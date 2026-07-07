@@ -1,0 +1,58 @@
+%% Diagram: Service/Rule/List control-plane component architecture
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TD
+    dashboard[React Dashboard]
+    subgraph api [FastAPI Control-Plane]
+        svcRouter[Services Router /services]
+        ruleRouter[Rules Router /services/:id/rules]
+        listRouter[Lists Router /services/:id/whitelist and /blacklist]
+        gblRouter[Global Blacklist Router /blacklist]
+        adminGuard{{require_admin}}
+        ownerGuard{{authorize_tenant_resource and scope_to_tenant}}
+        allocGuard{{require_within_allocation}}
+    end
+    subgraph svc [Service Layer]
+        serviceSvc[Service Svc<br/>+ bump_version and services_in_cidr]
+        ruleSvc[Rule Svc<br/>FOR UPDATE + count max 16]
+        listSvc[List Svc<br/>whitelist and service/global blacklist]
+        allocSvc[reused: Allocation Svc<br/>cidr_in_tenant_allocation]
+        auditSvc[reused: Audit Svc]
+    end
+    subgraph core [Core helpers]
+        cidrHelper[core/cidr.py<br/>reused: parse and reject-reserved]
+        ruleMatch[core/rulematch.py<br/>NEW: port-range and overlap]
+    end
+    postgres[(PostgreSQL<br/>protected_service · service_plan · allow_rule<br/>whitelist_entry · blacklist_entry)]
+    dashboard -->|tenant + admin: HTTPS + cookie| svcRouter
+    dashboard --> ruleRouter
+    dashboard --> listRouter
+    dashboard -->|admin only| gblRouter
+    svcRouter -.->|Depends| ownerGuard
+    svcRouter -.->|create/edit dest| allocGuard
+    svcRouter -.->|plan sizing| adminGuard
+    ruleRouter -.-> ownerGuard
+    listRouter -.-> ownerGuard
+    gblRouter -.->|Depends| adminGuard
+    svcRouter --> serviceSvc
+    ruleRouter --> ruleSvc
+    listRouter --> listSvc
+    gblRouter --> listSvc
+    serviceSvc --> allocSvc
+    serviceSvc -->|EXCLUDE gist dest no-overlap| postgres
+    ruleSvc --> ruleMatch
+    ruleSvc -->|UNIQUE service_id priority and FOR UPDATE| postgres
+    listSvc --> cidrHelper
+    serviceSvc --> cidrHelper
+    serviceSvc --> auditSvc
+    ruleSvc --> auditSvc
+    listSvc --> auditSvc
+    allocSvc -. TCA-16: revoke calls services_in_cidr .-> serviceSvc
+    dpFeatures[M2/M3 map build · M4 feed · Apply-status] -.->|read config| postgres
