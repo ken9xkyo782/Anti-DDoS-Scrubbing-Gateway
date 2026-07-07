@@ -3,6 +3,7 @@ import uuid
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.security import hash_password, verify_password
 from app.core.sessions import RedisSessionStore
@@ -221,7 +222,7 @@ async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:
 
 
 async def list_users(db: AsyncSession) -> list[User]:
-    return list((await db.execute(select(User))).scalars().all())
+    return list((await db.execute(select(User).options(selectinload(User.tenant)))).scalars().all())
 
 
 async def _get_existing_user(db: AsyncSession, user_id: uuid.UUID) -> User:

@@ -241,11 +241,11 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-09, AUTH-11, AUTH-12, AUTH-13, AUTH-15, AUTH-16, AUTH-18, AUTH-19, AUTH-20, AUTH-21, AUTH-22
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] tenant_user → any `/users` endpoint = 403 (AUTH-09); admin CRUD works + audited
-- [ ] **Isolation pair**: tenant A session cannot read/modify a resource scoped to B (404, zero leak); admin lists both with tenant labels (AUTH-12/13/15, Success Criteria)
-- [ ] Admin reset-password endpoint invalidates target sessions (AUTH-20)
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥7 tests pass (no silent deletions)
+- [x] tenant_user → any `/users` endpoint = 403 (AUTH-09); admin CRUD works + audited
+- [x] **Isolation pair**: tenant A session cannot read/modify a resource scoped to B (404, zero leak); admin lists both with tenant labels (AUTH-12/13/15, Success Criteria)
+- [x] Admin reset-password endpoint invalidates target sessions (AUTH-20)
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥7 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): users admin API with tenant-isolation enforcement`
