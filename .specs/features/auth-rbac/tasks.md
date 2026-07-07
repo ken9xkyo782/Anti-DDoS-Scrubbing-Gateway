@@ -51,10 +51,10 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: Foundation (enables AUTH-*)
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `pip install -e .` (or `uv sync`) resolves; `python -c "import app.main"` succeeds
-- [ ] `docker compose -f compose.test.yml up -d` brings up PG + Redis; `conftest.py` fixtures connect
-- [ ] `ruff check .`, `ruff format --check .`, `mypy app/` all pass on the skeleton
-- [ ] Gate check passes: `python -c "import app.main"` (build)
+- [x] `pip install -e .` (or `uv sync`) resolves; `python -c "import app.main"` succeeds
+- [x] `docker compose -f compose.test.yml up -d` brings up PG + Redis; `conftest.py` fixtures connect
+- [x] `ruff check .`, `ruff format --check .`, `mypy app/` all pass on the skeleton
+- [x] Gate check passes: `python -c "import app.main"` (build)
 **Tests**: none
 **Gate**: build
 **Commit**: `chore(control-plane): scaffold FastAPI skeleton, config & test infra`
