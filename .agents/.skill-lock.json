@@ -1,0 +1,135 @@
+{
+  "version": 2,
+  "skills": {
+    "chrome-devtools": {
+      "name": "chrome-devtools",
+      "source": "local",
+      "contentHash": "249d0fb724d83a9dc1b81f5812b894d471b36e6e629407cd43f9b8135fe4630a",
+      "installedAt": "2026-07-07T06:23:42.876Z",
+      "updatedAt": "2026-07-07T06:23:42.977Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "codenavi": {
+      "name": "codenavi",
+      "source": "local",
+      "contentHash": "23ac05b7f2d8df8311129d41432eba248bdcf14e9ace3f17c581976f7d888ada",
+      "installedAt": "2026-07-07T06:23:42.882Z",
+      "updatedAt": "2026-07-07T06:23:42.980Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "coding-guidelines": {
+      "name": "coding-guidelines",
+      "source": "local",
+      "contentHash": "28a414c715d3c41aae28a25e2f109813ec3f246f76b5567c1e7d6a128cd289ff",
+      "installedAt": "2026-07-07T06:23:42.884Z",
+      "updatedAt": "2026-07-07T06:23:42.982Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "docs-writer": {
+      "name": "docs-writer",
+      "source": "local",
+      "contentHash": "c49827c59d2e27d313731dfd36314cfde0e8dbf15be0e8f813d2f8b751546b0c",
+      "installedAt": "2026-07-07T06:23:42.888Z",
+      "updatedAt": "2026-07-07T06:23:42.985Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "learning-opportunities": {
+      "name": "learning-opportunities",
+      "source": "local",
+      "contentHash": "47c4d62eebf29a61477c1b611c6ae360b028e1e23e09df1f6a33b5ff32b020f7",
+      "installedAt": "2026-07-07T06:23:42.890Z",
+      "updatedAt": "2026-07-07T06:23:42.987Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "mermaid-studio": {
+      "name": "mermaid-studio",
+      "source": "local",
+      "contentHash": "8a240b980cee9287a20ec6ea1e4837c5d6e43c756ab17fcebbf6b1087a609815",
+      "installedAt": "2026-07-07T06:23:42.953Z",
+      "updatedAt": "2026-07-07T06:23:42.992Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "playwright-skill": {
+      "name": "playwright-skill",
+      "source": "local",
+      "contentHash": "9c45020d33af9ac2d44c89721f154c94bd73b9d8590117597b9a26920ff9cecc",
+      "installedAt": "2026-07-07T06:23:42.958Z",
+      "updatedAt": "2026-07-07T06:23:42.994Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "security-threat-model": {
+      "name": "security-threat-model",
+      "source": "local",
+      "contentHash": "9f4cf3c7971c6d84a4657c2c0c395a4c7febbac5a2361950922fc150fcef9599",
+      "installedAt": "2026-07-07T06:23:42.961Z",
+      "updatedAt": "2026-07-07T06:23:42.996Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "technical-design-doc-creator": {
+      "name": "technical-design-doc-creator",
+      "source": "local",
+      "contentHash": "d05974df076f695f96b4e4c263ad19f2aaffe8ee6248c1b07a634dd9ed0ea51e",
+      "installedAt": "2026-07-07T06:23:42.965Z",
+      "updatedAt": "2026-07-07T06:23:42.998Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "tlc-spec-driven": {
+      "name": "tlc-spec-driven",
+      "source": "local",
+      "contentHash": "69867b0e19be1fb556d2e697f0f18f1de0363d1aa2de9d36754d5b107156357c",
+      "installedAt": "2026-07-07T06:23:42.975Z",
+      "updatedAt": "2026-07-07T06:23:43.002Z",
+      "agents": [
+        "claude-code",
+        "codex"
+      ],
+      "method": "copy",
+      "global": false
+    }
+  }
+}
