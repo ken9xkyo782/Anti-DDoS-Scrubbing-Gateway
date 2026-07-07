@@ -97,6 +97,24 @@ class RedisSessionStore:
             sessions.append(session)
         return sessions
 
+    async def set_session_version(self, sid: str, session_version: int) -> bool:
+        session = await self._read(sid)
+        if session is None or self._is_absolute_expired(session):
+            await self.revoke(sid)
+            return False
+
+        updated = SessionData(
+            sid=session.sid,
+            user_id=session.user_id,
+            session_version=session_version,
+            created_at=session.created_at,
+            absolute_expiry=session.absolute_expiry,
+            last_seen=self._now(),
+            ip=session.ip,
+        )
+        await self._redis.set(self._session_key(sid), self._dump(updated), ex=self._idle_seconds)
+        return True
+
     async def _read(self, sid: str) -> SessionData | None:
         raw = await self._redis.get(self._session_key(sid))
         if raw is None:

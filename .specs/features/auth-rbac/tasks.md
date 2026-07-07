@@ -182,12 +182,12 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-16, AUTH-17, AUTH-18, AUTH-19, AUTH-20, AUTH-21, AUTH-22, AUTH-30, AUTH-31, AUTH-35
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Create/edit/delete persist + audit; invalid role/tenant → error (AUTH-17); duplicate username → 409 (AUTH-22)
-- [ ] `set_status(disabled)`, `reset_password`, `delete_user` bump `session_version` **and** revoke_all (AUTH-19/20/21)
-- [ ] `change_own_password` keeps current session, invalidates others (AUTH-30); wrong current pw rejected+audited (AUTH-31)
-- [ ] Disabling/deleting the last active admin refused (AUTH-35)
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥9 tests pass (no silent deletions)
+- [x] Create/edit/delete persist + audit; invalid role/tenant → error (AUTH-17); duplicate username → 409 (AUTH-22)
+- [x] `set_status(disabled)`, `reset_password`, `delete_user` bump `session_version` **and** revoke_all (AUTH-19/20/21)
+- [x] `change_own_password` keeps current session, invalidates others (AUTH-30); wrong current pw rejected+audited (AUTH-31)
+- [x] Disabling/deleting the last active admin refused (AUTH-35)
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥9 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): user lifecycle service with revoke-on-change & last-admin guard`
