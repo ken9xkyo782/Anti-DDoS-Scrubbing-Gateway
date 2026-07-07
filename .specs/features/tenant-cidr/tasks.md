@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute in progress (T1-T4 complete)
+**Status**: Execute in progress (T1-T5 complete)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -129,12 +129,12 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-01, TCA-02, TCA-03, TCA-04, TCA-05, TCA-07, TCA-08, TCA-09, TCA-25, TCA-26, TCA-31
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `create_tenant` persists active + audits (TCA-01); case-insensitive duplicate → 409 (TCA-02)
-- [ ] `update_tenant`/`set_status` apply + bump `updated_at` + audit; suspend then reactivate restores (TCA-03/04/31)
-- [ ] `list_tenants` returns allocation & user counts (TCA-05)
-- [ ] `delete_tenant` blocked (409 + blockers) while any user or non-revoked CIDR exists (TCA-07); empty tenant hard-deleted + audited (TCA-08); refused & performed outcomes both audited (TCA-09/26)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥7 tests pass (no silent deletions)
+- [x] `create_tenant` persists active + audits (TCA-01); case-insensitive duplicate → 409 (TCA-02)
+- [x] `update_tenant`/`set_status` apply + bump `updated_at` + audit; suspend then reactivate restores (TCA-03/04/31)
+- [x] `list_tenants` returns allocation & user counts (TCA-05)
+- [x] `delete_tenant` blocked (409 + blockers) while any user or non-revoked CIDR exists (TCA-07); empty tenant hard-deleted + audited (TCA-08); refused & performed outcomes both audited (TCA-09/26)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥7 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(tenant): tenant lifecycle service with dependent-safe delete`
