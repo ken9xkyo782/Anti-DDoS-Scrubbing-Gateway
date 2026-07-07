@@ -29,8 +29,11 @@ DEFAULT_BILLING_METRIC = "p95_clean_bps"
 
 
 class PrincipalLike(Protocol):
-    role: Role
-    tenant_id: uuid.UUID | None
+    @property
+    def role(self) -> Role: ...
+
+    @property
+    def tenant_id(self) -> uuid.UUID | None: ...
 
 
 @dataclass(frozen=True)
