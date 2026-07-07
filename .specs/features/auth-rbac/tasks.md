@@ -202,12 +202,12 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-01, AUTH-02, AUTH-03, AUTH-24, AUTH-27, AUTH-28, AUTH-29, AUTH-34
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Valid login → session id + `last_login_at` updated + success audit (AUTH-01/24)
-- [ ] Invalid creds → single generic failure, no user-exists signal, failed-login audit (AUTH-02)
-- [ ] Disabled user / inactive tenant login refused even with correct pw (AUTH-34)
-- [ ] `bootstrap_admin` creates exactly one admin when none exists, idempotent on rerun, creds from env (AUTH-27/28/29)
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥6 tests pass (no silent deletions)
+- [x] Valid login → session id + `last_login_at` updated + success audit (AUTH-01/24)
+- [x] Invalid creds → single generic failure, no user-exists signal, failed-login audit (AUTH-02)
+- [x] Disabled user / inactive tenant login refused even with correct pw (AUTH-34)
+- [x] `bootstrap_admin` creates exactly one admin when none exists, idempotent on rerun, creds from env (AUTH-27/28/29)
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥6 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): login/logout & idempotent first-admin bootstrap`
