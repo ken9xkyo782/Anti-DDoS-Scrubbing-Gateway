@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     session_idle_seconds: int = Field(default=30 * 60, gt=0)
     session_absolute_seconds: int = Field(default=12 * 60 * 60, gt=0)
     cookie_secure: bool = True
-    cookie_samesite: str = "lax"
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None

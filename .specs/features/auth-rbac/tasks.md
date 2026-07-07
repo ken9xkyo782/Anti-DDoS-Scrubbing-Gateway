@@ -222,11 +222,11 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-24, AUTH-30, AUTH-31
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Login sets cookie; `/auth/me` returns principal; logout clears + session dead (AUTH-03)
-- [ ] Wrong creds → 401 generic; no session → 401 on `/auth/me` (AUTH-02/05)
-- [ ] Self password change invalidates other sessions (AUTH-30); **log-capture asserts no plaintext credential emitted** (Success Criteria)
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥6 tests pass (no silent deletions)
+- [x] Login sets cookie; `/auth/me` returns principal; logout clears + session dead (AUTH-03)
+- [x] Wrong creds → 401 generic; no session → 401 on `/auth/me` (AUTH-02/05)
+- [x] Self password change invalidates other sessions (AUTH-30); **log-capture asserts no plaintext credential emitted** (Success Criteria)
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥6 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): auth API endpoints (login/logout/me/password)`
