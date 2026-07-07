@@ -162,12 +162,12 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-05, AUTH-09, AUTH-10, AUTH-12, AUTH-13, AUTH-14, AUTH-38
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] No/expired/version-mismatch session → 401 (AUTH-05); disabled user / inactive tenant → 401 (AUTH-34 path)
-- [ ] `require_admin` denies tenant_user → 403 (AUTH-09); missing scope → deny (AUTH-10)
-- [ ] `authorize_tenant_resource`: admin allowed; tenant_user only own `tenant_id`; else deny (AUTH-12)
-- [ ] `scope_to_tenant` filters lists to own tenant for tenant_user, no-op for admin (AUTH-13); role/tenant change mid-session honored via fresh load (AUTH-38)
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥7 tests pass (no silent deletions)
+- [x] No/expired/version-mismatch session → 401 (AUTH-05); disabled user / inactive tenant → 401 (AUTH-34 path)
+- [x] `require_admin` denies tenant_user → 403 (AUTH-09); missing scope → deny (AUTH-10)
+- [x] `authorize_tenant_resource`: admin allowed; tenant_user only own `tenant_id`; else deny (AUTH-12)
+- [x] `scope_to_tenant` filters lists to own tenant for tenant_user, no-op for admin (AUTH-13); role/tenant change mid-session honored via fresh load (AUTH-38)
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥7 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): fail-closed RBAC + tenant-ownership guards`
