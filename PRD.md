@@ -1,0 +1,558 @@
+# PRD - Cổng Lọc và Giảm thiểu Tấn công DDoS
+
+## 1. Thông tin tài liệu
+
+| Trường | Giá trị |
+|---|---|
+| Sản phẩm | Anti-DDoS Scrubbing Gateway |
+| Phiên bản PRD | MVP v1 |
+| Ngôn ngữ | Tiếng Việt |
+| Ngày tạo | 2026-07-07 |
+| Trạng thái | Draft kỹ thuật |
+| Nguồn đầu vào | `draf.md` và các quyết định phạm vi MVP |
+| Mô hình thương mại | Thương mại nội bộ, có thu phí (chargeback giữa các đơn vị nội bộ) |
+
+## 2. Tóm tắt sản phẩm
+
+Anti-DDoS Scrubbing Gateway là hệ thống lọc và giảm thiểu tấn công DDoS L3/L4 đặt tại scrubbing data center, đứng trước hạ tầng được bảo vệ như một lớp "lá chắn". Hệ thống nhận lưu lượng lớn từ phía upstream/WAN, phân loại theo thời gian thực tại tầng XDP/eBPF, loại bỏ traffic độc hại, và chuyển tiếp traffic sạch sang vùng backend/clean zone.
+
+MVP v1 tập trung vào một gateway node đơn lẻ, chạy native XDP trên server có 2 card mạng:
+
+- `IN`: nhận traffic từ upstream/WAN.
+- `OUT`: chuyển traffic sạch sang backend/clean zone.
+
+Gateway hoạt động theo mô hình L2 transparent bridge inbound-only: packet sạch được giữ nguyên header L3, không giảm TTL, không cập nhật IP checksum, không route qua Linux kernel networking stack, và được XDP redirect từ `IN` sang `OUT` theo static port pair.
+
+## 3. Mục tiêu và chỉ số thành công
+
+### 3.1. Mục tiêu sản phẩm
+
+- Bảo vệ các IP/CIDR được admin cấp phát cho tenant trước tấn công volumetric L3/L4.
+- Cho phép tenant tự cấu hình service, allow-rule, whitelist, blacklist, và theo dõi tình trạng traffic theo thời gian thực.
+- Cho phép admin quản trị tenant, user, IP/CIDR, service toàn hệ thống, whitelist/blacklist, và threat intelligence feed.
+- Đảm bảo data-plane có hiệu năng cao bằng native XDP/eBPF, fail-fast verdict pipeline, bloom filter, LPM trie, per-CPU counter/rate-limit, và cập nhật map an toàn qua worker.
+
+### 3.2. Chỉ số thành công MVP v1
+
+| Nhóm | Yêu cầu |
+|---|---|
+| Throughput mỗi node | Tối thiểu 40Gbps hoặc 20Mpps trong benchmark native XDP |
+| Added latency | p99 <= 1ms với clean traffic trong benchmark MVP |
+| Config propagation | Thay đổi service/rule/list/feed được cập nhật xuống data-plane <= 5 giây |
+| Dashboard realtime | Số liệu service-level refresh <= 2 giây |
+| Clean traffic accuracy | Zero known false drop trong bộ test v1; IPv6, fragment, malformed nằm ngoài cam kết pass |
+| Scale envelope | Tối đa 100 tenants, 1.000 services, 16 rules/service, 1M global blacklist entries |
+| Availability | Single-node MVP; HA/failover nằm ngoài phạm vi v1 |
+
+## 4. Phạm vi
+
+### 4.1. Trong phạm vi MVP v1
+
+- Lọc volumetric L3/L4: UDP flood, TCP SYN flood, ICMP flood, port scan, UDP reflection/amplification.
+- XDP native mode trên interface `IN`, redirect clean traffic sang interface `OUT`.
+- L2 transparent bridge inbound-only với static port pair.
+- Service allowlist theo IP/CIDR, protocol, source port, destination port, và rate-limit aggregate PPS/BPS.
+- Tenant whitelist/VIP và blacklist theo phạm vi service/tenant.
+- Global blacklist từ threat intelligence feed theo lịch.
+- Dashboard tenant/admin và worker Python nhận job qua Redis.
+- Telemetry service-level: PPS/BPS, clean/drop, top source, top destination port, drop reason, bloom false-positive counters.
+
+### 4.2. Ngoài phạm vi MVP v1
+
+- WAF/L7 filtering, HTTP/HTTPS inspection, reverse proxy, cookie/header analysis.
+- IPv6 forwarding/filtering đầy đủ; IPv6 bị drop cứng trong v1.
+- BGP dynamic routing, BGP Flowspec, route advertisement tự động.
+- HA/failover, active/passive pair, active/active cluster.
+- MAC learning động hoặc bridge learning như Linux bridge.
+- Packet-level forensic đầy đủ hoặc lưu payload.
+- Auto-mitigation tự tạo rule; v1 chỉ hỗ trợ manual config.
+
+## 5. Personas và RBAC
+
+### 5.1. Vai trò
+
+| Vai trò | Mô tả | Quyền chính |
+|---|---|---|
+| `admin` | Quản trị toàn hệ thống; chỉ có 1 admin chính trong MVP | Quản lý user, tenant, IP/CIDR, service toàn hệ thống, whitelist/blacklist, threat feed, trạng thái node |
+| `tenant_user` | Người dùng thuộc tenant, tài nguyên độc lập với tenant khác | Quản lý service/rule/list trong IP/CIDR được cấp; xem monitoring service của mình |
+
+### 5.2. Nguyên tắc cách ly tenant
+
+- Tenant chỉ được tạo service trên IP/CIDR đã được admin cấp phát.
+- Tenant không được xem, sửa, xóa service, whitelist, blacklist, telemetry chi tiết của tenant khác.
+- Mọi API ghi dữ liệu phải kiểm tra ownership theo `tenant_id` và phạm vi `AllocatedCIDR`.
+- Lỗi phân quyền phải fail-closed: trả lỗi truy cập, không trả dữ liệu partial của tenant khác.
+
+## 6. Yêu cầu chức năng
+
+### 6.1. Admin dashboard
+
+Admin phải có các nhóm chức năng sau:
+
+- Quản lý user: thêm, sửa, xóa, reset mật khẩu, gán tenant.
+- Quản lý IP/CIDR: cấp phát, thu hồi, xem trạng thái sử dụng, kiểm tra overlap.
+- Quản lý service toàn hệ thống: xem danh sách service kèm tenant/người tạo/trạng thái áp dụng data-plane.
+- Quản lý whitelist/blacklist toàn hệ thống: xem entry kèm tenant/người tạo/nguồn tạo.
+- Quản lý threat intelligence feed: thêm/sửa/xóa nguồn feed, lịch đồng bộ, trạng thái lần sync gần nhất, số entry hợp lệ/bị loại.
+- Monitoring node: trạng thái XDP attach, native/generic mode, interface `IN/OUT`, throughput, drop reason, lỗi map update.
+
+### 6.2. Tenant dashboard
+
+Tenant user phải có các nhóm chức năng sau:
+
+- Quản lý service trên IP/CIDR được cấp phát.
+- Quản lý allow-rule của service.
+- Quản lý whitelist/VIP để bypass list/rule sau khi packet parse hợp lệ, nhưng vẫn chịu VIP ceiling.
+- Quản lý blacklist tenant/service scoped.
+- Xem realtime monitoring theo service: PPS/BPS, clean/drop, top source IP, top destination port, drop reason.
+
+### 6.3. Service management
+
+`ProtectedService` đại diện cho một IP/CIDR hoặc một endpoint được bảo vệ. Mỗi service phải có:
+
+- Tenant sở hữu.
+- IP/CIDR thuộc vùng đã được admin cấp.
+- Trạng thái `enabled` hoặc `disabled`.
+- Chế độ policy mặc định: `allow-rule only`.
+- Tối đa 16 allow-rules trong MVP v1.
+- Cấu hình VIP ceiling aggregate PPS/BPS.
+
+Acceptance criteria:
+
+- Tạo service ngoài IP/CIDR được cấp phải bị từ chối.
+- Packet đến IP không thuộc service enabled phải bị drop với reason `service_miss`.
+- Packet đến service enabled nhưng không match allow-rule và không thuộc whitelist/VIP phải bị drop với reason `rule_drop` hoặc `not_allowed`.
+
+### 6.4. Allow-rule và rate-limit
+
+Allow-rule là luật cho phép traffic đi qua service sau khi vượt qua các kiểm tra hard drop. Rule gồm:
+
+- Protocol: TCP, UDP, ICMP, hoặc ANY trong phạm vi được hỗ trợ.
+- Source port range: optional, chỉ áp dụng TCP/UDP.
+- Destination port range: optional, chỉ áp dụng TCP/UDP.
+- Reason/description.
+- Rate-limit aggregate theo service/rule: PPS và BPS.
+- Trạng thái enabled/disabled.
+
+Yêu cầu kỹ thuật:
+
+- Rate-limit mặc định không dùng state per-source-IP trên hot path để tránh hash-map thrashing khi bị spoofed-IP flood.
+- Token bucket dùng per-CPU state và chấp nhận sai số theo số CPU/RSS queue.
+- Vòng lặp rule phải dùng `rule_count` thực tế và early-exit khi có verdict terminal; không lặp cứng 16 lần nếu service có ít rule hơn.
+
+### 6.5. Whitelist/VIP
+
+Whitelist/VIP dùng để đảm bảo traffic hợp lệ quan trọng không bị chặn bởi blacklist, threat feed hoặc allow-rule thông thường.
+
+Chính sách precedence:
+
+- Chỉ áp dụng sau khi packet đã parse hợp lệ trong phạm vi IPv4 non-fragment.
+- IPv6, malformed IPv4, fragment, EtherType không hỗ trợ vẫn bị drop trước khi whitelist được xét.
+- Whitelist/VIP yêu cầu packet match một `ProtectedService` enabled; IP đích chưa khai báo service vẫn bị `service_miss`.
+- Whitelist/VIP bypass bogon check, global blacklist, service blacklist, threat-intel feed, UDP amplification policy và allow-rule.
+- Whitelist/VIP vẫn chịu VIP ceiling aggregate PPS/BPS per service để giảm rủi ro spoofing whitelist.
+
+Acceptance criteria:
+
+- IP nguồn nằm trong whitelist/VIP của service được pass nếu packet hợp lệ và chưa vượt VIP ceiling.
+- Khi vượt VIP ceiling, packet bị drop với reason `vip_ceiling_drop`.
+- Whitelist/VIP entry phải được loại trừ khi worker build global blacklist từ threat feed.
+
+### 6.6. Blacklist
+
+Blacklist gồm 2 phạm vi:
+
+- Global blacklist: do admin hoặc threat intelligence feed tạo.
+- Service/tenant blacklist: do tenant hoặc admin tạo trong phạm vi service/tenant.
+
+Yêu cầu:
+
+- Non-whitelisted traffic match blacklist phải bị drop với reason `blacklist_drop`.
+- Blacklist lookup phải dùng bloom filter trước LPM trie để giảm lookup tốn kém.
+- Hệ thống phải đo bloom false-positive bằng counter `bloom_hit_lpm_miss`.
+
+### 6.7. Threat intelligence feed
+
+Threat intelligence feed đồng bộ IP/CIDR xấu từ nhiều nguồn Internet theo lịch.
+
+Yêu cầu:
+
+- Admin cấu hình nguồn feed, lịch đồng bộ, trạng thái enabled/disabled.
+- Worker Python tải feed theo lịch, validate, normalize, deduplicate, loại trừ whitelist/VIP, lưu database.
+- Sau khi dữ liệu hợp lệ được lưu, worker rebuild map và active swap theo double-buffer/active slot.
+- Lỗi sync một nguồn không được làm hỏng dữ liệu feed đang active.
+
+Acceptance criteria:
+
+- Feed sync phải ghi nhận số entry tải về, số entry hợp lệ, số entry bị loại do invalid/duplicate/whitelist conflict.
+- Nếu feed mới lỗi toàn bộ, data-plane tiếp tục dùng version blacklist active gần nhất.
+
+### 6.8. Agent worker
+
+Agent worker chạy Python, nhận job qua Redis và chịu trách nhiệm đồng bộ control-plane xuống data-plane.
+
+Job bắt buộc:
+
+| Job | Mục đích | Kết quả mong đợi |
+|---|---|---|
+| `SERVICE_UPDATE` | Cập nhật service enabled/disabled, CIDR, policy | Service map/rule map được rebuild/swap |
+| `RULE_UPDATE` | Cập nhật allow-rule/rate-limit | Rule block map được rebuild/swap |
+| `LIST_UPDATE` | Cập nhật whitelist/blacklist | LPM trie/bloom map được rebuild/swap |
+| `FEED_SYNC` | Tải và xử lý threat feed | Database và global blacklist map được cập nhật |
+| `MAP_REBUILD` | Rebuild toàn bộ BPF map từ database | New slot được chuẩn bị đầy đủ trước khi active |
+| `ACTIVE_SLOT_SWAP` | Chuyển data-plane sang map slot mới | Swap atomic qua global config/active slot |
+| `TELEMETRY_AGGREGATE` | Gom counter/event từ eBPF | Dashboard có số liệu refresh <= 2 giây |
+
+Yêu cầu reliability:
+
+- Job phải idempotent theo `job_id` hoặc version.
+- Map swap chỉ được thực hiện khi toàn bộ map liên quan build thành công.
+- Nếu swap thất bại, hệ thống giữ slot active cũ và ghi lỗi vận hành.
+
+## 7. Mô hình dữ liệu tối thiểu
+
+### 7.1. Object chính
+
+| Object | Trường tối thiểu |
+|---|---|
+| `Tenant` | `id`, `name`, `status`, `created_at`, `updated_at` |
+| `User` | `id`, `tenant_id`, `role`, `username`, `password_hash`, `status`, `last_login_at` |
+| `AllocatedCIDR` | `id`, `tenant_id`, `cidr`, `status`, `allocated_by`, `created_at` |
+| `ProtectedService` | `id`, `tenant_id`, `cidr_or_ip`, `name`, `mode`, `enabled`, `vip_pps`, `vip_bps` |
+| `AllowRule` | `id`, `service_id`, `protocol`, `src_port_start`, `src_port_end`, `dst_port_start`, `dst_port_end`, `pps`, `bps`, `reason`, `enabled`, `priority` |
+| `WhitelistEntry` | `id`, `tenant_id`, `service_id`, `cidr`, `scope`, `reason`, `created_by`, `expires_at`, `enabled` |
+| `BlacklistEntry` | `id`, `tenant_id`, `service_id`, `cidr`, `scope`, `source`, `reason`, `expires_at`, `enabled` |
+| `ThreatFeedSource` | `id`, `name`, `url`, `format`, `schedule`, `enabled`, `last_sync_status`, `last_sync_at` |
+| `TelemetryCounter` | `service_id`, `window_ts`, `pps`, `bps`, `clean_packets`, `drop_packets`, `drop_reason`, `top_src`, `top_dst_port` |
+| `AgentJob` | `id`, `type`, `payload`, `status`, `version`, `created_at`, `started_at`, `finished_at`, `error` |
+
+### 7.2. Ràng buộc dữ liệu
+
+- `AllocatedCIDR` không được overlap giữa tenant khác nhau trong MVP.
+- `ProtectedService.cidr_or_ip` phải nằm trong `AllocatedCIDR` của tenant.
+- `AllowRule.priority` phải unique trong cùng `service_id`.
+- `WhitelistEntry` và `BlacklistEntry` phải hỗ trợ CIDR IPv4.
+- IPv6 entry không được nhận trong MVP v1.
+
+## 8. Data-plane XDP/eBPF
+
+### 8.1. Nguyên tắc thiết kế
+
+- Native XDP driver mode là bắt buộc cho benchmark MVP.
+- Fail-fast với các packet chắc chắn không hỗ trợ: EtherType lạ, IPv6, malformed IPv4, fragment.
+- Parse packet một lần vào `pkt_meta`.
+- Dùng bloom filter trước LPM trie cho whitelist/blacklist.
+- Dùng per-CPU counter và per-CPU token bucket để giảm contention.
+- Dùng double-buffer/active slot để cập nhật map không làm gián đoạn data-plane.
+- Tất cả struct key dùng zero-init và xử lý padding nhất quán trước lookup/update map.
+
+### 8.2. Pipeline verdict MVP v1
+
+```mermaid
+flowchart TD
+    packet(["Packet vào XDP trên interface IN"]) --> parseL2{"Parse L2 / VLAN / QinQ<br/>lấy EtherType thật"}
+    parseL2 -- "IPv6" --> ipv6Drop["Drop IPv6<br/>reason=ipv6_unsupported"]
+    parseL2 -- "ARP" --> arpPass["Pass/redirect ARP theo chính sách bridge tối thiểu<br/>không áp dụng L4 filtering"]
+    parseL2 -- "Non-IP/VLAN lỗi" --> etherDrop["Drop EtherType không hỗ trợ<br/>reason=unsupported_ethertype"]
+    parseL2 -- "IPv4" --> parseIp{"Parse IPv4 + L4<br/>non-fragment?"}
+
+    parseIp -- "Malformed" --> malformedDrop["Drop malformed<br/>reason=malformed_ipv4"]
+    parseIp -- "Fragment" --> fragmentDrop["Drop fragment<br/>reason=fragment_unsupported"]
+    parseIp -- "OK" --> loadSlot["Snapshot active_slot/config<br/>vào pkt_meta"]
+
+    loadSlot --> service{"Match ProtectedService enabled?"}
+    service -- "Không" --> serviceMiss["Drop<br/>reason=service_miss"]
+    service -- "Có" --> whitelistEarly{"Source thuộc whitelist/VIP của service/tenant?"}
+    whitelistEarly -- "Có" --> vipCeiling{"Vượt VIP ceiling aggregate?"}
+    vipCeiling -- "Có" --> vipDrop["Drop<br/>reason=vip_ceiling_drop"]
+    vipCeiling -- "Không" --> redirectOut["XDP_REDIRECT IN -> OUT<br/>static port pair, giữ nguyên L3"]
+
+    whitelistEarly -- "Không" --> hardUdp{"UDP source port thuộc hardcoded amplification ports?"}
+    hardUdp -- "Có" --> udpHardDrop["Drop<br/>reason=udp_amplification_drop"]
+    hardUdp -- "Không" --> bogonCheck{"Source thuộc bogon/private/reserved?"}
+    bogonCheck -- "Có" --> bogonDrop["Drop<br/>reason=bogon_drop"]
+    bogonCheck -- "Không" --> dynamicUdp{"UDP source port thuộc dynamic blocked-port bitmap?"}
+    dynamicUdp -- "Có" --> udpDrop["Drop<br/>reason=udp_amplification_drop"]
+    dynamicUdp -- "Không" --> globalBloom{"Global blacklist bloom hit?"}
+
+    globalBloom -- "Có" --> globalLpm{"Global blacklist LPM confirm?"}
+    globalBloom -- "Không" --> serviceBloom{"Service blacklist bloom hit?"}
+    globalLpm -- "Có" --> blacklistDrop["Drop<br/>reason=blacklist_drop"]
+    globalLpm -- "Không" --> serviceBloom
+
+    serviceBloom -- "Có" --> serviceLpm{"Service blacklist LPM confirm?"}
+    serviceBloom -- "Không" --> ruleLoop{"Match allow-rule<br/>bounded loop by rule_count <= 16?"}
+    serviceLpm -- "Có" --> blacklistDrop
+    serviceLpm -- "Không" --> ruleLoop
+
+    ruleLoop -- "Không match" --> ruleDrop["Drop<br/>reason=not_allowed"]
+    ruleLoop -- "Match nhưng vượt limit" --> rateDrop["Drop<br/>reason=rate_limit_drop"]
+    ruleLoop -- "Match và còn quota" --> redirectOut
+
+    ipv6Drop & etherDrop & malformedDrop & fragmentDrop & vipDrop & udpHardDrop & bogonDrop & serviceMiss & udpDrop & blacklistDrop & ruleDrop & rateDrop --> counters["Cập nhật per-CPU counter"]
+    counters --> telemetry["Ringbuf/perf event sampling<br/>rate-limited"]
+```
+
+Ghi chú kỹ thuật:
+
+- Service lookup được đặt sớm để xác định ngữ cảnh bảo vệ và whitelist/VIP; đây là lookup metadata rẻ, không phải vòng lặp rule.
+- Hardcoded UDP amplification ports chạy sau whitelist/VIP nhưng trước bogon/blacklist/rule để vừa fail-fast reflection phổ biến vừa bảo toàn ngoại lệ VIP. Dynamic blocked-port bitmap chỉ áp dụng sau service match để tránh chi phí map lookup trên traffic không phục vụ.
+- Vì MVP là L2 transparent bridge, các requirement L3 như `TTL decrement`, `incremental checksum`, `neighbor unresolved`, `ARP next-hop refresh` không thuộc data-plane forwarding chính của v1.
+
+### 8.3. BPF map contract
+
+| Map | Loại gợi ý | Mục đích |
+|---|---|---|
+| `active_config` | global data/array map | Lưu active slot/version và cờ runtime |
+| `service_map` | hash/LPM theo destination IPv4/CIDR | Xác định service enabled và metadata |
+| `rule_block_map` | array/hash theo `service_id` | Lưu block allow-rule tối đa 16 rule/service |
+| `global_blacklist_bloom` | bloom/bitmap | Bypass LPM khi chắc chắn không match global blacklist |
+| `global_blacklist_lpm` | LPM trie | Confirm global blacklist CIDR |
+| `service_blacklist_bloom` | bloom/bitmap | Bypass LPM service blacklist |
+| `service_blacklist_lpm` | LPM trie | Confirm service/tenant blacklist CIDR |
+| `whitelist_bloom` | bloom/bitmap | Bypass LPM khi không match whitelist/VIP |
+| `whitelist_lpm` | LPM trie | Confirm whitelist/VIP CIDR |
+| `udp_blocked_port_bitmap` | array/bitmap | Dynamic source-port block |
+| `rate_limit_state` | per-CPU array/hash | Aggregate token bucket per service/rule |
+| `vip_ceiling_state` | per-CPU array/hash | Aggregate token bucket cho whitelist/VIP |
+| `counter_map` | per-CPU array/hash | PPS/BPS/drop reason/bloom false positive |
+| `tx_devmap` | devmap | Redirect packet sạch từ `IN` sang `OUT` |
+
+## 9. Control-plane và API surface
+
+### 9.1. Nhóm API/dashboard bắt buộc
+
+- Auth/session và RBAC.
+- User CRUD.
+- Tenant và IP/CIDR allocation.
+- Service CRUD.
+- Allow-rule CRUD.
+- Whitelist/blacklist CRUD.
+- Threat feed source CRUD và trigger sync thủ công.
+- Realtime monitoring query.
+- Node/data-plane health query.
+
+### 9.2. Trạng thái apply cấu hình
+
+Mỗi thay đổi control-plane phải có trạng thái apply rõ ràng:
+
+- `pending`: đã ghi database, chưa gửi job.
+- `queued`: đã tạo Redis job.
+- `applying`: worker đang rebuild/swap map.
+- `active`: data-plane đang dùng version mới.
+- `failed`: apply thất bại, có lỗi chi tiết.
+
+Acceptance criteria:
+
+- UI phải hiển thị version active hiện tại và trạng thái apply gần nhất của service/list/feed.
+- Nếu apply thất bại, cấu hình active cũ vẫn tiếp tục chạy.
+
+## 10. Observability
+
+### 10.1. Dashboard metrics
+
+Tenant nhìn thấy theo service:
+
+- Current PPS/BPS.
+- Clean packets/bytes.
+- Dropped packets/bytes.
+- Drop reason distribution.
+- Top source IP.
+- Top destination port.
+- Rate-limit hit count.
+- VIP ceiling hit count.
+
+Admin nhìn thấy thêm:
+
+- Tổng PPS/BPS theo node/interface.
+- XDP mode: native/generic/off.
+- Map active version.
+- Worker job status.
+- Threat feed sync status.
+- Bloom hit, LPM confirm, bloom false-positive.
+
+### 10.2. Drop reason chuẩn hóa
+
+Các reason tối thiểu:
+
+- `ipv6_unsupported`
+- `unsupported_ethertype`
+- `malformed_ipv4`
+- `fragment_unsupported`
+- `bogon_drop`
+- `service_miss`
+- `udp_amplification_drop`
+- `blacklist_drop`
+- `not_allowed`
+- `rate_limit_drop`
+- `vip_ceiling_drop`
+- `map_error`
+
+## 11. Yêu cầu phi chức năng
+
+### 11.1. Hiệu năng
+
+- Benchmark phải chạy ở native XDP driver mode.
+- Server phải có multi-queue NIC và RSS enabled.
+- Pipeline không được dùng per-source-IP state trên default rule path.
+- LPM trie lookup phải được bloom filter guard, trừ trường hợp map rebuild/debug được cấu hình riêng.
+- Ringbuf/perf event phải sampling và rate-limit để không làm nghẽn hot path.
+
+### 11.2. Bảo mật
+
+- Password phải được hash bằng thuật toán phù hợp cho password storage.
+- API write phải kiểm tra RBAC và tenant ownership.
+- Audit log bắt buộc cho thay đổi service/rule/list/feed/user.
+- Secret/feed credential không được log plaintext.
+- Admin action nguy hiểm như delete tenant, disable service, flush feed phải có audit event.
+
+### 11.3. Tính ổn định
+
+- Data-plane fail-closed với packet không parse được hoặc EtherType không hỗ trợ.
+- Control-plane fail-safe với map update: chỉ swap active slot khi build đầy đủ thành công.
+- Worker restart không được làm mất trạng thái active hiện tại.
+- Redis/job retry không được tạo dữ liệu trùng hoặc swap version cũ đè version mới.
+
+## 12. Test plan và acceptance criteria
+
+### 12.1. RBAC và tenant isolation
+
+- Tenant A không thể xem/sửa/xóa service/list/IP/CIDR của Tenant B.
+- Tenant không thể tạo service ngoài `AllocatedCIDR`.
+- Admin xem được danh sách service/list kèm tenant/người tạo.
+
+### 12.2. Service policy
+
+- Packet đến IP chưa khai báo service bị drop `service_miss`.
+- Packet đến service disabled bị drop `service_miss` hoặc reason tương đương được chuẩn hóa.
+- Packet đến service enabled nhưng không match allow-rule bị drop `not_allowed`.
+- Packet match allow-rule và chưa vượt limit được redirect `IN -> OUT`.
+
+### 12.3. Whitelist/blacklist
+
+- Whitelist/VIP hợp lệ bypass blacklist/feed/rule sau parse hợp lệ.
+- Whitelist/VIP vượt VIP ceiling bị drop `vip_ceiling_drop`.
+- Non-whitelisted source thuộc global blacklist bị drop `blacklist_drop`.
+- Threat feed không đưa whitelist/VIP vào active global blacklist.
+
+### 12.4. Packet verdict
+
+- IPv6 bị drop `ipv6_unsupported`.
+- Malformed IPv4 bị drop `malformed_ipv4`.
+- IPv4 fragment bị drop `fragment_unsupported`.
+- UDP source port amplification hardcoded bị drop sớm khi không thuộc whitelist/VIP.
+- Dynamic UDP blocked-port chỉ áp dụng sau service match.
+- Clean traffic giữ nguyên TTL/checksum và được redirect từ `IN` sang `OUT`.
+
+### 12.5. Performance
+
+- Native XDP benchmark đạt tối thiểu 40Gbps hoặc 20Mpps trên phần cứng mục tiêu.
+- Added latency p99 <= 1ms với clean traffic.
+- Config propagation từ API update đến active data-plane <= 5 giây.
+- Dashboard realtime refresh <= 2 giây.
+- Bloom false-positive counters hoạt động và hiển thị được cho admin.
+
+## 13. Rủi ro kỹ thuật và biện pháp giảm thiểu
+
+| Rủi ro | Tác động | Biện pháp |
+|---|---|---|
+| Hash-map thrashing do spoofed source IP | Giảm throughput nghiêm trọng | Không dùng per-source-IP state trên default rule path |
+| Bloom filter fill-rate cao | LPM lookup tăng âm thầm | Theo dõi bloom false-positive và rebuild/resize theo lịch |
+| Generic XDP mode | Mất phần lớn lợi ích hiệu năng | Health check bắt buộc cảnh báo khi không chạy native mode |
+| Fragment DNS hợp lệ bị drop | Có thể ảnh hưởng resolver/NTP đặc biệt | Ghi rõ giới hạn v1; khuyến nghị EDNS buffer nhỏ/fallback TCP |
+| Per-CPU token bucket sai số | Tổng quota thực tế phụ thuộc CPU/RSS | Tài liệu hóa sai số và benchmark theo cấu hình production |
+| Whitelist spoofing | Attacker giả source IP whitelist | VIP ceiling aggregate bắt buộc; audit và review whitelist định kỳ |
+
+## 14. Giả định MVP
+
+- MVP chạy single-node, không yêu cầu HA/failover.
+- Traffic được xử lý inbound-only từ `IN` sang `OUT`.
+- Gateway là L2 transparent bridge, không làm L3 routing cho clean traffic.
+- IPv6 và IPv4 fragment không được hỗ trợ trong MVP v1.
+- Monitoring chỉ ở service-level + reason; không lưu packet-level forensic đầy đủ.
+- Mitigation là manual config; hệ thống không tự tạo rule hoặc auto-mitigate trong v1.
+
+## 15. Rà soát nghiệp vụ (BA Review) — Phát hiện và khuyến nghị
+
+> Phạm vi rà soát: Tính toàn vẹn logic nghiệp vụ (Business Logic Integrity), Trải nghiệm vận hành (Operational UX), Rủi ro thương mại hóa (Commercialization Risks).
+> Ngày rà soát: 2026-07-07. Vai trò: Business Analyst.
+> Quy ước mức độ: `Blocker` (chặn cổng release tương ứng) · `Cao` · `Trung bình` · `Thấp`.
+> Cổng release: `Pilot` = phải xử lý trước khi chạy thử có khách · `GA` = phải xử lý trước khi bán production · `Backlog` = ghi nhận, xử lý sau.
+
+### 15.1. Tính toàn vẹn logic nghiệp vụ
+
+| ID | Mức độ | Cổng | Phát hiện | Rủi ro nghiệp vụ | Khuyến nghị hành động |
+|---|---|---|---|---|---|
+| BL-01 | Cao | Pilot | Mục 6.5/6.7 yêu cầu loại trừ whitelist/VIP khi build **global** blacklist. Global blacklist áp dụng cho mọi tenant, nên whitelist của tenant A sẽ gỡ IP khỏi bảo vệ global của tenant B/C. | Vỡ nguyên tắc cách ly tenant (5.2); một tenant có thể vô hiệu hóa threat feed cho tenant khác. | Chỉ loại trừ whitelist khỏi **phạm vi service/tenant tương ứng**, không loại trừ khỏi global. Whitelist tenant chỉ được bypass ở data-plane theo scope của chính tenant đó, không sửa nội dung global map. |
+| BL-02 | Cao | Pilot | `WhitelistEntry` có `service_id`/`scope` (7.1) nhưng `whitelist_lpm`/`whitelist_bloom` (8.3) chỉ key theo source IPv4. Key thuần source-IP không mã hóa được service scope. | Whitelist bị over-broad: một entry cho service A vô tình bypass cho mọi service khác của cùng nguồn IP. | Dùng composite key (ví dụ `service_id`/dst-context + source CIDR) hoặc map whitelist tách theo service. Bổ sung acceptance: whitelist service A **không** được bypass cho service B. |
+| BL-03 | Cao | Pilot | 6.3/12.2: service `disabled` → packet nhận `service_miss` → drop. Trên inline bridge inbound-only, disable = blackhole toàn bộ traffic của khách. | Thao tác "disable" mang ngữ nghĩa nguy hiểm ngoài kỳ vọng; có thể gây outage do nhầm lẫn vận hành. | Định nghĩa tường minh: `disabled` = drop-all (ngắt bảo vệ) hay pass-through (ngừng scrub). Nếu drop-all: thêm cảnh báo xác nhận + phân biệt reason `service_disabled` với `service_miss` để quan sát rõ. |
+| BL-04 | Trung bình | GA | 4.1 cam kết chống **TCP SYN flood** và **port scan**, nhưng pipeline 8.2 không có SYN cookie/SYN proxy/scan detection (do chủ trương tránh per-source state); thực chất chỉ rate-limit thô. | Chênh lệch giữa cam kết phạm vi và năng lực thực thi → over-promise, rủi ro pháp lý/datasheet. | Hoặc bổ sung cơ chế (SYN cookie stateless, ngưỡng scan) hoặc hạ cam kết thành "giảm thiểu bằng rate-limit/blacklist" và ghi rõ giới hạn. |
+| BL-05 | Trung bình | Pilot | Pipeline coi `rate_limit_drop` tại rule match đầu tiên là verdict terminal; không xét tiếp rule priority khác còn quota. | Traffic hợp lệ có thể bị drop dù tồn tại rule khác cho phép → false drop. | Định nghĩa rõ ngữ nghĩa match: first-match theo `priority` hay best-match; và có "fall-through" khi rule khớp bị hết quota hay không. Ghi vào 6.4 + acceptance. |
+| BL-06 | Trung bình | Pilot | 6.8 yêu cầu swap chỉ khi mọi map build thành công, nhưng có nhiều map độc lập (service/rule/blacklist/whitelist). Cần khẳng định swap là atomic qua **một** `active_slot`. | Nếu swap từng map, tồn tại cửa sổ cấu hình không nhất quán (rule mới + service cũ). | Chuẩn hóa: mọi map version hóa theo cùng một `active_slot` trong `active_config`; data-plane chỉ đọc theo slot đang active. Ghi rõ ràng buộc atomic vào 8.1/8.3. |
+| BL-07 | Trung bình | GA | `expires_at` của whitelist/blacklist (7.1) không có tiến trình cưỡng chế hết hạn. Nếu không có rebuild, entry hết hạn vẫn active trong data-plane. | Entry hết hạn tiếp tục bypass/chặn traffic ngoài ý muốn → rủi ro bảo mật/đúng đắn. | Thêm job reconciliation định kỳ (worker) rà `expires_at` và trigger `LIST_UPDATE`/rebuild; hiển thị "next expiry sweep" trên dashboard. |
+| BL-08 | Thấp | Backlog | Whitelist/VIP vẫn chịu VIP ceiling: attacker spoof IP whitelisted làm cạn ceiling → traffic hợp lệ của chính IP đó bị `vip_ceiling_drop`. | Self-DoS lên khách VIP thông qua spoofing — đã có mitigation nhưng chưa nêu failure mode. | Tài liệu hóa failure mode; cân nhắc cảnh báo khi VIP ceiling bị chạm liên tục (dấu hiệu spoof). |
+| BL-09 | Trung bình | GA | Chỉ có rate-limit per-rule (6.4) và VIP ceiling (6.3); không có aggregate limit toàn service cho traffic non-VIP. Tổng quota 16 rule có thể vượt capacity provisioned của service. | Không kiểm soát được trần tài nguyên bán cho khách → khó gắn với gói dịch vụ/SLA. | Bổ sung `service_pps`/`service_bps` aggregate cho non-VIP path (đối xứng với VIP ceiling), gắn với gói cam kết (xem CM-03). |
+
+### 15.2. Trải nghiệm vận hành (Operational UX)
+
+| ID | Mức độ | Cổng | Phát hiện | Rủi ro vận hành | Khuyến nghị hành động |
+|---|---|---|---|---|---|
+| OP-01 | Cao | Pilot | Mục 10 chỉ có dashboard passive; không có yêu cầu alerting/notification. | Operator phải "canh" dashboard; sự cố (attack onset, map fail, feed fail) không được báo động kịp. | Bổ sung mục Alerting: sự kiện + kênh (email/webhook/Slack) cho: attack onset theo ngưỡng PPS/BPS, `map_error`, XDP rớt native→generic, feed sync fail, VIP/rate-limit chạm trần liên tục. |
+| OP-02 | Cao | GA | 14: mitigation manual-only; 3.2: propagation ≤ 5s. DDoS diễn ra theo giây, human-in-the-loop quá chậm cho pattern mới. | Cửa sổ thiệt hại lớn trước khi operator kịp phản ứng. | Tối thiểu: alert → "one-click mitigate" template. Roadmap: auto-response theo ngưỡng (rate-limit/blacklist tạm) với review sau. Ghi rõ v1 chỉ bảo vệ tự động phần static (rule/blacklist/feed). |
+| OP-03 | Cao | Pilot | Single-node + fail-closed inline (11.3, 14) không có bypass/maintenance mode. | Thiết bị lỗi/nâng cấp = khách offline hoàn toàn (inline SPOF). | Định nghĩa bypass procedure (hardware bypass NIC hoặc rút gateway khỏi path + runbook), maintenance window, và cờ "global fail-open" có kiểm soát khi cần khôi phục dịch vụ khẩn cấp. |
+| OP-04 | Trung bình | GA | Không có dry-run/monitor(count-only) mode cho allow-rule/blacklist. | Rule/blacklist sai được apply thẳng vào live → drop traffic hợp lệ mà không cảnh báo trước. | Thêm trạng thái rule "monitor/count-only": đếm hit nhưng không drop, để validate trước khi enforce. |
+| OP-05 | Trung bình | GA | 9.2 có trạng thái apply nhưng không có rollback một-chạm về version active trước. | Config lỗi đang active phải sửa tay + chờ propagation lần nữa. | Tận dụng double-buffer để hỗ trợ "revert to previous active version" một thao tác; lưu lịch sử version. |
+| OP-06 | Trung bình | GA | Telemetry chỉ service-level aggregate (10.1); packet-level forensic ngoài scope. Tenant khó debug vì sao traffic bị `not_allowed`. | Self-service kém; tăng ticket hỗ trợ. | Bổ sung sampled drop-flow records (5-tuple + reason, rate-limited) cho tenant, tách khỏi forensic đầy đủ. |
+| OP-07 | Trung bình | GA | 5.1: "chỉ có 1 admin chính". | Bus factor, không phủ 24/7, không tách nhiệm vụ (separation of duties). | Cho phép nhiều user role `admin` (vẫn 1 role) trong v1; roadmap phân quyền admin chi tiết hơn. |
+| OP-08 | Thấp | Backlog | Onboarding có "vách default-deny": bật service là traffic bị drop cho tới khi rule đúng. | Trải nghiệm khởi tạo khó, dễ gây gián đoạn khi go-live. | Guided onboarding + "learning mode" đề xuất rule từ traffic quan sát (dựa OP-04 count-only). |
+
+### 15.3. Rủi ro thương mại hóa (Product Commercialization Risks)
+
+| ID | Mức độ | Cổng | Phát hiện | Rủi ro thương mại | Khuyến nghị hành động |
+|---|---|---|---|---|---|
+| CM-01 | Blocker | GA | Single-node, no HA, fail-closed inline (3.2, 4.2, 14) → SPOF. | Không đạt yêu cầu uptime của bất kỳ khách mua DDoS protection nào → không bán production được. | Đưa HA/failover thành **điều kiện cổng GA** (không chỉ "ngoài phạm vi"). v1 định vị rõ là pilot/PoC. Có roadmap active/passive tối thiểu. |
+| CM-02 | Cao | Pilot | IPv6 bị drop cứng (4.2, 8.2). 2026 nhiều mạng mobile/dual-stack ưu tiên IPv6. | Người dùng IPv6 hợp lệ của khách bị blackhole ngay khi đặt sau scrubber → mất truy cập, khiếu nại. | Cảnh báo onboarding rất rõ + checklist: tắt AAAA hoặc route IPv6 vòng qua scrubber. Roadmap IPv6 forwarding là ưu tiên GA cao. |
+| CM-03 | Cao | GA | Không có object gói dịch vụ/tier/committed bandwidth/metering/billing; rate-limit là control kỹ thuật, không phải bậc thương mại. | Không có mô hình định giá/quota gắn SLA; không xuất được usage để tính phí. | Thêm `ServicePlan` (committed clean pps/bps, trần, overage) + xuất usage định kỳ từ telemetry cho billing. Liên kết BL-09. |
+| CM-04 | Cao | GA | Data-plane dùng chung, ngân sách CPU/PPS/40G là của cả node; không có fairness/isolation per-tenant (11.1). | Noisy neighbor: tấn công vào tenant A làm cạn tài nguyên xử lý của tenant B → không cam kết được SLA per-tenant. | Thêm cơ chế công bằng/hạn mức per-tenant ở data-plane (ưu tiên/hạn ngạch), hoặc nêu rõ giới hạn "best-effort chia sẻ" trong hợp đồng v1. |
+| CM-05 | Trung bình | GA | Datasheet có thể quảng bá SYN flood/port scan trong khi năng lực thực tế hạn chế (xem BL-04). | Rủi ro pháp lý/uy tín do over-claim. | Đồng bộ datasheet với năng lực thực; chỉ marketing những gì pipeline thực thi. |
+| CM-06 | Trung bình | Pilot | 40Gbps/20Mpps mỗi node; tấn công volumetric hiện đại đạt hàng trăm Gbps–Tbps. | Định vị sai kỳ vọng "khả năng hấp thụ tấn công" vs "throughput line-rate". | Truyền thông rõ: absorption capacity phụ thuộc upstream provisioning; single 40G node là small/mid scrubber; scale-out là roadmap. |
+| CM-07 | Trung bình | Pilot | Threat feed lấy từ "nhiều nguồn Internet" (6.7); nhiều feed cấm tái phân phối/thương mại. | Vi phạm license feed khi thương mại hóa. | Rà soát điều khoản license từng nguồn feed; chỉ dùng feed cho phép commercial/redistribution. |
+| CM-08 | Trung bình | GA | Telemetry lưu `top_src` (source IP) — IP là dữ liệu cá nhân theo GDPR và tương đương. | Rủi ro tuân thủ (retention, data residency) khi bán khách EU/khu vực quản chặt. | Thêm chính sách retention/anonymization cho source IP + tùy chọn data residency; ghi vào 11.2. |
+| CM-09 | Trung bình | Pilot | Inbound-only (IN→OUT); return path đi đường khác (asymmetric/DSR). | Chỉ triển khai được ở topology hỗ trợ asymmetric routing → thu hẹp thị trường, tăng ma sát triển khai. | Nêu rõ điều kiện tiên quyết mạng (asymmetric routing/DSR) trong tài liệu triển khai và tiêu chí qualify khách. |
+| CM-10 | Thấp | GA | 11.2 có hash password/RBAC/audit nhưng không có MFA/account lockout/session policy cho admin. | Thiếu yêu cầu bảo mật tối thiểu (table stakes) cho khách enterprise. | Bổ sung MFA, khóa tài khoản sau N lần sai, chính sách hết hạn session cho admin. |
+
+### 15.4. Thứ tự ưu tiên hành động
+
+- **Trước Pilot (must-fix):** BL-01, BL-02, BL-03, BL-05, BL-06, OP-01, OP-03, CM-02, CM-06, CM-07, CM-09.
+- **Trước GA (must-fix):** CM-01 (Blocker), BL-04, BL-07, BL-09, OP-02, OP-04, OP-05, OP-06, OP-07, CM-03, CM-04, CM-05, CM-08, CM-10.
+- **Backlog:** BL-08, OP-08.
+
+### 15.5. Câu hỏi/quyết định cần chốt với chủ sản phẩm
+
+1. `disabled` service nghĩa là drop-all hay pass-through? (BL-03)
+2. Whitelist có được phép bypass threat feed global không, hay chỉ bypass blacklist trong phạm vi tenant? (BL-01)
+3. Match allow-rule là first-match theo priority hay best-match, và có fall-through khi hết quota không? (BL-05)
+4. ~~v1 là bản thương mại có khách trả phí hay chỉ PoC nội bộ?~~ **Đã chốt (2026-07-07): thương mại nội bộ, có thu phí (chargeback nội bộ).** Xem điều chỉnh ở 15.6.
+5. Đơn vị chargeback nội bộ dự kiến (theo IP bảo vệ / theo Gbps sạch / theo Mpps)? (CM-03 — nay là yêu cầu bắt buộc)
+6. Có cam kết SLA/OLA per-tenant nội bộ trong v1 không, và mức nào? (CM-04)
+
+### 15.6. Điều chỉnh theo mô hình "thương mại nội bộ, trả phí" (chốt 2026-07-07)
+
+Quyết định v1 là sản phẩm nội bộ có thu phí (chargeback), không bán ra thị trường ngoài, làm thay đổi trọng số các rủi ro thương mại hóa như sau:
+
+- **Nâng mức — trở thành bắt buộc:**
+  - **CM-03 (metering/chargeback):** Vì đã thu phí nội bộ nên cần **mô hình đo lường + xuất usage để chargeback/showback** giữa các đơn vị. Đây không còn là tùy chọn. Cần chốt đơn vị tính (IP bảo vệ / Gbps sạch / Mpps) và chu kỳ xuất. Liên kết `ServicePlan` (BL-09).
+  - **CM-01 (HA/SPOF):** Đã thu phí ⇒ có kỳ vọng dịch vụ. Vẫn là rủi ro thật, **giữ là điều kiện GA**, nhưng có thể chấp nhận ở Pilot với **biện pháp bù**: OLA nội bộ ghi rõ maintenance window + bypass procedure (OP-03) + cam kết mức uptime khiêm tốn, có văn bản.
+  - **CM-04 (fairness/SLA per-tenant):** Chargeback công bằng đòi hỏi tránh noisy-neighbor giữa các đơn vị trả phí. Giữ mức Cao; tối thiểu phải công bố rõ mô hình chia sẻ tài nguyên trong OLA.
+
+- **Giảm nhẹ — do biên giới tin cậy nội bộ, mạng tự kiểm soát:**
+  - **CM-05 (over-claim datasheet):** Rủi ro pháp lý thấp hơn (không bán ngoài), nhưng vẫn cần trung thực năng lực để giữ tin cậy nội bộ và tránh kỳ vọng sai. Hạ xuống Thấp.
+  - **CM-09 (asymmetric routing):** Mạng nội bộ kiểm soát được ⇒ ma sát triển khai thấp. Hạ xuống Thấp; vẫn ghi vào tài liệu triển khai.
+  - **CM-10 (MFA/lockout):** Nhiều khả năng dùng SSO/IdP nội bộ sẵn có. Hạ xuống Thấp nếu tích hợp SSO nội bộ; nếu tự quản lý danh tính thì giữ nguyên.
+
+- **Không đổi (commercial-use vẫn áp dụng dù nội bộ):**
+  - **CM-07 (license threat feed):** Nhiều feed cấm dùng thương mại bất kể nội bộ/ngoài; giữ nguyên, phải rà license.
+  - **CM-08 (PII/GDPR trên `top_src`):** Nếu dịch vụ được bảo vệ có người dùng cuối bên ngoài, source IP vẫn là dữ liệu cá nhân; giữ nguyên chính sách retention.
+  - **CM-02 (IPv6 hard-drop) và CM-06 (định vị capacity):** Rủi ro kỹ thuật/kỳ vọng không phụ thuộc nội bộ hay ngoài; giữ nguyên.
+
+Ưu tiên cập nhật: **CM-03 chuyển từ GA sang cần chốt trước Pilot** (để tính được chi phí ngay khi chạy thu phí); các mục CM-05/CM-09/CM-10 chuyển sang Backlog nếu điều kiện giảm nhẹ ở trên được thỏa.
