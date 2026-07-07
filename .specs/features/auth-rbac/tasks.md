@@ -143,11 +143,11 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-23, AUTH-24, AUTH-25, AUTH-26
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `record_event` inserts one row committed with the caller's mutation (same txn)
-- [ ] Scrub helper removes `password`/`token`/`secret`/`credential` keys from metadata (AUTH-26) — unit test
-- [ ] `actor_username` snapshot persisted even if actor later deleted
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥4 tests pass (no silent deletions)
+- [x] `record_event` inserts one row committed with the caller's mutation (same txn)
+- [x] Scrub helper removes `password`/`token`/`secret`/`credential` keys from metadata (AUTH-26) — unit test
+- [x] `actor_username` snapshot persisted even if actor later deleted
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥4 tests pass (no silent deletions)
 **Tests**: integration (+ unit for scrub)
 **Gate**: full
 **Commit**: `feat(auth): transactional audit writer with secret scrubbing`
