@@ -26,10 +26,12 @@
 - Spec `spec.md` (TCA-01..32); context `context.md` (D-TCA-1..3); `design.md`; `tasks.md` (T1–T7)
 - Requires auth-rbac executed first (reuses its skeleton/guards/audit)
 
-**Service, rule & list management (API)** - PLANNED
-- `ProtectedService` + `ServicePlan` (committed/ceiling clean Gbps) CRUD
-- `AllowRule` (≤16, unique priority), whitelist/VIP, blacklist CRUD, all CIDR-scoped
-- Overlap warning for allow-rules; disable-service confirm + audit
+**Service, rule & list management (API)** - IN PROGRESS (spec + context + design drafted)
+- `ProtectedService` + `ServicePlan` (committed/ceiling clean Gbps) CRUD, dest `cidr_or_ip` ⊆ `AllocatedCIDR` (wires AUTH-14) + global no-overlap across active services
+- `AllowRule` (≤16, unique priority, first-match warn), whitelist/VIP + service/global blacklist CRUD; list sources are arbitrary IPv4 (service-scoped, not source-in-allocation)
+- Disable = drop-all + confirm + audit (AD-002); delete = disable-first + cascade children; realizes tenant-cidr `TCA-16` (revoke-in-use blocked)
+- Spec `spec.md` (SRL-01..44); context `context.md` (D-SRL-1..4, A-SRL-1..6); `design.md` + rendered diagrams
+- Requires auth-rbac + tenant-cidr executed first (reuses guard/audit + `cidr_in_tenant_allocation`/`AllocatedCIDR`/`core/cidr`)
 
 **Apply-status state machine** - PLANNED
 - `pending → queued → applying → active → failed` per service/list/feed
