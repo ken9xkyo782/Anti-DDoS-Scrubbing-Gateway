@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
 
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None
+    node_clean_capacity_gbps: Decimal = Field(default=Decimal("40"), gt=0)
 
 
 @lru_cache

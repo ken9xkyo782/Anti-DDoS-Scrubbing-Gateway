@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
@@ -384,8 +385,16 @@ class ServicePlan(TimestampMixin, Base):
         unique=True,
         nullable=False,
     )
-    committed_clean_gbps: Mapped[float] = mapped_column(Numeric(10, 2), default=0, nullable=False)
-    ceiling_clean_gbps: Mapped[float] = mapped_column(Numeric(10, 2), default=0, nullable=False)
+    committed_clean_gbps: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        default=Decimal("0"),
+        nullable=False,
+    )
+    ceiling_clean_gbps: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        default=Decimal("0"),
+        nullable=False,
+    )
     billing_metric: Mapped[str] = mapped_column(
         String(64),
         default="p95_clean_bps",
