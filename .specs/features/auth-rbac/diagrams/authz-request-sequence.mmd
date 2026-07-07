@@ -1,0 +1,44 @@
+%% Diagram: Auth & RBAC request-authorization sequence (admin write example)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'actorBkg': '#4f46e5', 'actorTextColor': '#ffffff',
+  'signalColor': '#94a3b8', 'signalTextColor': '#334155',
+  'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    autonumber
+    participant C as Client (Dashboard)
+    participant API as FastAPI
+    participant R as Redis (Sessions)
+    participant DB as PostgreSQL
+    participant AU as Audit
+
+    C->>API: POST /users  (Cookie: sid)
+    Note over API: get_current_user
+    API->>R: GET session:sid
+    alt session missing / expired
+        R-->>API: nil
+        API-->>C: 401 Unauthorized (fail-closed)
+    else session valid
+        R-->>API: {user_id, session_version}
+        API->>DB: SELECT user (fresh role, status, tenant)
+        alt user disabled OR tenant inactive OR version mismatch
+            DB-->>API: stale / disabled
+            API-->>C: 401 (revoked, fail-closed)
+        else user active
+            DB-->>API: user{role, tenant_id}
+            Note over API: require_admin + ownership guard
+            alt not authorized
+                API-->>C: 403 Forbidden (no side effect)
+            else authorized
+                API->>DB: INSERT user (argon2id hash)
+                API->>AU: write(actor, user.create, target)
+                AU->>DB: INSERT audit_event (no secrets)
+                DB-->>API: committed
+                API-->>C: 201 Created
+            end
+        end
+    end

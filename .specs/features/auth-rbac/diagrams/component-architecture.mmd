@@ -1,0 +1,50 @@
+%% Diagram: Auth & RBAC control-plane component architecture
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TD
+    dashboard[React Dashboard]
+
+    subgraph api [FastAPI Control-Plane]
+        direction TB
+        authRouter[Auth Router]
+        usersRouter[Users Router]
+        currentUser{{get_current_user}}
+        rbacGuard{{RBAC + Ownership Guard}}
+    end
+
+    subgraph svc [Service Layer]
+        direction TB
+        authService[Auth Service]
+        userService[User Service]
+        auditService[Audit Service]
+    end
+
+    sessionStore[(Redis<br/>Session Store)]
+    postgres[(PostgreSQL<br/>User / Tenant / AuditEvent)]
+
+    dashboard -->|HTTPS + HttpOnly cookie| authRouter
+    dashboard -->|HTTPS + HttpOnly cookie| usersRouter
+
+    authRouter -.->|Depends| currentUser
+    usersRouter -.->|Depends| currentUser
+    usersRouter -.->|Depends| rbacGuard
+
+    currentUser -->|resolve session| sessionStore
+    currentUser -->|load fresh user + role| postgres
+
+    authRouter -->|login / logout| authService
+    usersRouter -->|CRUD| userService
+
+    authService -->|create / revoke session| sessionStore
+    authService --> postgres
+    userService --> postgres
+    authService --> auditService
+    userService --> auditService
+    auditService -->|append event| postgres
