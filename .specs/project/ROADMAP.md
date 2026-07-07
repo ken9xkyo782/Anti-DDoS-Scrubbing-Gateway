@@ -1,0 +1,162 @@
+# Roadmap
+
+**Current Milestone:** M1 — Control-plane foundation & tenant model
+**Status:** Planning
+
+> All M1–M6 milestones together constitute the **Pilot MVP v1**. M7 is the **GA** track. Milestones are dependency-ordered; features are the units taken through Specify → (Design → Tasks) → Execute.
+
+---
+
+## M1 — Control-plane foundation & tenant model
+
+**Goal:** Auth, RBAC, tenant isolation, and full config CRUD persisted to Postgres with an apply-status state machine — config manageable end-to-end before the data-plane enforces it.
+**Target:** Admin/tenant can log in, allocate CIDRs, and CRUD services/rules/lists; every write is tenant-scoped and audited.
+
+### Features
+
+**Auth & RBAC** - IN PROGRESS (spec drafted)
+- Session auth, password hashing (argon2/bcrypt), `admin` + `tenant_user` roles
+- Fail-closed authorization; tenant ownership checks on every write
+- Spec: `.specs/features/auth-rbac/spec.md` (AUTH-01..39)
+
+**Tenant & CIDR allocation** - PLANNED
+- Tenant CRUD; `AllocatedCIDR` with non-overlap constraint (Postgres inet/cidr)
+- Admin allocates/revokes ranges; usage & overlap views
+
+**Service, rule & list management (API)** - PLANNED
+- `ProtectedService` + `ServicePlan` (committed/ceiling clean Gbps) CRUD
+- `AllowRule` (≤16, unique priority), whitelist/VIP, blacklist CRUD, all CIDR-scoped
+- Overlap warning for allow-rules; disable-service confirm + audit
+
+**Apply-status state machine** - PLANNED
+- `pending → queued → applying → active → failed` per service/list/feed
+- UI surfaces current active version + last apply status (9.2)
+
+---
+
+## M2 — Data-plane verdict pipeline (XDP core)
+
+**Goal:** Native XDP on `IN` that parses, fail-fast drops unsupported traffic, matches services, and redirects clean traffic to `OUT` as a header-preserving L2 bridge.
+**Target:** Clean IPv4 traffic to a declared/enabled service forwarded `IN→OUT`; unsupported traffic dropped with correct reasons; per-CPU counters populated.
+
+### Features
+
+**Packet parse & fail-fast** - PLANNED
+- L2/VLAN/QinQ EtherType, IPv4+L4 parse into `pkt_meta` (single parse)
+- Drops: `ipv6_unsupported`, `unsupported_ethertype`, `malformed_ipv4`, `fragment_unsupported`; minimal ARP policy
+
+**Service lookup & transparent redirect** - PLANNED
+- `service_map` match; `service_miss` vs `service_disabled` (drop-all, not pass-through)
+- `XDP_REDIRECT IN→OUT` via `tx_devmap`, TTL/checksum preserved
+- `active_slot` snapshot/pin at ingress (consistent per-packet view)
+
+**Drop-reason counters** - PLANNED
+- Per-CPU `counter_map`; standardized drop reasons (10.2); rate-limited ringbuf/perf sampling
+
+---
+
+## M3 — Policy enforcement & fairness
+
+**Goal:** Full verdict pipeline — allow-rules, rate-limits, scoped whitelist/VIP, blacklists, amplification/bogon filters, and per-service committed clean-bandwidth reservation.
+**Target:** Pipeline of section 8.2 fully enforced; fairness test passes (flooding service A never starves service B's committed bandwidth).
+
+### Features
+
+**Allow-rule matching & rate-limit** - PLANNED
+- First-match by ascending `priority`, terminal verdict, early-exit on `rule_count`
+- Per-CPU aggregate token buckets (`rate_limit_state`); `rate_limit_drop`, no fall-through
+
+**Whitelist/VIP (scoped) & VIP ceiling** - PLANNED
+- Bloom → LPM keyed by `service_id`+source CIDR (no cross-service bypass)
+- VIP ceiling aggregate bucket; `vip_ceiling_drop`
+
+**Blacklist (bloom + LPM)** - PLANNED
+- Global + service blacklist via bloom → LPM; `blacklist_drop`; `bloom_hit_lpm_miss` counter
+- Hardcoded UDP amplification ports, bogon check, dynamic blocked-port bitmap
+
+**Fairness & bandwidth reservation (8.4)** - PLANNED
+- 2-tier committed (global + spin_lock) / burst (per-CPU) buckets per service
+- Node headroom bucket (`congestion_drop`); ingress-cost cap (`ingress_cap_drop`); `service_ceiling_drop`
+
+---
+
+## M4 — Worker sync & threat feed
+
+**Goal:** Python worker consuming Redis jobs that rebuilds BPF maps and swaps them atomically via double-buffer, plus scheduled threat-feed ingestion.
+**Target:** A control-plane change reaches active data-plane ≤ 5 s; failed builds keep the previous active slot; feed sync is resilient per source.
+
+### Features
+
+**Agent worker & job pipeline** - PLANNED
+- Jobs: `SERVICE_UPDATE`, `RULE_UPDATE`, `LIST_UPDATE`, `FEED_SYNC`, `MAP_REBUILD`, `ACTIVE_SLOT_SWAP`, `TELEMETRY_AGGREGATE`
+- Idempotent by `job_id`/version; no stale-over-new swap; worker restart preserves active state
+
+**Double-buffer map build/swap** - PLANNED
+- Build full inactive slot, verify, then single `active_slot` write; rollback = flip back
+- Config maps slotted; runtime-state maps unslotted (8.3)
+
+**Threat intelligence feed sync** - PLANNED
+- Fetch/validate/normalize/dedup per source; whitelist-overlap flag + alert (no global removal)
+- Bad new feed keeps last-active version; sync stats recorded
+
+---
+
+## M5 — Observability & chargeback
+
+**Goal:** Service-level telemetry aggregation, tenant/admin dashboards, and p95 clean-Gbps metering exported for internal chargeback.
+**Target:** Dashboards refresh ≤ 2 s; `BillingUsage` computes `billed_gbps = max(committed, p95_clean)` from exact hot-path byte counts.
+
+### Features
+
+**Telemetry & dashboards** - PLANNED
+- `TELEMETRY_AGGREGATE` from counters/events; tenant service view + admin node view
+- Drop-reason distribution, top src/dst-port, bloom hit/false-positive, XDP mode, map version, job/feed status
+
+**Chargeback metering** - PLANNED
+- p95 clean bps sampling → `BillingUsage` per period; overage policy (`billed`/`capped`)
+- Billing bytes from exact per-CPU counters, decoupled from sampled events; export for chargeback
+
+---
+
+## M6 — Operations & SLA
+
+**Goal:** Operational safety and proactive monitoring for real-time DDoS response at Pilot.
+**Target:** Global bypass + maintenance mode work with audit/alert; alerting covers data-plane/control-plane/SLA events; per-tenant SLA reports generated.
+
+### Features
+
+**Bypass & maintenance mode** - PLANNED
+- Global soft-bypass flag (`active_config`) with "BYPASS ACTIVE" banner + critical alert + audit
+- Per-node maintenance mode blocks stray `ACTIVE_SLOT_SWAP`; bypass traffic counted separately; OLA runbook
+
+**Alerting** - PLANNED
+- Email + generic webhook; severity + hysteresis + dedup + auto-resolve
+- Events: attack onset, `map_error`, XDP native→generic, feed/apply failures, worker/backlog, fairness breach; per-tenant isolation
+
+**SLA/OLA reporting & audit** - PLANNED
+- Per-tenant periodic SLA report (met/missed per dimension) tied to `BillingUsage`
+- Audit log for service/rule/list/feed/user + dangerous admin actions
+
+---
+
+## M7 — GA track (Future)
+
+**Goal:** Production-readiness beyond the single-node pilot.
+
+### Features
+
+**HA / failover (CM-01, GA Blocker)** - PLANNED — active/passive + link bypass; the condition for an Availability SLA.
+**IPv6 forwarding (CM-02)** - PLANNED — high-priority; remove hard-drop.
+**Auto-response / one-click mitigate (OP-02)** - PLANNED
+**Monitor/count-only rule mode (OP-04)** - PLANNED
+**One-click rollback to previous version (OP-05)** - PLANNED
+
+---
+
+## Future Considerations
+
+- Sampled per-tenant drop-flow records for self-service debugging (OP-06)
+- Whitelist/blacklist `expires_at` reconciliation sweep (BL-07)
+- Stateless SYN-cookie / scan detection to back TCP SYN-flood/port-scan claims (BL-04)
+- PII retention/anonymization for `top_src` (CM-08); multi-admin & separation of duties (OP-07)
+- Guided onboarding + learning mode (OP-08); SSO/IdP + MFA for admins (CM-10)
