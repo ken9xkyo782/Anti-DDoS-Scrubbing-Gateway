@@ -69,10 +69,10 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: Foundation
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `alembic upgrade head` applies cleanly against `compose.test.yml` Postgres
-- [ ] A connectivity integration test opens an `AsyncSession` and runs `SELECT 1`
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: 1 test passes (no silent deletions)
+- [x] `alembic upgrade head` applies cleanly against `compose.test.yml` Postgres
+- [x] A connectivity integration test opens an `AsyncSession` and runs `SELECT 1`
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: 1 test passes (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(control-plane): async DB engine, session factory & alembic harness`
