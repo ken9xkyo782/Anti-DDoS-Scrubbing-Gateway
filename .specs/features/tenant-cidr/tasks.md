@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute in progress (T1-T5 complete)
+**Status**: Execute in progress (T1-T6 complete)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -149,11 +149,11 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-01, TCA-03, TCA-04, TCA-05, TCA-06, TCA-07, TCA-08, TCA-31
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Admin CRUD + suspend/reactivate endpoints work and are audited; delete-with-dependents → 409 (TCA-07); delete-empty → 204 (TCA-08)
-- [ ] `tenant_user` → any `/tenants` endpoint = 403, no side effect (TCA-06)
-- [ ] **End-to-end suspend**: seed a `tenant_user`, log in (auth-rbac), admin suspends its tenant → that user's next request → 401 (TCA-04); reactivate → login works again (TCA-31)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥6 tests pass (no silent deletions)
+- [x] Admin CRUD + suspend/reactivate endpoints work and are audited; delete-with-dependents → 409 (TCA-07); delete-empty → 204 (TCA-08)
+- [x] `tenant_user` → any `/tenants` endpoint = 403, no side effect (TCA-06)
+- [x] **End-to-end suspend**: seed a `tenant_user`, log in (auth-rbac), admin suspends its tenant → that user's next request → 401 (TCA-04); reactivate → login works again (TCA-31)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥6 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(tenant): admin tenants API with suspend/reactivate`
