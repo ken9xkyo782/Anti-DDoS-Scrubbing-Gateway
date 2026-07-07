@@ -11,11 +11,13 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy import (
     Enum as SAEnum,
 )
-from sqlalchemy.dialects.postgresql import CITEXT, JSONB, UUID
+from sqlalchemy.dialects.postgresql import CIDR, CITEXT, JSONB, UUID, ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -40,6 +42,11 @@ class TenantStatus(StrEnum):
     suspended = "suspended"
 
 
+class CIDRStatus(StrEnum):
+    active = "active"
+    revoked = "revoked"
+
+
 role_enum = SAEnum(
     Role,
     name="role",
@@ -55,6 +62,12 @@ user_status_enum = SAEnum(
 tenant_status_enum = SAEnum(
     TenantStatus,
     name="tenant_status",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+cidr_status_enum = SAEnum(
+    CIDRStatus,
+    name="cidr_status",
     native_enum=False,
     values_callable=lambda values: [value.value for value in values],
 )
@@ -76,9 +89,10 @@ class TimestampMixin:
 
 class Tenant(TimestampMixin, Base):
     __tablename__ = "tenants"
+    __table_args__ = (UniqueConstraint("name", name="uq_tenants_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(CITEXT, nullable=False)
     status: Mapped[TenantStatus] = mapped_column(
         tenant_status_enum,
         default=TenantStatus.active,
@@ -86,6 +100,10 @@ class Tenant(TimestampMixin, Base):
     )
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
+    allocations: Mapped[list["AllocatedCIDR"]] = relationship(
+        back_populates="tenant",
+        passive_deletes=True,
+    )
 
 
 class User(TimestampMixin, Base):
@@ -120,6 +138,49 @@ class User(TimestampMixin, Base):
         back_populates="actor",
         passive_deletes=True,
     )
+    allocated_cidrs: Mapped[list["AllocatedCIDR"]] = relationship(
+        back_populates="allocator",
+        passive_deletes=True,
+    )
+
+
+class AllocatedCIDR(TimestampMixin, Base):
+    __tablename__ = "allocated_cidr"
+    __table_args__ = (
+        ExcludeConstraint(
+            ("cidr", "&&"),
+            using="gist",
+            where=text("status = 'active'"),
+            ops={"cidr": "inet_ops"},
+            name="allocated_cidr_active_no_overlap",
+        ),
+        Index(
+            "ix_allocated_cidr_tenant_active",
+            "tenant_id",
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    cidr: Mapped[str] = mapped_column(CIDR, nullable=False)
+    status: Mapped[CIDRStatus] = mapped_column(
+        cidr_status_enum,
+        default=CIDRStatus.active,
+        nullable=False,
+    )
+    allocated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    tenant: Mapped[Tenant] = relationship(back_populates="allocations")
+    allocator: Mapped[User | None] = relationship(back_populates="allocated_cidrs")
 
 
 class AuditEvent(Base):

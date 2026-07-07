@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute in progress (T1 complete)
+**Status**: Execute in progress (T1-T2 complete)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -71,12 +71,12 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-02 (name unique), TCA-11, TCA-17, TCA-27, TCA-32 (FK RESTRICT); schema for TCA-10/15
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `alembic upgrade head` creates `allocated_cidr` with a constraint literally named `allocated_cidr_active_no_overlap` (verify via `pg_constraint`); **no `btree_gist`/extension** required (AD-010)
-- [ ] Integration: two overlapping `active` rows → second raises `ExclusionViolation` (TCA-11); a revoked + a new equal/overlapping `active` row coexist (revoke frees space, TCA-17); two concurrent overlapping inserts → exactly one commits (TCA-27)
-- [ ] Case-insensitive duplicate `Tenant.name` rejected (TCA-02); deleting a `Tenant` with an active CIDR is blocked by FK RESTRICT (TCA-32 backstop)
-- [ ] `User.tenant_id` confirmed to block tenant delete (explicit `RESTRICT` if auth-rbac left it default NO ACTION) — design flag #4
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥5 tests pass (no silent deletions)
+- [x] `alembic upgrade head` creates `allocated_cidr` with a constraint literally named `allocated_cidr_active_no_overlap` (verify via `pg_constraint`); **no `btree_gist`/extension** required (AD-010)
+- [x] Integration: two overlapping `active` rows → second raises `ExclusionViolation` (TCA-11); a revoked + a new equal/overlapping `active` row coexist (revoke frees space, TCA-17); two concurrent overlapping inserts → exactly one commits (TCA-27)
+- [x] Case-insensitive duplicate `Tenant.name` rejected (TCA-02); deleting a `Tenant` with an active CIDR is blocked by FK RESTRICT (TCA-32 backstop)
+- [x] `User.tenant_id` confirmed to block tenant delete (explicit `RESTRICT` if auth-rbac left it default NO ACTION) — design flag #4
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥5 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(cidr): AllocatedCIDR model + partial GiST no-overlap constraint & migration`
