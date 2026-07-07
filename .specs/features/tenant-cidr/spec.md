@@ -2,7 +2,7 @@
 
 **Milestone:** M1 — Control-plane foundation & tenant model
 **Category ID:** TCA
-**Status:** Spec + Design + Tasks complete; awaiting approval → Execute
+**Status:** Verified (T1-T7 complete)
 **Depends on:** Auth & RBAC (`.specs/features/auth-rbac/`) — consumes `require_admin`, the tenant-ownership guard, and the audit writer; **resolves** its deferred `AUTH-36`.
 **Discuss context:** `.specs/features/tenant-cidr/context.md` (D-TCA-1..3)
 
@@ -182,15 +182,15 @@ Explicitly excluded to prevent scope creep.
 
 | Requirement ID | Story | PRD ref | Phase | Status |
 | --- | --- | --- | --- | --- |
-| TCA-01..06 | P1: Tenant lifecycle management | 6.1, 7.1, 11.2 | Design | Pending |
-| TCA-07..09 | P1: Delete tenant (resolves AUTH-36) | 11.2 | Design | Pending |
-| TCA-10..14 | P1: CIDR allocation + global non-overlap | 6.1, 7.2 | Design | Pending |
-| TCA-15..17 | P1: CIDR revoke (in-use blocked) | 6.1, 7.2 | Design | Pending |
-| TCA-18..19 | P1: Usage & overlap-check views | 6.1 | Design | Pending |
-| TCA-20..22 | P1: CIDR-scope primitive (reusable) | 5.2, 7.2, 12.1 (AUTH-14) | Design | Pending |
-| TCA-23..24 | P2: Tenant self-view of allocations | 6.2, 5.2 | - | Pending |
-| TCA-25..26 | P1: Audit coverage | 11.2 | Design | Pending |
-| TCA-27..32 | Edge cases | 6.1, 7.2 | Design | Pending |
+| TCA-01..06 | P1: Tenant lifecycle management | 6.1, 7.1, 11.2 | Execute | Verified |
+| TCA-07..09 | P1: Delete tenant (resolves AUTH-36) | 11.2 | Execute | Verified |
+| TCA-10..14 | P1: CIDR allocation + global non-overlap | 6.1, 7.2 | Execute | Verified |
+| TCA-15..17 | P1: CIDR revoke (in-use blocked) | 6.1, 7.2 | Execute | Verified |
+| TCA-18..19 | P1: Usage & overlap-check views | 6.1 | Execute | Verified |
+| TCA-20..22 | P1: CIDR-scope primitive (reusable) | 5.2, 7.2, 12.1 (AUTH-14) | Execute | Verified |
+| TCA-23..24 | P2: Tenant self-view of allocations | 6.2, 5.2 | Execute | Verified |
+| TCA-25..26 | P1: Audit coverage | 11.2 | Execute | Verified |
+| TCA-27..32 | Edge cases | 6.1, 7.2 | Execute | Verified |
 
 **ID format:** `TCA-[NUMBER]`
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified

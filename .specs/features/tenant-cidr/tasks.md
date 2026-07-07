@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute in progress (T1-T6 complete)
+**Status**: Complete (T1-T7 verified)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -168,11 +168,11 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-06, TCA-10, TCA-11, TCA-12, TCA-13, TCA-14, TCA-15, TCA-16, TCA-18, TCA-19, TCA-23, TCA-24, TCA-28
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Admin allocate → 201; overlap → 409; IPv6/host-bits/`0.0.0.0/0` → 422 (TCA-10/11/12/13/28); revoke + overlap-check + list endpoints work (TCA-15/16/18/19)
-- [ ] `GET /me/allocations` returns only the caller's tenant's active ranges (TCA-23)
-- [ ] **Isolation pair**: tenant A cannot read/modify tenant B's allocation → 404, zero leak (TCA-24); `tenant_user` on admin endpoints → 403 (TCA-06)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥8 tests pass (no silent deletions)
+- [x] Admin allocate → 201; overlap → 409; IPv6/host-bits/`0.0.0.0/0` → 422 (TCA-10/11/12/13/28); revoke + overlap-check + list endpoints work (TCA-15/16/18/19)
+- [x] `GET /me/allocations` returns only the caller's tenant's active ranges (TCA-23)
+- [x] **Isolation pair**: tenant A cannot read/modify tenant B's allocation → 404, zero leak (TCA-24); `tenant_user` on admin endpoints → 403 (TCA-06)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥8 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(cidr): allocations admin API + tenant self-view with isolation`

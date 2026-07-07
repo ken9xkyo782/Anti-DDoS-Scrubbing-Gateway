@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routers import auth, tenants, users
+from app.api.routers import allocations, auth, tenants, users
 from app.core.config import get_settings
 from app.db.session import dispose_engine
 
@@ -19,6 +19,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.include_router(allocations.router)
     app.include_router(auth.router)
     app.include_router(tenants.router)
     app.include_router(users.router)
