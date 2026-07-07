@@ -51,7 +51,3 @@ plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
 strict = true
 warn_unused_configs = true
 mypy_path = ["."]
-
-[[tool.mypy.overrides]]
-module = ["alembic.*"]
-ignore_missing_imports = true

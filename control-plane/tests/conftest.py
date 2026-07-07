@@ -1,6 +1,8 @@
 from collections.abc import AsyncGenerator, Iterator
 
 import pytest
+from alembic.command import upgrade
+from alembic.config import Config
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -18,17 +20,21 @@ def _clear_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
 
 
+@pytest.fixture(scope="session")
+def migrated_db() -> None:
+    upgrade(Config("alembic.ini"), "head")
+
+
 @pytest.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(migrated_db: None) -> AsyncGenerator[AsyncSession, None]:
     from app.db.session import dispose_engine, get_session_factory
 
     session_factory = get_session_factory()
     async with session_factory() as session:
-        transaction = await session.begin()
+        await session.begin()
         try:
             yield session
         finally:
-            if transaction.is_active:
-                await transaction.rollback()
+            await session.rollback()
             await session.close()
             await dispose_engine()

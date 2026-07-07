@@ -6,9 +6,11 @@ from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
+from app.db import models as _models
 from app.db.session import Base
 
 config = context.config
+_ = _models
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

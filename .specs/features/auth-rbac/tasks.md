@@ -87,10 +87,10 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-06, AUTH-17, AUTH-22, AUTH-23..26 (schema)
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Migration creates all three tables + the `citext` extension
-- [ ] Integration tests prove: role⇔tenant CHECK rejects admin-with-tenant & tenant_user-without-tenant (AUTH-17); duplicate username (case-insensitive) rejected (AUTH-22); deleting a user NULLs `AuditEvent.actor_user_id` but keeps `actor_username`
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥4 tests pass (no silent deletions)
+- [x] Migration creates all three tables + the `citext` extension
+- [x] Integration tests prove: role⇔tenant CHECK rejects admin-with-tenant & tenant_user-without-tenant (AUTH-17); duplicate username (case-insensitive) rejected (AUTH-22); deleting a user NULLs `AuditEvent.actor_user_id` but keeps `actor_username`
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥4 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): User/Tenant/AuditEvent models, constraints & migration`
