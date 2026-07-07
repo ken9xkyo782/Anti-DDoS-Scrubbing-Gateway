@@ -13,7 +13,7 @@ from sqlalchemy.sql import Select
 
 from app.core.config import get_settings
 from app.core.sessions import RedisSessionStore
-from app.db.models import Role, TenantStatus, User, UserStatus
+from app.db.models import ProtectedService, Role, TenantStatus, User, UserStatus
 from app.db.session import get_db
 from app.services.allocations import cidr_in_tenant_allocation
 
@@ -115,6 +115,26 @@ async def require_within_allocation(
 ) -> None:
     if not await cidr_in_tenant_allocation(db, tenant_id, target):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def load_service_for_principal(
+    db: AsyncSession,
+    service_id: uuid.UUID,
+    principal: Principal,
+) -> ProtectedService:
+    service = await db.get(ProtectedService, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    try:
+        authorize_tenant_resource(principal, service.tenant_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Service not found",
+            ) from exc
+        raise
+    return service
 
 
 def scope_to_tenant(statement: Select[Any], principal: Principal) -> Select[Any]:
