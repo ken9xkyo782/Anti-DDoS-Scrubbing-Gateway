@@ -1,11 +1,25 @@
 # State
 
 **Last Updated:** 2026-07-07
-**Current Work:** M1 → Auth & RBAC — spec + design + tasks complete (`.specs/features/auth-rbac/`, 12 tasks T1–T12, AUTH-01..39), awaiting approval → Execute
+**Current Work:** M1 → **Tenant & CIDR allocation** — spec + design complete (`.specs/features/tenant-cidr/`, TCA-01..32; discuss `context.md`; `design.md` = layered FastAPI + DB-enforced GiST exclusion), awaiting confirmation → Tasks. Auth & RBAC spec+design+tasks complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
 
 ---
 
 ## Recent Decisions (Last 60 days)
+
+### AD-009: Tenant & CIDR allocation policy — 3 gray areas (2026-07-07)
+
+**Decision:** (a) `AllocatedCIDR` non-overlap enforced **globally** (no two `active` allocations overlap, even within one tenant) via Postgres GiST exclusion constraint partial on `status='active'`; (b) revoking a CIDR still holding services/list entries is **blocked** (409, fail-closed) — not cascade/soft; (c) deleting a tenant with any user or active CIDR is **blocked** until emptied — `suspend` is the reversible off-switch. Full context in `.specs/features/tenant-cidr/context.md` (D-TCA-1..3).
+**Reason:** Global no-overlap = one DB constraint + unambiguous scope checks (superset of PRD 7.2). Block-on-in-use / block-on-delete match the product's fail-closed posture; no orphaned users (closes AUTH-36) or silently-unprotected resources.
+**Trade-off:** Admin must do explicit multi-step cleanup before revoke/delete (no one-click cascade); global overlap forbids a tenant holding nested ranges of its own.
+**Impact:** M1 Tenant & CIDR feature (TCA-01..32). Resolves auth-rbac `AUTH-36`; supplies data + CIDR-scope primitive behind `AUTH-14`. Assumptions flagged: non-canonical CIDR rejected via `cidr` type; `0.0.0.0/0` rejected.
+
+### AD-010: CIDR non-overlap = DB-level partial GiST exclusion (2026-07-07)
+
+**Decision:** `AllocatedCIDR.cidr` uses Postgres `CIDR` type; non-overlap enforced by `EXCLUDE USING gist (cidr inet_ops WITH &&) WHERE (status='active')`. Scope containment (AUTH-14 primitive) via `cidr >>= :target`. API-layer CIDR validation via Python `ipaddress.ip_network(strict=True)` (reject IPv6/host-bits/`0.0.0.0/0`).
+**Reason (verified vs PostgreSQL docs, 2026-07-07):** `inet_ops` is a **core built-in** GiST opclass (supports `&&`,`>>`,`>>=`); **no `btree_gist`/extension** needed for a single-column `&&` constraint. Must be **named explicitly** (`ops={'cidr':'inet_ops'}` in SQLAlchemy `ExcludeConstraint`) — it isn't the default opclass until PG 19. Partial `WHERE active` makes soft-revoke free the space (re-allocatable) and is race-proof (concurrent overlaps → one `ExclusionViolation` → 409).
+**Trade-off:** requires the named opclass (a known SQLAlchemy gotcha); DB error must be mapped to a friendly 409.
+**Impact:** M1 Tenant & CIDR `design.md`; the `cidr_in_tenant_allocation` primitive + `AllocatedCIDR` model are reused by Service/Whitelist/Blacklist (M1/M3). `User.tenant_id` FK to be pinned `ON DELETE RESTRICT`.
 
 ### AD-001: Stack for control-plane, DB, dashboard (2026-07-07)
 

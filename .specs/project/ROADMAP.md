@@ -19,9 +19,11 @@
 - Fail-closed authorization; tenant ownership checks on every write
 - Spec: `.specs/features/auth-rbac/spec.md` (AUTH-01..39)
 
-**Tenant & CIDR allocation** - PLANNED
-- Tenant CRUD; `AllocatedCIDR` with non-overlap constraint (Postgres inet/cidr)
-- Admin allocates/revokes ranges; usage & overlap views
+**Tenant & CIDR allocation** - IN PROGRESS (spec drafted)
+- Tenant CRUD; `AllocatedCIDR` with **global** non-overlap constraint (Postgres GiST exclusion)
+- Admin allocates/revokes ranges; usage & overlap-check views; reusable CIDR-scope primitive
+- Resolves auth-rbac `AUTH-36` (delete-tenant rule); provides data + primitive behind `AUTH-14`
+- Spec: `.specs/features/tenant-cidr/spec.md` (TCA-01..32); context: `context.md` (D-TCA-1..3)
 
 **Service, rule & list management (API)** - PLANNED
 - `ProtectedService` + `ServicePlan` (committed/ceiling clean Gbps) CRUD
