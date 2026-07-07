@@ -1,7 +1,7 @@
 # State
 
 **Last Updated:** 2026-07-07
-**Current Work:** M1 → Auth & RBAC — spec drafted (`.specs/features/auth-rbac/spec.md`, AUTH-01..39), awaiting confirmation → Design
+**Current Work:** M1 → Auth & RBAC — spec + design complete (`.specs/features/auth-rbac/`, AUTH-01..39; Redis sessions + reusable RBAC guard & audit writer), awaiting approval → Tasks
 
 ---
 
