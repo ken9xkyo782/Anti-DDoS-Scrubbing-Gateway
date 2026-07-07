@@ -105,11 +105,11 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-06, AUTH-07, AUTH-08
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `hash_password` returns an argon2id string with per-password salt; two hashes of same input differ
-- [ ] `verify_password` true on match, false on mismatch; uses library constant-time verify
-- [ ] `new_session_id` returns ≥32 bytes of URL-safe entropy, unique across calls
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` (quick)
-- [ ] Test count: ≥4 tests pass (no silent deletions)
+- [x] `hash_password` returns an argon2id string with per-password salt; two hashes of same input differ
+- [x] `verify_password` true on match, false on mismatch; uses library constant-time verify
+- [x] `new_session_id` returns ≥32 bytes of URL-safe entropy, unique across calls
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` (quick)
+- [x] Test count: ≥4 tests pass (no silent deletions)
 **Tests**: unit
 **Gate**: quick
 **Commit**: `feat(auth): password hashing & session-id primitives`
