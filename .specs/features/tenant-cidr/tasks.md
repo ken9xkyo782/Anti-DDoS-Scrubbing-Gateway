@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Draft (awaiting approval → Execute)
+**Status**: Execute in progress (T1 complete)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -52,11 +52,11 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-12, TCA-13, TCA-28, TCA-30, TCA-21 (pure part)
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `parse_ipv4_cidr` accepts `203.0.113.0/24` and `/32`; rejects IPv6 (`2001:db8::/32`), malformed (TCA-12), and host-bits `10.0.0.5/24` with the canonical form `10.0.0.0/24` in the message (TCA-13)
-- [ ] `reject_reserved` rejects `0.0.0.0/0` and `0.0.0.0/8`; permits normal public/private ranges (TCA-28)
-- [ ] `is_subnet` truth table: `203.0.113.10/32 ⊆ /24` true; `/23 ⊄ /24` false (TCA-21/30)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` (quick)
-- [ ] Test count: ≥6 tests pass (no silent deletions)
+- [x] `parse_ipv4_cidr` accepts `203.0.113.0/24` and `/32`; rejects IPv6 (`2001:db8::/32`), malformed (TCA-12), and host-bits `10.0.0.5/24` with the canonical form `10.0.0.0/24` in the message (TCA-13)
+- [x] `reject_reserved` rejects `0.0.0.0/0` and `0.0.0.0/8`; permits normal public/private ranges (TCA-28)
+- [x] `is_subnet` truth table: `203.0.113.10/32 ⊆ /24` true; `/23 ⊄ /24` false (TCA-21/30)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` (quick)
+- [x] Test count: ≥6 tests pass (no silent deletions)
 **Tests**: unit
 **Gate**: quick
 **Commit**: `feat(cidr): pure IPv4 CIDR validation & containment helpers`
