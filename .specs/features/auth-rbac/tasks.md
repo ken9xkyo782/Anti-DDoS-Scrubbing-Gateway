@@ -124,11 +124,11 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-01, AUTH-03, AUTH-04, AUTH-19, AUTH-20, AUTH-30, AUTH-33
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `create`→`get` round-trips; `get` on unknown/expired sid → None (AUTH-04)
-- [ ] `revoke` kills one session; `revoke_all` kills all + clears reverse index (AUTH-19/20)
-- [ ] `list_for_user` returns active sessions (AUTH-33); idle TTL slides on `get`, absolute expiry still enforced
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥5 tests pass (no silent deletions)
+- [x] `create`→`get` round-trips; `get` on unknown/expired sid → None (AUTH-04)
+- [x] `revoke` kills one session; `revoke_all` kills all + clears reverse index (AUTH-19/20)
+- [x] `list_for_user` returns active sessions (AUTH-33); idle TTL slides on `get`, absolute expiry still enforced
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥5 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): Redis server-side session store with mass revocation`

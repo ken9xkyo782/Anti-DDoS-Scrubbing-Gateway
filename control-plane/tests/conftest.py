@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator, Iterator
 import pytest
 from alembic.command import upgrade
 from alembic.config import Config
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -38,3 +39,16 @@ async def db_session(migrated_db: None) -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             await session.close()
             await dispose_engine()
+
+
+@pytest.fixture
+async def redis_client() -> AsyncGenerator[Redis, None]:
+    from app.core.config import get_settings
+
+    client = Redis.from_url(get_settings().redis_url, decode_responses=True)
+    await client.flushdb()
+    try:
+        yield client
+    finally:
+        await client.flushdb()
+        await client.aclose()
