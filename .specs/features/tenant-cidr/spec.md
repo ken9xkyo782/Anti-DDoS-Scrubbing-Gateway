@@ -2,7 +2,7 @@
 
 **Milestone:** M1 — Control-plane foundation & tenant model
 **Category ID:** TCA
-**Status:** Design complete (`design.md`); awaiting confirmation → Tasks
+**Status:** Spec + Design + Tasks complete; awaiting approval → Execute
 **Depends on:** Auth & RBAC (`.specs/features/auth-rbac/`) — consumes `require_admin`, the tenant-ownership guard, and the audit writer; **resolves** its deferred `AUTH-36`.
 **Discuss context:** `.specs/features/tenant-cidr/context.md` (D-TCA-1..3)
 
@@ -194,7 +194,7 @@ Explicitly excluded to prevent scope creep.
 
 **ID format:** `TCA-[NUMBER]`
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
-**Coverage:** 32 requirements total, 0 mapped to tasks yet (Design pending) ⚠️
+**Coverage:** 32 requirements total, **32 mapped to tasks** (`tasks.md`, T1–T7), 0 unmapped ✅
 
 **Cross-feature:** resolves auth-rbac `AUTH-36` (delete-tenant rule) and provides the data + primitive behind `AUTH-14` (CIDR-scope enforcement).
 

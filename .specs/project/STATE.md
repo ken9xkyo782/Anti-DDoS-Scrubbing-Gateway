@@ -1,7 +1,7 @@
 # State
 
 **Last Updated:** 2026-07-07
-**Current Work:** M1 → **Tenant & CIDR allocation** — spec + design complete (`.specs/features/tenant-cidr/`, TCA-01..32; discuss `context.md`; `design.md` = layered FastAPI + DB-enforced GiST exclusion), awaiting confirmation → Tasks. Auth & RBAC spec+design+tasks complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
+**Current Work:** M1 → **Tenant & CIDR allocation** — spec + design + tasks complete (`.specs/features/tenant-cidr/`, TCA-01..32 → T1–T7; all 32 reqs mapped; only T1 `[P]`). Requires auth-rbac executed first (reuses skeleton/guards/audit). Awaiting approval → Execute. Auth & RBAC also complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
 
 ---
 
