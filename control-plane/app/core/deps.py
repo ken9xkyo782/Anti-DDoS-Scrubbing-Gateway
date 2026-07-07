@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from ipaddress import IPv4Network
 from typing import Annotated, Any, NoReturn
 
 from fastapi import Depends, HTTPException, Request, status
@@ -14,6 +15,7 @@ from app.core.config import get_settings
 from app.core.sessions import RedisSessionStore
 from app.db.models import Role, TenantStatus, User, UserStatus
 from app.db.session import get_db
+from app.services.allocations import cidr_in_tenant_allocation
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,15 @@ def authorize_tenant_resource(
     if principal.tenant_id is None or resource_tenant_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if principal.tenant_id != resource_tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+async def require_within_allocation(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    target: IPv4Network,
+) -> None:
+    if not await cidr_in_tenant_allocation(db, tenant_id, target):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 

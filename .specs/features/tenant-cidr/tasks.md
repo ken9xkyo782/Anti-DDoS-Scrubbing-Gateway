@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute in progress (T1-T3 complete)
+**Status**: Execute in progress (T1-T4 complete)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -111,10 +111,10 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-20, TCA-22 (guard form; wires AUTH-14 for later features)
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] Target ⊆ tenant's active allocation → guard passes; target outside → raises 403 (TCA-20)
-- [ ] Unknown tenant / partial coverage → fail-closed 403 (TCA-22)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥3 tests pass (no silent deletions)
+- [x] Target ⊆ tenant's active allocation → guard passes; target outside → raises 403 (TCA-20)
+- [x] Unknown tenant / partial coverage → fail-closed 403 (TCA-22)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥3 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(cidr): fail-closed allocation-scope guard (AUTH-14 primitive)`
