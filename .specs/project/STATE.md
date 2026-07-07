@@ -1,11 +1,19 @@
 # State
 
 **Last Updated:** 2026-07-07
-**Current Work:** M1 → **Tenant & CIDR allocation** — spec + design + tasks complete (`.specs/features/tenant-cidr/`, TCA-01..32 → T1–T7; all 32 reqs mapped; only T1 `[P]`). Requires auth-rbac executed first (reuses skeleton/guards/audit). Awaiting approval → Execute. Auth & RBAC also complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
+**Current Work:** M1 → **Service, rule & list management (API)** — spec + context + **design** complete (`.specs/features/service-rule-list/`, SRL-01..44; D-SRL-1..4; A-SRL-1/3 confirmed admin-only + version-bump-owned-here). Design adds 5 tables + `protected_service_dest_no_overlap` GiST exclusion + `UNIQUE(service_id,priority)` + app row-lock ≤16 + `core/rulematch.py`; wires TCA-16 by modifying `allocations.revoke` (lazy import `services_in_cidr`). Diagrams rendered (component + service-create sequence). Awaiting approval → Tasks. Pure control-plane CRUD; requires auth-rbac + tenant-cidr executed first.
+**Prior M1 work:** **Tenant & CIDR allocation** — spec + design + tasks complete (`.specs/features/tenant-cidr/`, TCA-01..32 → T1–T7). Awaiting approval → Execute. **Auth & RBAC** complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
 
 ---
 
 ## Recent Decisions (Last 60 days)
+
+### AD-011: Service/rule/list management policy — 4 gray areas (2026-07-07)
+
+**Decision:** (a) whitelist/blacklist **source** CIDRs are **arbitrary IPv4** (external allowed) — only a service's **destination** `cidr_or_ip` is scoped to `AllocatedCIDR` (AUTH-14); lists are "scoped" = attached to `service_id` (AD-003); (b) **delete service = disable-first, then cascade** its own rules/whitelist/blacklist (dangerous + audited); delete of an `enabled` service → 409; (c) service destination `cidr_or_ip` **must not overlap** another active service — enforced **globally** via partial GiST exclusion (mirrors `AllocatedCIDR`, one dst IP → one service); (d) **manual** global blacklist CRUD ships in this feature (admin-only), **feed** auto-population deferred to M4 (`source` field discriminates `manual`/`feed`). Full context in `.specs/features/service-rule-list/context.md` (D-SRL-1..4).
+**Reason:** Whitelisting/blacklisting external sources is the whole point; children are composed by the service (cascade natural) while the CIDR↔service scoping relationship blocks (D-TCA-2); global service-destination no-overlap = deterministic `service_map` + unambiguous ownership; manual global-deny is plain list mgmt, the feed is its own M4 machinery.
+**Trade-off:** Delete needs the explicit disable→delete sequence (no one-call live cut); services can't nest destination ranges; plan `committed`/`ceiling` are admin-only in v1 (A-SRL-1, flagged).
+**Impact:** M1 Service/rule/list feature (SRL-01..44). Wires auth-rbac `AUTH-14`; realizes tenant-cidr `TCA-16` (revoke-in-use) via the dependency-count hook it stubbed. New `protected_service_active_dest_no_overlap` GiST exclusion + `(service_id,priority)` unique + ≤16-rule cap. Flagged: A-SRL-1 plan authority, A-SRL-3 apply-status handoff (stops at `pending`).
 
 ### AD-009: Tenant & CIDR allocation policy — 3 gray areas (2026-07-07)
 
