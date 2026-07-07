@@ -3,7 +3,7 @@
 **Design**: `.specs/features/tenant-cidr/design.md`
 **Spec**: `.specs/features/tenant-cidr/spec.md` (TCA-01..32)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute in progress (T1-T2 complete)
+**Status**: Execute in progress (T1-T3 complete)
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12) executed first**. This feature reuses its `control-plane/` skeleton, `Base`/`Tenant`/`User`/`AuditEvent` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`), `app/services/audit.py`, and the DB/Redis lifespan. Its Alembic revision's `down_revision` = auth-rbac's head.
 
@@ -91,12 +91,12 @@ T2 ─────┼───────┴─► T7
 **Requirement**: TCA-10, TCA-11, TCA-14, TCA-15, TCA-16, TCA-17, TCA-18, TCA-19, TCA-20, TCA-21, TCA-22, TCA-25, TCA-26, TCA-29, TCA-30
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `allocate` to active tenant persists + audits (TCA-10/25); overlap → 409 with conflicting range (TCA-11); suspended/missing tenant → refused (TCA-14)
-- [ ] `revoke` of empty range → `status='revoked'` + audit; forcing the dependency hook >0 → 409 with blockers (TCA-16); re-revoke idempotent (TCA-29); dangerous-action audited (TCA-26)
-- [ ] `overlap_check` reports conflicts without writing (TCA-19); `list_for_tenant` returns usage summary (TCA-18)
-- [ ] `cidr_in_tenant_allocation` truth table: contained `/32` → true; superset/partial → false; revoked-range → false; unknown tenant → false (TCA-20/21/22)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥9 tests pass (no silent deletions)
+- [x] `allocate` to active tenant persists + audits (TCA-10/25); overlap → 409 with conflicting range (TCA-11); suspended/missing tenant → refused (TCA-14)
+- [x] `revoke` of empty range → `status='revoked'` + audit; forcing the dependency hook >0 → 409 with blockers (TCA-16); re-revoke idempotent (TCA-29); dangerous-action audited (TCA-26)
+- [x] `overlap_check` reports conflicts without writing (TCA-19); `list_for_tenant` returns usage summary (TCA-18)
+- [x] `cidr_in_tenant_allocation` truth table: contained `/32` → true; superset/partial → false; revoked-range → false; unknown tenant → false (TCA-20/21/22)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥9 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(cidr): allocation service, soft-revoke & tenant CIDR-scope primitive`
