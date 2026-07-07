@@ -1,7 +1,7 @@
 # State
 
 **Last Updated:** 2026-07-07
-**Current Work:** M1 → Auth & RBAC — spec + design complete (`.specs/features/auth-rbac/`, AUTH-01..39; Redis sessions + reusable RBAC guard & audit writer), awaiting approval → Tasks
+**Current Work:** M1 → Auth & RBAC — spec + design + tasks complete (`.specs/features/auth-rbac/`, 12 tasks T1–T12, AUTH-01..39), awaiting approval → Execute
 
 ---
 
@@ -13,6 +13,13 @@
 **Reason:** FastAPI shares Python with the sync worker; Postgres has native inet/cidr for CIDR allocation/overlap; React suits ≤2s realtime dashboards.
 **Trade-off:** Two languages (C + Python) across the stack; React adds a build/SPA layer vs server-rendered.
 **Impact:** M1 API and M5 dashboards target these; Postgres constraints back `AllocatedCIDR` non-overlap (7.2).
+
+### AD-008: Control-plane testing/runtime conventions (2026-07-07)
+
+**Decision:** Control-plane is **async** (asyncpg + SQLAlchemy 2.0 `AsyncSession`, `redis.asyncio`, httpx `AsyncClient`). Tests use **pytest** with `unit`/`integration` markers; integration tests run against a **docker-compose test stack** (`compose.test.yml` PG+Redis). Quick gate = **ruff + mypy + unit**; full gate adds integration. Conventions in `.specs/codebase/TESTING.md`.
+**Reason:** Async fits later realtime dashboards/worker; real PG needed for citext/JSONB/CHECK fidelity; ruff+mypy modern default.
+**Trade-off:** Integration tests not parallel-safe (shared compose stack) → mostly sequential execution.
+**Impact:** All control-plane code (M1–M6) follows async idioms; only unit-tested tasks can be `[P]`.
 
 ### AD-002: Service `disabled` = drop-all (D1 / BL-03) (2026-07-07)
 
