@@ -4,7 +4,7 @@
 **Spec**: `.specs/features/service-rule-list/spec.md` (SRL-01..44)
 **Context**: `.specs/features/service-rule-list/context.md` (D-SRL-1..4; A-SRL-1/3 confirmed)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute — T1–T9 complete, T10 next
+**Status**: Execute — T1–T10 complete, T11 next
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12)** and **Tenant & CIDR allocation (T1–T7)** executed first. This feature reuses their `control-plane/` skeleton, `Base`/`User`/`Tenant`/`AuditEvent`/`AllocatedCIDR` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`, `require_within_allocation`), `app/core/cidr.py`, `app/services/allocations.py::cidr_in_tenant_allocation`, and `app/services/audit.py`. Its Alembic revision's `down_revision` = **tenant-cidr's head**.
 
@@ -241,10 +241,10 @@ T2 ─► T3 ─┬─► T4 ──────────────► T9 �
 **Requirement**: SRL-22, SRL-23, SRL-25, SRL-26, SRL-27, SRL-31, SRL-41
 **Tools**: Bash, Write/Edit · Skill: `coding-guidelines`
 **Done when**:
-- [ ] Add whitelist arbitrary IPv4 → 201 + audit; IPv6 → 422 (SRL-22/23); add service blacklist → 201; IPv6 → 422 (SRL-26/27); same source in both lists coexists (SRL-41)
-- [ ] list/delete scoped to owning service; another tenant's/service's list → 404 zero-leak (SRL-25/31)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥7 tests pass (no silent deletions)
+- [x] Add whitelist arbitrary IPv4 → 201 + audit; IPv6 → 422 (SRL-22/23); add service blacklist → 201; IPv6 → 422 (SRL-26/27); same source in both lists coexists (SRL-41)
+- [x] list/delete scoped to owning service; another tenant's/service's list → 404 zero-leak (SRL-25/31)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥7 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(list): service whitelist & blacklist API`
