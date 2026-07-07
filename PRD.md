@@ -1,16 +1,54 @@
-# PRD - Cổng Lọc và Giảm thiểu Tấn công DDoS
+# PRD — Cổng Lọc và Giảm thiểu Tấn công DDoS (Anti-DDoS Scrubbing Gateway)
+
+## Mục lục
+
+1. Thông tin tài liệu
+2. Tóm tắt sản phẩm
+3. Mục tiêu và chỉ số thành công
+4. Phạm vi
+5. Personas và RBAC
+6. Yêu cầu chức năng
+7. Mô hình dữ liệu tối thiểu
+8. Data-plane XDP/eBPF
+9. Control-plane và API surface
+10. Observability
+11. Yêu cầu phi chức năng
+12. Test plan và acceptance criteria
+13. Rủi ro kỹ thuật và biện pháp giảm thiểu
+14. Giả định MVP
+15. Rà soát nghiệp vụ & nhật ký quyết định (BA Review & Decision Log)
+16. Phụ lục — Thuật ngữ
 
 ## 1. Thông tin tài liệu
 
 | Trường | Giá trị |
 |---|---|
 | Sản phẩm | Anti-DDoS Scrubbing Gateway |
-| Phiên bản PRD | MVP v1 |
+| Loại tài liệu | Product Requirements Document (PRD) |
+| Phiên bản | v1.0 (MVP v1) |
+| Trạng thái | **Final — Sẵn sàng bàn giao cho phát triển Pilot** |
 | Ngôn ngữ | Tiếng Việt |
 | Ngày tạo | 2026-07-07 |
-| Trạng thái | Draft kỹ thuật |
-| Nguồn đầu vào | các quyết định phạm vi MVP |
+| Cập nhật gần nhất | 2026-07-07 |
 | Mô hình thương mại | Thương mại nội bộ, có thu phí (chargeback giữa các đơn vị nội bộ) |
+| Phạm vi phát hành | Nội bộ |
+| Chủ sở hữu tài liệu | Product Owner _(điền tên)_ |
+| Rà soát nghiệp vụ | Business Analyst (xem Mục 15) |
+| Người phê duyệt | _(điền tên / ngày phê duyệt)_ |
+
+### 1.1. Lịch sử phiên bản
+
+| Phiên bản | Ngày | Nội dung chính |
+|---|---|---|
+| 0.1 | 2026-07-07 | Draft kỹ thuật đầu tiên: phạm vi MVP, data-plane XDP, control-plane, API surface. |
+| 1.0 | 2026-07-07 | Hoàn tất rà soát BA (logic nghiệp vụ, vận hành, thương mại hóa); chốt 6 quyết định sản phẩm (Mục 15.5); bổ sung `ServicePlan`/chargeback (7.1/8.2/8.3/10.3), fairness/reservation data-plane (8.4), SLA/OLA (11.4), vận hành bypass + alerting (11.5); đóng 10 finding. Chuẩn hóa thành bản final bàn giao. |
+
+### 1.2. Tình trạng sẵn sàng bàn giao
+
+- **Đã chốt & thiết kế:** toàn bộ hạng mục logic nghiệp vụ, kỹ thuật data-plane và vận hành lõi — 10 finding đã đóng (Mục 15).
+- **Còn mở trước Pilot (phi kỹ thuật):** CM-02 (cảnh báo IPv6 blackhole trong onboarding), CM-06 (định vị capacity), CM-07 (rà license threat feed) — thuộc Product/Legal, **không chặn phát triển**.
+- **Điều kiện GA:** HA/failover (CM-01, Blocker) và các hạng mục GA khác — xem Mục 15.4.
+- Tài liệu này là nguồn tham chiếu chuẩn (source of truth) cho đội phát triển Pilot.
 
 ## 2. Tóm tắt sản phẩm
 
@@ -264,27 +302,32 @@ Yêu cầu reliability:
 ```mermaid
 flowchart TD
     packet(["Packet vào XDP trên interface IN"]) --> parseL2{"Parse L2 / VLAN / QinQ<br/>lấy EtherType thật"}
-    parseL2 -- "IPv6" --> ipv6Drop["Drop IPv6<br/>reason=ipv6_unsupported"]
-    parseL2 -- "ARP" --> arpPass["Pass/redirect ARP theo chính sách bridge tối thiểu<br/>không áp dụng L4 filtering"]
-    parseL2 -- "Non-IP/VLAN lỗi" --> etherDrop["Drop EtherType không hỗ trợ<br/>reason=unsupported_ethertype"]
+    parseL2 -- "IPv6" --> ipv6Drop["Drop<br/>reason=ipv6_unsupported"]
+    parseL2 -- "ARP" --> arpPass["Pass/redirect ARP theo chính sách bridge tối thiểu"]
+    parseL2 -- "Non-IP/VLAN lỗi" --> etherDrop["Drop<br/>reason=unsupported_ethertype"]
     parseL2 -- "IPv4" --> parseIp{"Parse IPv4 + L4<br/>non-fragment?"}
 
-    parseIp -- "Malformed" --> malformedDrop["Drop malformed<br/>reason=malformed_ipv4"]
-    parseIp -- "Fragment" --> fragmentDrop["Drop fragment<br/>reason=fragment_unsupported"]
-    parseIp -- "OK" --> loadSlot["Snapshot active_slot/config<br/>vào pkt_meta"]
+    parseIp -- "Malformed" --> malformedDrop["Drop<br/>reason=malformed_ipv4"]
+    parseIp -- "Fragment" --> fragmentDrop["Drop<br/>reason=fragment_unsupported"]
+    parseIp -- "OK" --> loadSlot["Snapshot active_slot/config<br/>vào pkt_meta (pin slot)"]
 
-    loadSlot --> service{"Match ProtectedService enabled?"}
-    service -- "Không" --> serviceMiss["Drop<br/>reason=service_miss"]
-    service -- "Có" --> whitelistEarly{"Source thuộc whitelist/VIP của service/tenant?"}
+    loadSlot --> service{"Match ProtectedService?"}
+    service -- "Chưa khai báo" --> serviceMiss["Drop<br/>reason=service_miss"]
+    service -- "Disabled" --> serviceDisabled["Drop<br/>reason=service_disabled"]
+    service -- "Enabled" --> ingressCap{"Vượt trần ingress-cost<br/>per-service (k × ceiling)?"}
+
+    ingressCap -- "Có" --> ingressDrop["Early drop<br/>reason=ingress_cap_drop"]
+    ingressCap -- "Không" --> whitelistEarly{"Source thuộc whitelist/VIP<br/>của service (scope service_id)?"}
+
     whitelistEarly -- "Có" --> vipCeiling{"Vượt VIP ceiling aggregate?"}
     vipCeiling -- "Có" --> vipDrop["Drop<br/>reason=vip_ceiling_drop"]
     vipCeiling -- "Không" --> redirectOut["XDP_REDIRECT IN -> OUT<br/>static port pair, giữ nguyên L3"]
 
-    whitelistEarly -- "Không" --> hardUdp{"UDP source port thuộc hardcoded amplification ports?"}
+    whitelistEarly -- "Không" --> hardUdp{"UDP source port thuộc<br/>hardcoded amplification ports?"}
     hardUdp -- "Có" --> udpHardDrop["Drop<br/>reason=udp_amplification_drop"]
     hardUdp -- "Không" --> bogonCheck{"Source thuộc bogon/private/reserved?"}
     bogonCheck -- "Có" --> bogonDrop["Drop<br/>reason=bogon_drop"]
-    bogonCheck -- "Không" --> dynamicUdp{"UDP source port thuộc dynamic blocked-port bitmap?"}
+    bogonCheck -- "Không" --> dynamicUdp{"UDP source port thuộc<br/>dynamic blocked-port bitmap?"}
     dynamicUdp -- "Có" --> udpDrop["Drop<br/>reason=udp_amplification_drop"]
     dynamicUdp -- "Không" --> globalBloom{"Global blacklist bloom hit?"}
 
@@ -294,15 +337,22 @@ flowchart TD
     globalLpm -- "Không" --> serviceBloom
 
     serviceBloom -- "Có" --> serviceLpm{"Service blacklist LPM confirm?"}
-    serviceBloom -- "Không" --> ruleLoop{"Match allow-rule<br/>bounded loop by rule_count <= 16?"}
+    serviceBloom -- "Không" --> ruleLoop{"Match allow-rule<br/>first-match by priority, rule_count <= 16"}
     serviceLpm -- "Có" --> blacklistDrop
     serviceLpm -- "Không" --> ruleLoop
 
     ruleLoop -- "Không match" --> ruleDrop["Drop<br/>reason=not_allowed"]
-    ruleLoop -- "Match nhưng vượt limit" --> rateDrop["Drop<br/>reason=rate_limit_drop"]
-    ruleLoop -- "Match và còn quota" --> redirectOut
+    ruleLoop -- "Match, hết quota rule (terminal)" --> rateDrop["Drop<br/>reason=rate_limit_drop"]
+    ruleLoop -- "Match, còn quota" --> committedBk{"Committed bucket còn token?"}
 
-    ipv6Drop & etherDrop & malformedDrop & fragmentDrop & vipDrop & udpHardDrop & bogonDrop & serviceMiss & udpDrop & blacklistDrop & ruleDrop & rateDrop --> counters["Cập nhật per-CPU counter"]
+    committedBk -- "Có" --> redirectOut
+    committedBk -- "Không" --> burstBk{"Service burst bucket còn token?"}
+    burstBk -- "Không" --> ceilDrop["Drop<br/>reason=service_ceiling_drop"]
+    burstBk -- "Có" --> nodeBk{"Node headroom còn token?"}
+    nodeBk -- "Không" --> congDrop["Drop<br/>reason=congestion_drop"]
+    nodeBk -- "Có" --> redirectOut
+
+    ipv6Drop & etherDrop & malformedDrop & fragmentDrop & serviceMiss & serviceDisabled & ingressDrop & vipDrop & udpHardDrop & bogonDrop & udpDrop & blacklistDrop & ruleDrop & rateDrop & ceilDrop & congDrop --> counters["Cập nhật per-CPU counter"]
     counters --> telemetry["Ringbuf/perf event sampling<br/>rate-limited"]
 ```
 
@@ -313,7 +363,7 @@ Ghi chú kỹ thuật:
 - Vì MVP là L2 transparent bridge, các requirement L3 như `TTL decrement`, `incremental checksum`, `neighbor unresolved`, `ARP next-hop refresh` không thuộc data-plane forwarding chính của v1.
 - Nhánh service match `Không` phân biệt 2 trường hợp: IP **chưa khai báo service** → `service_miss`; service tồn tại nhưng **`disabled`** → `service_disabled` (disable là ngắt chủ đích, không pass-through).
 - Vòng lặp allow-rule là **first-match theo `priority` tăng dần**; rule khớp đầu tiên là terminal (kể cả khi hết quota → `rate_limit_drop`), không fall-through.
-- Trên nhánh non-VIP, sau khi allow-rule match và còn quota per-rule, packet phải qua **service aggregate ceiling** (trần `ceiling_clean_gbps` qua `service_agg_rate_state`) trước `redirectOut`; vượt trần → drop reason=`service_ceiling_drop`. Đây là điểm cưỡng chế băng thông sạch phục vụ chargeback theo Gbps sạch và chống oversubscription node. Nhánh whitelist/VIP tiếp tục dùng VIP ceiling riêng, không đi qua service aggregate ceiling.
+- Trên nhánh non-VIP, sau khi allow-rule match và còn quota per-rule, packet đi qua **thang admit committed/burst** (8.4): committed bucket còn token → admit; nếu không, burst bucket + node headroom → admit, ngược lại drop `service_ceiling_drop` (burst cạn) hoặc `congestion_drop` (node bão hòa). Đây là điểm cưỡng chế băng thông sạch phục vụ chargeback theo Gbps sạch và fairness per-service. Nhánh whitelist/VIP dùng VIP ceiling riêng, không đi qua thang admit này.
 
 ### 8.3. BPF map contract
 
@@ -371,7 +421,7 @@ Vì bucket tách theo service, service A bị flood chỉ tiêu committed+burst 
 
 #### 8.4.5. Vị trí trong pipeline (bổ sung cho 8.2)
 
-Ngay sau `service match`: chèn **Cơ chế 3** (ingress cost cap) trước whitelist/VIP. Trên nhánh non-VIP, thay thế điểm "service aggregate ceiling" cũ trước `redirectOut` bằng **thang admit** (Cơ chế 1+2):
+Ngay sau `service match`: áp **Cơ chế 3** (ingress cost cap) trước whitelist/VIP. Trên nhánh non-VIP, trước `redirectOut` là **thang admit** (Cơ chế 1+2), đã thể hiện trong sơ đồ 8.2; chi tiết:
 
 ```mermaid
 flowchart TD
@@ -632,12 +682,15 @@ Mục 10 chỉ có dashboard passive; cần push alert chủ động.
 - Monitoring chỉ ở service-level + reason; không lưu packet-level forensic đầy đủ.
 - Mitigation là manual config; hệ thống không tự tạo rule hoặc auto-mitigate trong v1.
 
-## 15. Rà soát nghiệp vụ (BA Review) — Phát hiện và khuyến nghị
+## 15. Rà soát nghiệp vụ & nhật ký quyết định (BA Review & Decision Log)
+
+Mục này là phụ lục truy vết (traceability) cho bản final: ghi lại phát hiện rà soát, quyết định đã chốt và trạng thái xử lý, giúp đội phát triển hiểu **vì sao** một yêu cầu được thiết kế như vậy. Chi tiết đã được đưa vào thân tài liệu ở các mục tham chiếu tương ứng.
 
 > Phạm vi rà soát: Tính toàn vẹn logic nghiệp vụ (Business Logic Integrity), Trải nghiệm vận hành (Operational UX), Rủi ro thương mại hóa (Commercialization Risks).
 > Ngày rà soát: 2026-07-07. Vai trò: Business Analyst.
-> Quy ước mức độ: `Blocker` (chặn cổng release tương ứng) · `Cao` · `Trung bình` · `Thấp`.
-> Cổng release: `Pilot` = phải xử lý trước khi chạy thử có khách · `GA` = phải xử lý trước khi bán production · `Backlog` = ghi nhận, xử lý sau.
+> Quy ước cột **Mức độ**: `Blocker` / `Cao` / `Trung bình` / `Thấp`; giá trị **✅ Đã xử lý** nghĩa là finding đã được chốt/thiết kế trong thân tài liệu và đóng.
+> Cổng release: `Pilot` = trước khi chạy thử có khách · `GA` = trước khi vận hành production diện rộng · `Backlog` = xử lý sau.
+> **Tổng quan:** 10 finding đã đóng (toàn bộ hạng mục kỹ thuật lõi & logic nghiệp vụ); còn lại là mục Pilot phi kỹ thuật và mục GA. Nhật ký quyết định sản phẩm ở 15.5.
 
 ### 15.1. Tính toàn vẹn logic nghiệp vụ
 
@@ -688,14 +741,16 @@ Mục 10 chỉ có dashboard passive; cần push alert chủ động.
 - **Trước GA (must-fix):** CM-01 (Blocker; Pilot đã có biện pháp bù), BL-04, BL-07, OP-02, OP-04, OP-05, OP-06, OP-07, CM-08.
 - **Backlog / Thấp:** BL-08, OP-08, CM-05, CM-09, CM-10.
 
-### 15.5. Câu hỏi/quyết định cần chốt với chủ sản phẩm
+### 15.5. Nhật ký quyết định sản phẩm (đã chốt 2026-07-07)
 
-1. ~~`disabled` = drop-all hay pass-through?~~ **Đã chốt (2026-07-07): drop-all** + reason `service_disabled` + xác nhận/audit (BL-03). Ghi 6.3/8.2/10.2/12.2.
-2. ~~Whitelist bypass threat feed global tới đâu?~~ **Đã chốt (2026-07-07): bypass có scope**, không sửa global map, cảnh báo+audit khi whitelist IP thuộc feed (BL-01, đóng luôn BL-02). Ghi 6.5/6.7/8.3/12.3.
-3. ~~Match allow-rule first/best-match, fall-through?~~ **Đã chốt (2026-07-07): first-match theo priority, terminal, không fall-through** (BL-05). Ghi 6.4/8.2/12.2.
-4. ~~v1 là bản thương mại có khách trả phí hay chỉ PoC nội bộ?~~ **Đã chốt (2026-07-07): thương mại nội bộ, có thu phí (chargeback nội bộ).** Xem điều chỉnh ở 15.6.
-5. ~~Đơn vị chargeback nội bộ~~ **Đã chốt (2026-07-07): theo Gbps sạch**, chỉ số p95 clean bps. Thiết kế: `ServicePlan`/`BillingUsage` (7.1), đo lường (10.3), cưỡng chế trần (8.2/8.3 — `service_agg_rate_state`, reason `service_ceiling_drop`).
-6. ~~Mức SLA/OLA per-tenant~~ **Đã chốt (2026-07-07): cao; phương án (ii).** Ở Pilot loại trừ Availability khỏi cam kết SLA (best-effort + maintenance window/bypass trong OLA); cam kết cao ở latency/accuracy/propagation/fairness. HA là điều kiện GA cho Availability. Fairness/reservation per-service ở data-plane là bắt buộc. Thiết kế: Mục 11.4.
+| # | Quyết định | Lựa chọn đã chốt | Finding | Tham chiếu |
+|---|---|---|---|---|
+| D1 | Ngữ nghĩa service `disabled` | Drop-all + reason `service_disabled` + xác nhận UI/audit (không pass-through) | BL-03 | 6.3, 8.2, 10.2, 12.2 |
+| D2 | Phạm vi bypass của whitelist | Bypass có scope theo `service_id`; không sửa global map; cảnh báo+audit khi trùng feed | BL-01, BL-02 | 6.5, 6.7, 8.3, 12.3 |
+| D3 | Ngữ nghĩa match allow-rule | First-match theo `priority`, verdict terminal, không fall-through | BL-05 | 6.4, 8.2, 12.2 |
+| D4 | Mô hình thương mại | Thương mại nội bộ, có thu phí (chargeback) | — | 1, 15.6 |
+| D5 | Đơn vị chargeback | Theo Gbps sạch, chỉ số p95 clean bps | CM-03, BL-09 | 7.1, 10.3, 8.2/8.3 |
+| D6 | Mức SLA/OLA per-tenant | Cao; phương án (ii): Pilot loại Availability khỏi SLA, HA là điều kiện GA | CM-01, CM-04 | 3.2, 11.4, 8.4, 14 |
 
 ### 15.6. Điều chỉnh theo mô hình "thương mại nội bộ, trả phí" (chốt 2026-07-07)
 
@@ -745,3 +800,27 @@ Sau khi chốt mô hình thương mại (nội bộ, thu phí), chargeback theo 
 2. **OP-02 (GA):** auto-response/one-click mitigate cho phản ứng nhanh khi có tấn công.
 
 *Ghi chú:* residual CPU-fairness của CM-04 (dưới flood PPS vượt năng lực node) là giới hạn vật lý single-node (8.4.6), thuộc bài toán capacity/HA (CM-01/CM-06), **không phải mục treo của v1**.
+
+## 16. Phụ lục — Thuật ngữ
+
+| Thuật ngữ | Giải thích |
+|---|---|
+| XDP | eXpress Data Path — hook xử lý gói sớm nhất trong kernel Linux, chạy tại driver NIC (native mode) cho hiệu năng cao. |
+| eBPF | Máy ảo an toàn trong kernel để chạy chương trình data-plane (bloom/LPM/token bucket/counter). |
+| Native / Generic XDP | Native = chạy ở driver NIC (hiệu năng cao, bắt buộc cho benchmark); Generic = fallback tầng kernel (chậm). |
+| L2 transparent bridge | Cầu nối trong suốt tầng 2, không sửa header L3 (không giảm TTL, không đổi checksum). |
+| Inbound-only | Chỉ xử lý chiều `IN → OUT` (upstream → backend); return path đi đường khác (asymmetric). |
+| LPM trie | Longest-Prefix-Match trie — cấu trúc tra cứu CIDR. |
+| Bloom filter | Bộ lọc xác suất để bỏ qua LPM khi chắc chắn không khớp; có tỉ lệ false-positive được đo. |
+| Token bucket | Cơ chế rate-limit; per-CPU để giảm contention (chấp nhận sai số theo CPU/RSS). |
+| Committed / Ceiling clean Gbps | Committed = băng thông sạch cam kết (đảm bảo cứng, cơ sở SLA & floor chargeback); Ceiling = trần cứng aggregate non-VIP. |
+| VIP ceiling | Trần aggregate PPS/BPS áp cho traffic whitelist/VIP để giảm rủi ro spoofing. |
+| Active slot / double-buffer | Hai bộ config map; swap atomic bằng một lần ghi `active_slot`. |
+| Whitelist/VIP | Nguồn tin cậy được bypass list/rule trong phạm vi service, vẫn chịu VIP ceiling. |
+| p95 | Bách phân vị thứ 95 — chuẩn ngành để tính phí băng thông. |
+| Pilot / GA | Pilot = chạy thử có khách nội bộ trả phí; GA = vận hành production diện rộng. |
+| OLA | Operational-Level Agreement — thỏa thuận vận hành nội bộ (giới hạn Availability, maintenance window, bypass). |
+| SPOF | Single Point of Failure — điểm hỏng đơn khiến toàn hệ thống dừng. |
+| RSS | Receive-Side Scaling — phân phối gói vào nhiều queue/CPU của NIC. |
+
+*— Hết tài liệu —*
