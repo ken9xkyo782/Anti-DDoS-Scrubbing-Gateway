@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant Admin
+    participant R as Allocations Router
+    participant V as core/cidr.parse
+    participant S as Allocation Service
+    participant DB as PostgreSQL
+    Admin->>R: POST /allocations {tenant_id, cidr}
+    R->>V: parse_ipv4_cidr(cidr) strict
+    V-->>R: 422 if IPv6 / host-bits / reserved (A1,A2)
+    R->>S: allocate(tenant_id, cidr, actor)
+    S->>DB: SELECT tenant status=active?
+    DB-->>S: ok / 409 if suspended or missing
+    S->>DB: INSERT allocated_cidr(status=active) + audit (one txn)
+    alt overlaps an existing active row
+        DB-->>S: ExclusionViolation
+        S-->>R: 409 conflict (name conflicting range)
+    else no overlap
+        DB-->>S: committed
+        S-->>R: 201 Created (+ audit row)
+    end

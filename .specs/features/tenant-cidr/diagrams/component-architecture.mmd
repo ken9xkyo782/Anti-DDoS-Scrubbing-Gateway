@@ -1,0 +1,32 @@
+flowchart TD
+    dashboard[React Dashboard]
+    subgraph api [FastAPI Control-Plane]
+        tenantsRouter[Tenants Router /tenants]
+        allocRouter[Allocations Router /allocations]
+        adminGuard{{require_admin}}
+        ownerGuard{{authorize_tenant_resource}}
+    end
+    subgraph svc [Service Layer]
+        tenantSvc[Tenant Service]
+        allocSvc[Allocation Service<br/>+ cidr_in_tenant_allocation]
+        auditSvc[reused: Audit Service]
+    end
+    subgraph core [Core helpers]
+        cidrHelper[core/cidr.py<br/>parse / validate / reject-reserved]
+    end
+    postgres[(PostgreSQL<br/>tenant - allocated_cidr - user - audit_event)]
+    dashboard -->|admin: HTTPS + cookie| tenantsRouter
+    dashboard -->|admin + tenant self-view| allocRouter
+    tenantsRouter -.->|Depends| adminGuard
+    allocRouter -.->|admin ops| adminGuard
+    allocRouter -.->|self-view| ownerGuard
+    tenantsRouter --> tenantSvc
+    allocRouter --> allocSvc
+    allocSvc --> cidrHelper
+    tenantsRouter -. validate .-> cidrHelper
+    tenantSvc --> auditSvc
+    allocSvc --> auditSvc
+    tenantSvc --> postgres
+    allocSvc -->|EXCLUDE gist and >>= containment| postgres
+    auditSvc --> postgres
+    laterFeatures[Service / Whitelist / Blacklist features] -.->|import| allocSvc
