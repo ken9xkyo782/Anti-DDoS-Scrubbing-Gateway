@@ -4,7 +4,7 @@
 **Spec**: `.specs/features/service-rule-list/spec.md` (SRL-01..44)
 **Context**: `.specs/features/service-rule-list/context.md` (D-SRL-1..4; A-SRL-1/3 confirmed)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Draft — awaiting approval → Execute
+**Status**: Execute — T1 complete, T2 next
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12)** and **Tenant & CIDR allocation (T1–T7)** executed first. This feature reuses their `control-plane/` skeleton, `Base`/`User`/`Tenant`/`AuditEvent`/`AllocatedCIDR` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`, `require_within_allocation`), `app/core/cidr.py`, `app/services/allocations.py::cidr_in_tenant_allocation`, and `app/services/audit.py`. Its Alembic revision's `down_revision` = **tenant-cidr's head**.
 
@@ -64,11 +64,11 @@ T2 ─► T3 ─┬─► T4 ──────────────► T9 �
 **Requirement**: SRL-18 (pure), SRL-19 (pure), SRL-37 (pure)
 **Tools**: Bash, Write/Edit · Skill: `coding-guidelines`
 **Done when**:
-- [ ] `validate_port_range` accepts `(80,80)`, `(1,65535)`, `(None,None)`; rejects `(80,79)`, `(-1,10)`, `(0,70000)` (SRL-19)
-- [ ] `rules_overlap` truth table: same-protocol touching/nested ranges → true; disjoint ports → false; `any` vs `tcp` → protocol-intersect true; `icmp` (ports None) equal → true, vs `udp` → false (SRL-18)
-- [ ] `find_overlaps` returns every overlapped rule for a candidate; empty list when disjoint (SRL-18/37)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` (quick)
-- [ ] Test count: ≥8 tests pass (no silent deletions)
+- [x] `validate_port_range` accepts `(80,80)`, `(1,65535)`, `(None,None)`; rejects `(80,79)`, `(-1,10)`, `(0,70000)` (SRL-19)
+- [x] `rules_overlap` truth table: same-protocol touching/nested ranges → true; disjoint ports → false; `any` vs `tcp` → protocol-intersect true; `icmp` (ports None) equal → true, vs `udp` → false (SRL-18)
+- [x] `find_overlaps` returns every overlapped rule for a candidate; empty list when disjoint (SRL-18/37)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` (quick)
+- [x] Test count: ≥8 tests pass (no silent deletions)
 **Tests**: unit
 **Gate**: quick
 **Commit**: `feat(rule): pure port-range validation & rule-overlap helpers`
