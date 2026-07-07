@@ -1,7 +1,7 @@
 # Auth & RBAC Design
 
 **Spec**: `.specs/features/auth-rbac/spec.md`
-**Status**: Draft (awaiting approval → Tasks)
+**Status**: Implemented (T1-T12 verified)
 **Scope note**: Greenfield — this is the **first backend feature**, so it also establishes the control-plane project skeleton and two reusable primitives (RBAC/ownership guard, audit writer) that every later M1+ feature consumes.
 
 ---

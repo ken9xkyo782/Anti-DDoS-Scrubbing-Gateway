@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/auth-rbac/design.md`
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Draft (awaiting approval → Execute)
+**Status**: Complete (T1-T12 verified)
 
 **Stack for all tasks:** async FastAPI (asyncpg + SQLAlchemy 2.0 `AsyncSession`, `redis.asyncio`), httpx `AsyncClient` tests, ruff + mypy. Integration tests need `compose.test.yml` up.
 
@@ -260,10 +260,10 @@ T8,T7 ──► T11 ─┼─► T12
 **Requirement**: AUTH-27, AUTH-28, AUTH-29 (+ end-to-end Success Criteria)
 **Tools**: Bash, Write/Edit
 **Done when**:
-- [ ] `python -m app.cli bootstrap-admin` creates first admin from env; rerun is idempotent (AUTH-27/28)
-- [ ] App boots with routers mounted; e2e: bootstrap → login → create tenant_user → that user logs in
-- [ ] Gate check passes: `... && pytest -q` (full)
-- [ ] Test count: ≥3 tests pass (no silent deletions)
+- [x] `python -m app.cli bootstrap-admin` creates first admin from env; rerun is idempotent (AUTH-27/28)
+- [x] App boots with routers mounted; e2e: bootstrap → login → create tenant_user → that user logs in
+- [x] Gate check passes: `... && pytest -q` (full)
+- [x] Test count: ≥3 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(auth): first-admin bootstrap CLI & control-plane assembly`

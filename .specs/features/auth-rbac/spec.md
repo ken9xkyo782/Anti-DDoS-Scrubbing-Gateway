@@ -2,7 +2,7 @@
 
 **Milestone:** M1 — Control-plane foundation & tenant model
 **Category ID:** AUTH
-**Status:** Draft (awaiting confirmation → Design)
+**Status:** Implemented (T1-T12 verified)
 
 ## Problem Statement
 
@@ -212,7 +212,7 @@ Explicitly excluded to prevent scope creep.
 
 **ID format:** `AUTH-[NUMBER]`
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
-**Coverage:** 39 requirements total, 0 mapped to tasks yet (Design pending) ⚠️
+**Coverage:** T1-T12 implemented the MVP auth/RBAC task set. AUTH-32, full AUTH-33 UI exposure, and AUTH-36 remain deferred as documented in `tasks.md`.
 
 ---
 
