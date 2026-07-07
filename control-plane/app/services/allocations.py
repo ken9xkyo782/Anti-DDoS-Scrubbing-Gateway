@@ -175,10 +175,13 @@ async def cidr_in_tenant_allocation(
 
 
 async def count_allocation_dependents(
-    _db: AsyncSession,
-    _allocation: AllocatedCIDR,
+    db: AsyncSession,
+    allocation: AllocatedCIDR,
 ) -> list[str]:
-    return []
+    from app.services.services import services_in_cidr
+
+    services = await services_in_cidr(db, IPv4Network(str(allocation.cidr)))
+    return [f"protected_service:{service.name}" for service in services]
 
 
 async def _find_conflict(db: AsyncSession, cidr: IPv4Network) -> AllocatedCIDR | None:
