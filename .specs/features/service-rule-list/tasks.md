@@ -4,7 +4,7 @@
 **Spec**: `.specs/features/service-rule-list/spec.md` (SRL-01..44)
 **Context**: `.specs/features/service-rule-list/context.md` (D-SRL-1..4; A-SRL-1/3 confirmed)
 **Testing**: `.specs/codebase/TESTING.md`
-**Status**: Execute — T1–T8 complete, T9 next
+**Status**: Execute — T1–T9 complete, T10 next
 
 **Cross-feature prerequisite:** requires **Auth & RBAC (T1–T12)** and **Tenant & CIDR allocation (T1–T7)** executed first. This feature reuses their `control-plane/` skeleton, `Base`/`User`/`Tenant`/`AuditEvent`/`AllocatedCIDR` models, `app/core/deps.py` guards (`require_admin`, `get_current_user`, `authorize_tenant_resource`, `scope_to_tenant`, `require_within_allocation`), `app/core/cidr.py`, `app/services/allocations.py::cidr_in_tenant_allocation`, and `app/services/audit.py`. Its Alembic revision's `down_revision` = **tenant-cidr's head**.
 
@@ -223,10 +223,10 @@ T2 ─► T3 ─┬─► T4 ──────────────► T9 �
 **Requirement**: SRL-15, SRL-16, SRL-17, SRL-18, SRL-19, SRL-20, SRL-21, SRL-31, SRL-37
 **Tools**: Bash, Write/Edit · Skill: `coding-guidelines`
 **Done when**:
-- [ ] Create rule → 201 + version bump; duplicate priority → 409; 17th → 409; invalid ports → 422; overlap → 201 + `warnings[]` (SRL-15/16/17/18/19/21)
-- [ ] `overlap-check` dry-run reports overlaps, writes nothing (SRL-37); list/edit/delete scoped; cross-tenant → 404 (SRL-20/31)
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
-- [ ] Test count: ≥8 tests pass (no silent deletions)
+- [x] Create rule → 201 + version bump; duplicate priority → 409; 17th → 409; invalid ports → 422; overlap → 201 + `warnings[]` (SRL-15/16/17/18/19/21)
+- [x] `overlap-check` dry-run reports overlaps, writes nothing (SRL-37); list/edit/delete scoped; cross-tenant → 404 (SRL-20/31)
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (full)
+- [x] Test count: ≥8 tests pass (no silent deletions)
 **Tests**: integration
 **Gate**: full
 **Commit**: `feat(rule): allow-rule API with overlap-check dry-run`
