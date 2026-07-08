@@ -60,6 +60,28 @@ class ApplyStatus(StrEnum):
     failed = "failed"
 
 
+class JobStatus(StrEnum):
+    queued = "queued"
+    applying = "applying"
+    succeeded = "succeeded"
+    failed = "failed"
+    superseded = "superseded"
+
+
+class JobType(StrEnum):
+    service_update = "SERVICE_UPDATE"
+
+
+class ChangeTrigger(StrEnum):
+    service = "service"
+    plan = "plan"
+    rule = "rule"
+    whitelist = "whitelist"
+    blacklist = "blacklist"
+    enable = "enable"
+    disable = "disable"
+
+
 class ServiceMode(StrEnum):
     allow_rule_only = "allow-rule-only"
 
@@ -113,6 +135,24 @@ cidr_status_enum = SAEnum(
 apply_status_enum = SAEnum(
     ApplyStatus,
     name="apply_status",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+job_status_enum = SAEnum(
+    JobStatus,
+    name="job_status",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+job_type_enum = SAEnum(
+    JobType,
+    name="job_type",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+change_trigger_enum = SAEnum(
+    ChangeTrigger,
+    name="change_trigger",
     native_enum=False,
     values_callable=lambda values: [value.value for value in values],
 )
@@ -510,6 +550,52 @@ class BlacklistEntry(Base):
 
     service: Mapped[ProtectedService | None] = relationship(back_populates="blacklist_entries")
     creator: Mapped[User | None] = relationship()
+
+
+class AgentJob(Base):
+    __tablename__ = "agent_job"
+    __table_args__ = (
+        UniqueConstraint(
+            "target_type",
+            "target_id",
+            "version",
+            name="agent_job_target_version_unique",
+        ),
+        Index("ix_agent_job_status", "status"),
+        Index("ix_agent_job_target", "target_type", "target_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_service.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_type: Mapped[JobType] = mapped_column(
+        job_type_enum,
+        default=JobType.service_update,
+        nullable=False,
+    )
+    trigger: Mapped[ChangeTrigger] = mapped_column(change_trigger_enum, nullable=False)
+    status: Mapped[JobStatus] = mapped_column(
+        job_status_enum,
+        default=JobStatus.queued,
+        nullable=False,
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    service: Mapped[ProtectedService] = relationship()
 
 
 Index(
