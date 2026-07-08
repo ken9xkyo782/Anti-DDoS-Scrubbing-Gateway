@@ -121,7 +121,7 @@ native-unsupported error; Ctrl-C leaves the iface with no XDP prog (`ip link sho
 
 ### T3: Test harness walking skeleton (BPF_PROG_TEST_RUN)
 
-**Status:** Blocked (2026-07-08) — environment cannot load BPF as current user; see STATE B-002.
+**Status:** Verified (2026-07-08)
 **What:** Synthetic-frame builders + a `BPF_PROG_TEST_RUN` runner with one trivial assertion, proving the
 compile→load→test loop end-to-end against the trivial program.
 **Where:** `data-plane/tests/pkt_build.h`, `data-plane/tests/test_parse.c` (+ Makefile `test` target
@@ -133,13 +133,13 @@ compiling the BPF obj with `-DPKT_TEST_HOOKS`)
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `pkt_build.h` provides composable frame builders: `build_eth(ethertype)`, `build_vlan`, `build_qinq`,
+- [x] `pkt_build.h` provides composable frame builders: `build_eth(ethertype)`, `build_vlan`, `build_qinq`,
       `build_ipv4(proto,frag,ihl)`, `build_tcp/udp/icmp`, `build_arp`, `build_ipv6` (byte buffers).
-- [ ] `test_parse.c` loads the `-DPKT_TEST_HOOKS` object and runs `bpf_prog_test_run_opts` with a frame as
+- [x] `test_parse.c` loads the `-DPKT_TEST_HOOKS` object and runs `bpf_prog_test_run_opts` with a frame as
       `data_in`, asserting `opts.retval`; helper to read `counter_map[reason]` and `test_meta_map[0]`.
-- [ ] One trivial test passes (any well-formed frame → `XDP_PASS` on the trivial prog), proving the loop.
-- [ ] Gate check passes: `make test`.
-- [ ] Test count: **1** dp-unit test passes (no silent deletions).
+- [x] One trivial test passes (any well-formed frame → `XDP_PASS` on the trivial prog), proving the loop.
+- [x] Gate check passes: `make test`.
+- [x] Test count: **1** dp-unit test passes (no silent deletions).
 **Tests:** dp-unit · **Gate:** quick
 
 **Verify:** `cd data-plane && make test` → `1 passed`, exit 0.
