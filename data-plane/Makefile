@@ -10,9 +10,13 @@ TEST_DIR := tests
 
 BPF_SRC := $(SRC_DIR)/xdp_gateway.bpf.c
 BPF_OBJ := $(BUILD_DIR)/xdp_gateway.bpf.o
+TEST_BPF_OBJ := $(BUILD_DIR)/xdp_gateway.test.bpf.o
 SKEL := $(BUILD_DIR)/xdp_gateway.skel.h
+TEST_SKEL := $(BUILD_DIR)/xdp_gateway.test.skel.h
 LOADER_SRC := $(LOADER_DIR)/loader.c
 LOADER := $(BUILD_DIR)/xdp_gateway_loader
+TEST_SRC := $(TEST_DIR)/test_parse.c
+TEST_BIN := $(BUILD_DIR)/test_parse
 
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 UAPI_INCLUDE := /usr/include/$(shell uname -m)-linux-gnu
@@ -35,9 +39,16 @@ $(BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h | $(BUILD_
 	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@
 	$(LLVM_STRIP) -g $@
 
+$(TEST_BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h | $(BUILD_DIR)
+	$(BPF_CLANG) $(BPF_CFLAGS) -DPKT_TEST_HOOKS -c $< -o $@
+	$(LLVM_STRIP) -g $@
+
 skel: $(SKEL)
 
 $(SKEL): $(BPF_OBJ)
+	$(BPFTOOL) gen skeleton $< > $@
+
+$(TEST_SKEL): $(TEST_BPF_OBJ)
 	$(BPFTOOL) gen skeleton $< > $@
 
 loader: $(LOADER)
@@ -45,8 +56,11 @@ loader: $(LOADER)
 $(LOADER): $(LOADER_SRC) $(SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
-test:
-	@echo "test target is added in T3"
+test: $(TEST_BIN)
+	$(TEST_BIN)
+
+$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(TEST_SKEL) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 run: loader
 	@if [ -z "$(IFACE)" ]; then echo "usage: make run IFACE=<ifname>"; exit 2; fi

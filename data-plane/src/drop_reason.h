@@ -1,9 +1,7 @@
 #ifndef XDP_GATEWAY_DROP_REASON_H
 #define XDP_GATEWAY_DROP_REASON_H
 
-#include <linux/bpf.h>
 #include <linux/types.h>
-#include <bpf/bpf_helpers.h>
 
 enum drop_reason {
 	DR_IPV6_UNSUPPORTED = 0,
@@ -13,6 +11,10 @@ enum drop_reason {
 	DR_MAP_ERROR,
 	DROP_REASON_CAP = 32,
 };
+
+#ifdef __BPF__
+#include <linux/bpf.h>
+#include <bpf/bpf_helpers.h>
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -31,5 +33,6 @@ static __always_inline int record_drop(enum drop_reason reason)
 
 	return XDP_DROP;
 }
+#endif
 
 #endif
