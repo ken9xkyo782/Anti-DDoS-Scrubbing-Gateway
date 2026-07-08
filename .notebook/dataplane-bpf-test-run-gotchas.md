@@ -29,3 +29,11 @@ From `data-plane/`:
 
 - Build gate: `make bpf skel loader`
 - Quick gate: `make test`
+
+## Live Veth Redirect
+
+- For the service-lookup redirect smoke, this kernel returned `xdp_redirect_err`
+  `err=-95` (`EOPNOTSUPP`) when redirecting from one veth to another until the
+  capture peer had an XDP program attached. The smoke test attaches a temporary
+  `XDP_PASS` program to the sink peer before sending the frame, then removes it
+  during cleanup.

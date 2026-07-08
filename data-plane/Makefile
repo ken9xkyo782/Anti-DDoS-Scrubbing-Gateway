@@ -26,7 +26,7 @@ LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
 USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
-.PHONY: all bpf skel loader test clean run
+.PHONY: all bpf skel loader test smoke clean run
 
 all: bpf skel loader
 
@@ -58,6 +58,9 @@ $(LOADER): $(LOADER_SRC) $(SKEL) | $(BUILD_DIR)
 
 test: $(TEST_BIN)
 	$(TEST_BIN)
+
+smoke: loader
+	$(TEST_DIR)/smoke_redirect.sh
 
 $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz

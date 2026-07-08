@@ -236,7 +236,7 @@ attach mode + populated OUT, or a clean fail-loud error on a non-XDP-TX OUT.
 
 ### T6: Live-veth redirect smoke — real `XDP_REDIRECT` + TTL/checksum (dp-integration)
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`make test && sudo make smoke` → 29 passed + delivered TTL/csum unchanged)
 **What:** A privileged two-veth `IN↔OUT` test that loads the program, seeds a service, sends a frame into
 `IN`, captures it on `OUT`, and asserts real forwarding with **TTL + IPv4 checksum byte-identical**.
 **Where:** `data-plane/tests/smoke_redirect.sh` (new), `data-plane/Makefile` (`smoke` target)
