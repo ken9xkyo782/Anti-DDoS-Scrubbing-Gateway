@@ -1,0 +1,36 @@
+flowchart TD
+    dashboard[React Dashboard]
+    subgraph api [FastAPI Control-Plane]
+        srlSvc[Service/Rule/List Svcs<br/>MODIFIED: route pending via guard + enqueue]
+        applyRouter[Apply-status Router<br/>GET /services/:id/apply-status · retry · GET /jobs]
+        ownerGuard{{load_service_for_principal · require_admin}}
+    end
+    subgraph applysvc [Apply Service · app/services/apply.py]
+        enqueue[enqueue_service_update<br/>pending→queued + AgentJob outbox]
+        marks[mark_applying · mark_active · mark_failed<br/>version-guarded FOR UPDATE]
+        retry[retry · get_apply_status · list_jobs]
+        dispatch[ApplyDispatcher.dispatch<br/>post-commit LPUSH best-effort]
+    end
+    guard[[core/applystate.py<br/>assert_transition · LEGAL graph · monotonic active_version]]
+    audit[Audit Svc · reused]
+    postgres[(PostgreSQL<br/>agent_job · protected_service.apply_status/version/active_version)]
+    redis[(Redis list<br/>apply:jobs)]
+    worker[M4 Sync Worker<br/>consumes + calls mark_*]
+
+    dashboard -->|tenant + admin| applyRouter
+    applyRouter -.->|Depends| ownerGuard
+    applyRouter --> retry
+    srlSvc --> enqueue
+    enqueue --> guard
+    marks --> guard
+    retry --> guard
+    enqueue -->|same txn: INSERT agent_job + apply_status=queued| postgres
+    enqueue -->|register post-commit| dispatch
+    dispatch -->|LPUSH job_id + set dispatched_at| redis
+    marks -->|FOR UPDATE service + job| postgres
+    retry --> audit
+    retry --> postgres
+    audit --> postgres
+    redis -.->|M4 consume| worker
+    worker -.->|mark_applying/active/failed| marks
+    worker -.->|reconcile queued & dispatched_at IS NULL| postgres

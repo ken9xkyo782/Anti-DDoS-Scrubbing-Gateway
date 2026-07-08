@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant U as Tenant/Admin
+    participant SR as Service/Rule/List Svc (modified)
+    participant AP as Apply Svc
+    participant G as core/applystate
+    participant DB as PostgreSQL
+    participant RQ as Redis apply:jobs
+    participant W as M4 Worker (future)
+    U->>SR: mutate (create/edit/rule/list/enable/disable)
+    Note over SR,DB: one transaction
+    SR->>DB: SELECT service FOR UPDATE (bump_version)
+    SR->>G: assert_transition(*, pending) → set apply_status=pending, version=N
+    SR->>AP: enqueue_service_update(service, actor, trigger)
+    AP->>G: assert_transition(pending, queued)
+    AP->>DB: INSERT agent_job(target,version=N,queued) ON CONFLICT DO NOTHING<br/>UPDATE service SET apply_status=queued
+    SR->>DB: COMMIT
+    SR-->>U: 202 {apply_status:queued, version:N, active_version:M}
+    AP->>RQ: post-commit best-effort LPUSH job_id, set dispatched_at
+    W->>RQ: consume job_id (M4)
+    W->>AP: mark_applying(job)
+    AP->>DB: FOR UPDATE service and job, if version==N then applying, else superseded
+    W->>AP: mark_active(job, N)  (after build+swap)
+    AP->>DB: FOR UPDATE, if version still N and advances then active + active_version=N, else NO-OP

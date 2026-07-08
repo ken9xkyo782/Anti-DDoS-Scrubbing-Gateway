@@ -33,12 +33,14 @@
 - Spec `spec.md` (SRL-01..44); context `context.md` (D-SRL-1..4, A-SRL-1..6); `design.md` + rendered diagrams
 - Requires auth-rbac + tenant-cidr executed first (reuses guard/audit + `cidr_in_tenant_allocation`/`AllocatedCIDR`/`core/cidr`)
 
-**Apply-status state machine** - IN PROGRESS (spec + context drafted)
+**Apply-status state machine** - IN PROGRESS (spec + context + design + tasks)
 - `pending → queued → applying → active | failed` behind a single guarded transition function (illegal / backward-`active_version` transitions rejected); a `failed` apply keeps the last-good `active_version` live
 - **Auto-enqueue** (D-APLY-1): every committed service/rule/list mutation creates a durable version-idempotent `AgentJob`, moves the service `pending→queued`, returns **202** `{apply_status, version, active_version}` (TDD 4.5/4.6)
 - **Worker-facing** `mark_applying/active/failed` (version-guarded → "no stale-over-new swap"); the whole machine is testable in M1 without a data-plane, M4's worker just calls them
 - **Per-service** targets in v1 (D-APLY-3); per-service read API (9.2) + admin job/backlog list; reads service-rule-list's `version` (A-SRL-3) and modifies its service/rule/list services to enqueue
-- Spec `spec.md` (APLY-01..40); context `context.md` (D-APLY-1..3, A-APLY-1..6)
+- Spec `spec.md` (APLY-01..40); context `context.md` (D-APLY-1..3, A-APLY-1..6); `design.md` + rendered diagrams (component + state-machine + enqueue-apply sequence)
+- Design: `agent_job` table (`UNIQUE(target,version)` idempotency, `ON DELETE CASCADE`); pure `core/applystate.py` guard; `services/apply.py` (transactional-outbox enqueue + version-guarded `mark_*` + retry + reads + `ApplyDispatcher`); modifies service-rule-list services + `bump_version`
+- Tasks `tasks.md` (T1–T7; all 40 reqs mapped): T1 guard (unit, `[P]`) · T2 model+migration · T3 enqueue outbox+dispatcher+reads · T4 version-guarded `mark_*`+retry · T5 read/retry/jobs router · T6 wire enqueue into SRL services · T7 SRL routers→202
 - Requires service-rule-list executed first; adds enqueue-only Redis + `AgentJob` model (worker loop = M4)
 
 ---

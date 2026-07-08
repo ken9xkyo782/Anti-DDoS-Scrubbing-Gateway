@@ -1,0 +1,17 @@
+stateDiagram-v2
+    [*] --> pending: create/edit (bump_version)
+    pending --> queued: enqueue + AgentJob (API, same txn)
+    queued --> applying: worker mark_applying
+    applying --> active: mark_active(K) if version==K<br/>active_version=K (monotonic)
+    applying --> failed: mark_failed(err)<br/>active_version unchanged
+    failed --> queued: retry (re-enqueue same version)
+    queued --> pending: superseded by new mutation
+    applying --> pending: superseded by new mutation
+    active --> pending: new mutation
+    failed --> pending: new mutation
+    active --> [*]
+    note right of applying
+      mark_active/mark_failed for a version < current
+      service.version are NO-OPS (job → superseded);
+      no stale-over-new swap (APLY-15/33)
+    end note
