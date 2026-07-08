@@ -5,6 +5,7 @@
 #include "drop_reason.h"
 #include "parse.h"
 #include "pkt_meta.h"
+#include "service.h"
 
 #ifdef PKT_TEST_HOOKS
 struct {

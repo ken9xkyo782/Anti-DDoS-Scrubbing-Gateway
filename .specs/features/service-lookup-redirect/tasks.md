@@ -68,7 +68,7 @@ by no other task, and has no automated tests, so it runs alongside `T3`. Everyth
 
 ### T1: Contract headers — `service.h` + `pkt_meta`/`drop_reason` extensions
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`make bpf skel`)
 **What:** Add the shared config-contract header and extend the two existing contract headers, keeping the
 program building and every existing field/name intact.
 **Where:** `data-plane/src/service.h` (new), `data-plane/src/pkt_meta.h` (modify),
