@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import Select
 
 from app.core.config import get_settings
+from app.core.redis import get_redis_client
 from app.core.sessions import RedisSessionStore
 from app.db.models import ProtectedService, Role, TenantStatus, User, UserStatus
 from app.db.session import get_db
@@ -28,11 +29,7 @@ class Principal:
 
 
 async def get_redis() -> AsyncGenerator[Redis, None]:
-    client = Redis.from_url(get_settings().redis_url, decode_responses=True)
-    try:
-        yield client
-    finally:
-        await client.aclose()
+    yield get_redis_client()
 
 
 def get_session_store(redis: Annotated[Redis, Depends(get_redis)]) -> RedisSessionStore:
