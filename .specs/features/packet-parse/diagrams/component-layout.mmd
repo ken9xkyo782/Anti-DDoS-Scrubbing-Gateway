@@ -1,0 +1,47 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart LR
+    subgraph src["data-plane/src (BPF, clang -target bpf)"]
+        pm["pkt_meta.h<br/>single-parse contract"]
+        dr["drop_reason.h<br/>enum + counter_map + record_drop()"]
+        ph["parse.h<br/>inline eth/vlan/ipv4/l4 helpers"]
+        xg["xdp_gateway.bpf.c<br/>SEC(xdp): verdicts + seams"]
+        pm --> ph
+        ph --> xg
+        dr --> xg
+    end
+
+    subgraph build["build/ (generated, gitignored)"]
+        obj["xdp_gateway.bpf.o"]
+        skel["xdp_gateway.skel.h<br/>(bpftool gen skeleton)"]
+        obj --> skel
+    end
+
+    subgraph loaderg["data-plane/loader"]
+        ld["loader.c<br/>bpf_xdp_attach(DRV, fail-loud)<br/>bpf_xdp_query + signal detach"]
+    end
+
+    subgraph testg["data-plane/tests (dp-unit)"]
+        pb["pkt_build.h<br/>synthetic frames"]
+        tp["test_parse.c<br/>BPF_PROG_TEST_RUN + asserts"]
+        pb --> tp
+    end
+
+    xg -->|"clang"| obj
+    skel --> ld
+    obj -.->|"-DPKT_TEST_HOOKS build"| tp
+
+    ld ==>|"attach native XDP"| IN[["interface IN"]]
+    xg -.->|"XDP_PASS seam"| next["Service lookup &amp; redirect<br/>(next M2 feature)"]
+
+    classDef gen fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b;
+    classDef ext fill:#f1f5f9,stroke:#475569,color:#0f172a;
+    class obj,skel gen;
+    class IN,next ext;

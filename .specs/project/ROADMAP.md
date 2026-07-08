@@ -52,9 +52,15 @@
 
 ### Features
 
-**Packet parse & fail-fast** - PLANNED
+**Packet parse & fail-fast** - IN PROGRESS (spec + context + design + tasks)
 - L2/VLAN/QinQ EtherType, IPv4+L4 parse into `pkt_meta` (single parse)
-- Drops: `ipv6_unsupported`, `unsupported_ethertype`, `malformed_ipv4`, `fragment_unsupported`; minimal ARP policy
+- Drops: `ipv6_unsupported`, `unsupported_ethertype`, `malformed_ipv4`, `fragment_unsupported`; ARP = classify + `XDP_PASS` (redirect seam deferred)
+- **Bootstraps `data-plane/`**: `clang -target bpf` + libbpf-skeleton build, native/DRV-mode loader on `IN` (fail-loud, no generic fallback), `BPF_PROG_TEST_RUN` test harness; valid IPv4 exits at a marked `XDP_PASS` service-lookup seam
+- Ships shared `enum drop_reason` + minimal per-CPU counter (full §10.2 set + sampling = *Drop-reason counters*); adds data-plane test conventions to `TESTING.md`
+- Spec `spec.md` (PKT-01..24); context `context.md` (D-PKT-1..4, A-PKT-1..7); `design.md` + rendered diagrams (parse-fail-fast flow + component layout); `tasks.md` (T1–T8, all 24 reqs mapped)
+- Design: `data-plane/` layout (`pkt_meta.h`/`drop_reason.h`/`parse.h`/`xdp_gateway.bpf.c` + `loader/loader.c` + `tests/`); inlined stack-`pkt_meta` parse chain (no tail-call/scratch map); libbpf skeleton + `bpf_xdp_attach(DRV)` fail-loud; `BPF_PROG_TEST_RUN` tests (`-DPKT_TEST_HOOKS` `test_meta_map`); plain uapi headers (no `vmlinux.h`); `counter_map` sized `DROP_REASON_CAP=32`. libbpf APIs verified vs docs.
+- Tasks: **T1** scaffold+contracts+trivial prog (build) · **T2** native loader `[P]` · **T3** `BPF_PROG_TEST_RUN` harness · **T4** EtherType+IPv6/unsupported+ARP · **T5** IPv4+malformed+fragment · **T6** L4+`pkt_meta`+seam · **T7** VLAN/QinQ · **T8** TESTING.md data-plane section `[P]`. Only T2/T8 `[P]`; T3→T7 serialize on shared files. Establishes data-plane `TESTING.md` conventions (T8).
+- First data-plane feature — no control-plane change; consumed by *Service lookup & transparent redirect* (replaces both seams) and all of M3
 
 **Service lookup & transparent redirect** - PLANNED
 - `service_map` match; `service_miss` vs `service_disabled` (drop-all, not pass-through)

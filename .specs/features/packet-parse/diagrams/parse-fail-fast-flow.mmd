@@ -1,0 +1,35 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TD
+    pkt(["Frame on IN (xdp_md: data..data_end)"]) --> ethP{"parse_eth + parse_vlan<br/>resolve inner EtherType (&le;2 tags)"}
+    ethP -- "IPv6" --> d6["XDP_DROP<br/>ipv6_unsupported"]
+    ethP -- "ARP" --> arp["XDP_PASS to host stack<br/>SEAM: redirect IN&rarr;OUT later"]
+    ethP -- "other EtherType / &gt;2 tags / truncated tag" --> due["XDP_DROP<br/>unsupported_ethertype"]
+    ethP -- "IPv4" --> ipP{"parse_ipv4<br/>version==4, ihl&ge;5, tot_len/options bounds"}
+
+    ipP -- "bad header / truncated" --> dm["XDP_DROP<br/>malformed_ipv4"]
+    ipP -- "MF set or frag_off&ne;0" --> df["XDP_DROP<br/>fragment_unsupported"]
+    ipP -- "ok" --> l4P{"parse_l4<br/>TCP/UDP ports &middot; ICMP type/code &middot; other = proto only"}
+
+    l4P -- "L4 header truncated" --> dm
+    l4P -- "ok" --> fill["fill pkt_meta (stack, single parse)<br/>#ifdef PKT_TEST_HOOKS &rarr; test_meta_map[0]"]
+    fill --> seam["XDP_PASS<br/>SEAM: service lookup (next feature)"]
+
+    d6 --> cnt["record_drop(reason)<br/>counter_map (per-CPU)"]
+    due --> cnt
+    dm --> cnt
+    df --> cnt
+
+    classDef drop fill:#fde8e8,stroke:#e02424,color:#611a1a;
+    classDef pass fill:#e6f4ea,stroke:#1e7e34,color:#14532d;
+    classDef seam fill:#fff7e6,stroke:#d9822b,color:#7a4a12;
+    class d6,due,dm,df drop;
+    class arp,seam pass;
+    class fill seam;
