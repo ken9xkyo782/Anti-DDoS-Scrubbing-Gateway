@@ -101,7 +101,7 @@ async def create_service(
     )
 
 
-async def test_add_whitelist_arbitrary_ipv4_returns_201(
+async def test_add_whitelist_arbitrary_ipv4_returns_202_queued(
     db_session: AsyncSession,
     redis_client: Redis,
 ) -> None:
@@ -117,8 +117,8 @@ async def test_add_whitelist_arbitrary_ipv4_returns_201(
             json={"source_cidr": "198.51.100.7/32"},
         )
 
-    assert response.status_code == 201
-    assert response.json()["source_cidr"] == "198.51.100.7/32"
+    assert response.status_code == 202
+    assert response.json()["apply_status"] == "queued"
 
 
 async def test_add_whitelist_ipv6_returns_422(
@@ -140,7 +140,7 @@ async def test_add_whitelist_ipv6_returns_422(
     assert response.status_code == 422
 
 
-async def test_add_service_blacklist_returns_201(
+async def test_add_service_blacklist_returns_202_queued(
     db_session: AsyncSession,
     redis_client: Redis,
 ) -> None:
@@ -156,8 +156,8 @@ async def test_add_service_blacklist_returns_201(
             json={"source_cidr": "45.0.0.0/8"},
         )
 
-    assert response.status_code == 201
-    assert response.json()["scope"] == "service"
+    assert response.status_code == 202
+    assert response.json()["apply_status"] == "queued"
 
 
 async def test_add_service_blacklist_ipv6_returns_422(
@@ -199,8 +199,8 @@ async def test_same_source_can_be_whitelisted_and_blacklisted(
             json={"source_cidr": "198.51.100.7/32"},
         )
 
-    assert whitelist.status_code == 201
-    assert blacklist.status_code == 201
+    assert whitelist.status_code == 202
+    assert blacklist.status_code == 202
 
 
 async def test_list_and_delete_service_lists(db_session: AsyncSession, redis_client: Redis) -> None:
@@ -232,8 +232,8 @@ async def test_list_and_delete_service_lists(db_session: AsyncSession, redis_cli
 
     assert [row["source_cidr"] for row in whitelist.json()] == ["198.51.100.7/32"]
     assert [row["source_cidr"] for row in blacklist.json()] == ["45.0.0.0/8"]
-    assert whitelist_delete.status_code == 204
-    assert blacklist_delete.status_code == 204
+    assert whitelist_delete.status_code == 202
+    assert blacklist_delete.status_code == 202
 
 
 async def test_cross_tenant_list_access_returns_zero_leak_404(

@@ -11,11 +11,13 @@ from app.db.models import (
     BlacklistEntry,
     BlacklistScope,
     BlacklistSource,
+    ChangeTrigger,
     ProtectedService,
     Role,
     User,
     WhitelistEntry,
 )
+from app.services.apply import enqueue_service_update
 from app.services.audit import record_event
 from app.services.services import bump_version
 
@@ -41,7 +43,8 @@ async def add_whitelist(
         await db.flush()
     except IntegrityError as exc:
         _raise_integrity_error(exc)
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.whitelist)
     await record_event(
         db,
         actor=actor,
@@ -62,14 +65,15 @@ async def remove_whitelist(
     source_cidr: str,
     actor: User | None,
     ip: str | None = None,
-) -> None:
+) -> ProtectedService:
     service = await _require_service(db, service_id)
     _authorize_actor(actor, service)
     source = _parse_source(source_cidr)
     entry = await _require_whitelist_entry(db, service.id, source)
     await db.delete(entry)
     await db.flush()
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.whitelist)
     await record_event(
         db,
         actor=actor,
@@ -80,6 +84,7 @@ async def remove_whitelist(
         ip=ip,
         metadata={"service_id": str(service.id), "source_cidr": str(source)},
     )
+    return service
 
 
 async def list_whitelist(
@@ -135,7 +140,8 @@ async def add_blacklist(
     except IntegrityError as exc:
         _raise_integrity_error(exc)
     if service is not None:
-        await bump_version(db, service.id)
+        service = await bump_version(db, service.id)
+        await enqueue_service_update(db, service, actor, ChangeTrigger.blacklist)
     await record_event(
         db,
         actor=actor,
@@ -161,7 +167,7 @@ async def remove_blacklist(
     source_cidr: str,
     actor: User | None,
     ip: str | None = None,
-) -> None:
+) -> ProtectedService | None:
     source = _parse_source(source_cidr)
     service: ProtectedService | None = None
     if scope == BlacklistScope.service:
@@ -176,7 +182,8 @@ async def remove_blacklist(
     await db.delete(entry)
     await db.flush()
     if service is not None:
-        await bump_version(db, service.id)
+        service = await bump_version(db, service.id)
+        await enqueue_service_update(db, service, actor, ChangeTrigger.blacklist)
     await record_event(
         db,
         actor=actor,
@@ -191,6 +198,7 @@ async def remove_blacklist(
             "source_cidr": str(source),
         },
     )
+    return service
 
 
 async def list_blacklist(

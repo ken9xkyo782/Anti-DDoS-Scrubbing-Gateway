@@ -103,7 +103,7 @@ async def create_service(
     )
 
 
-async def test_create_rule_returns_201_and_bumps_version(
+async def test_create_rule_returns_202_queued_and_bumps_version(
     db_session: AsyncSession,
     redis_client: Redis,
 ) -> None:
@@ -119,9 +119,9 @@ async def test_create_rule_returns_201_and_bumps_version(
             json={"priority": 10, "protocol": "tcp", "dst_port_lo": 80, "dst_port_hi": 80},
         )
 
-    assert response.status_code == 201
-    assert response.json()["priority"] == 10
-    assert response.json()["warnings"] == []
+    assert response.status_code == 202
+    assert response.json()["apply_status"] == "queued"
+    assert response.json()["version"] == 2
     assert service.service.version == 2
 
 
@@ -203,8 +203,8 @@ async def test_overlap_create_returns_warning(
             json={"priority": 20, "protocol": "any"},
         )
 
-    assert response.status_code == 201
-    assert response.json()["warnings"] == ["Overlaps rule priority 10"]
+    assert response.status_code == 202
+    assert response.json()["apply_status"] == "queued"
 
 
 async def test_overlap_check_dry_run_writes_nothing(
@@ -246,19 +246,23 @@ async def test_list_patch_delete_rules(db_session: AsyncSession, redis_client: R
             f"/services/{service.service.id}/rules",
             json={"priority": 10, "protocol": "tcp"},
         )
+        rule = (
+            await db_session.execute(
+                select(AllowRule).where(AllowRule.service_id == service.service.id)
+            )
+        ).scalar_one()
         listed = await client.get(f"/services/{service.service.id}/rules")
         patched = await client.patch(
-            f"/services/{service.service.id}/rules/{created.json()['id']}",
+            f"/services/{service.service.id}/rules/{rule.id}",
             json={"priority": 20, "protocol": "udp"},
         )
-        deleted = await client.delete(
-            f"/services/{service.service.id}/rules/{created.json()['id']}"
-        )
+        deleted = await client.delete(f"/services/{service.service.id}/rules/{rule.id}")
 
-    assert [row["id"] for row in listed.json()] == [created.json()["id"]]
-    assert patched.status_code == 200
-    assert patched.json()["priority"] == 20
-    assert deleted.status_code == 204
+    assert created.status_code == 202
+    assert [row["id"] for row in listed.json()] == [str(rule.id)]
+    assert patched.status_code == 202
+    assert patched.json()["apply_status"] == "queued"
+    assert deleted.status_code == 202
 
 
 async def test_cross_tenant_rule_access_returns_zero_leak_404(

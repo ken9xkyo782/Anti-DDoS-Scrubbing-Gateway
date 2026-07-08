@@ -134,7 +134,7 @@ async def test_create_service_inside_allocation_persists_plan_and_audits(
     )
 
     assert record.service.enabled is False
-    assert record.service.apply_status == ApplyStatus.pending
+    assert record.service.apply_status == ApplyStatus.queued
     assert record.service.version == 1
     assert record.plan.committed_clean_gbps == Decimal("2")
     assert record.plan.ceiling_clean_gbps == Decimal("5")
@@ -245,7 +245,7 @@ async def test_update_service_bumps_version_pending_and_vip(
     assert updated.service.vip_pps == 1000
     assert updated.service.vip_bps == 2000
     assert updated.service.version == 2
-    assert updated.service.apply_status == ApplyStatus.pending
+    assert updated.service.apply_status == ApplyStatus.queued
     assert (await audit_actions(db_session, "service.update"))[0].target_id == str(
         record.service.id
     )

@@ -11,9 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.applystate import assert_transition
 from app.core.config import get_settings
 from app.db.models import (
     ApplyStatus,
+    ChangeTrigger,
     ProtectedService,
     Role,
     ServiceMode,
@@ -23,6 +25,7 @@ from app.db.models import (
     utc_now,
 )
 from app.services.allocations import cidr_in_tenant_allocation
+from app.services.apply import enqueue_service_update
 from app.services.audit import record_event
 
 DEFAULT_BILLING_METRIC = "p95_clean_bps"
@@ -113,6 +116,7 @@ async def create_service(
         ip=ip,
         metadata={"tenant_id": str(tenant_id), "cidr_or_ip": str(cidr_or_ip), "name": name},
     )
+    await enqueue_service_update(db, service, actor, ChangeTrigger.service)
     return await _record_for_service(db, service)
 
 
@@ -172,7 +176,8 @@ async def update_service(
     if vip_bps is not None:
         service.vip_bps = vip_bps
 
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.service)
     await record_event(
         db,
         actor=actor,
@@ -200,7 +205,9 @@ async def set_enabled(
         return service
 
     service.enabled = enabled
-    await bump_version(db, service.id)
+    trigger = ChangeTrigger.enable if enabled else ChangeTrigger.disable
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, trigger)
     await record_event(
         db,
         actor=actor,
@@ -229,7 +236,8 @@ async def size_plan(
     plan = await _require_plan(db, service.id)
     plan.committed_clean_gbps = committed_clean_gbps
     plan.ceiling_clean_gbps = ceiling_clean_gbps
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.plan)
     await record_event(
         db,
         actor=actor,
@@ -296,6 +304,7 @@ async def bump_version(db: AsyncSession, service_id: uuid.UUID) -> ProtectedServ
     if service is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     service.version += 1
+    assert_transition(service.apply_status, ApplyStatus.pending)
     service.apply_status = ApplyStatus.pending
     service.updated_at = utc_now()
     await db.flush()

@@ -4,13 +4,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas.apply import ApplyMutationResponse
 from app.api.schemas.lists import (
     BlacklistEntryResponse,
     ListEntryCreateRequest,
     WhitelistEntryResponse,
 )
 from app.core.deps import Principal, get_current_user, load_service_for_principal
-from app.db.models import BlacklistEntry, BlacklistScope, User, WhitelistEntry
+from app.db.models import BlacklistEntry, BlacklistScope, ProtectedService, User, WhitelistEntry
 from app.db.session import get_db
 from app.services import lists as list_service
 
@@ -19,24 +20,24 @@ router = APIRouter(tags=["lists"])
 
 @router.post(
     "/services/{service_id}/whitelist",
-    response_model=WhitelistEntryResponse,
-    status_code=status.HTTP_201_CREATED,
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def add_whitelist(
     service_id: uuid.UUID,
     payload: ListEntryCreateRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> WhitelistEntryResponse:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    entry = await list_service.add_whitelist(
+    await list_service.add_whitelist(
         db,
         service_id=service.id,
         source_cidr=payload.source_cidr,
         actor=actor,
     )
-    return _whitelist_response(entry)
+    return _apply_mutation_response(service)
 
 
 @router.get("/services/{service_id}/whitelist", response_model=list[WhitelistEntryResponse])
@@ -53,44 +54,49 @@ async def list_whitelist(
     ]
 
 
-@router.delete("/services/{service_id}/whitelist", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/services/{service_id}/whitelist",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def remove_whitelist(
     service_id: uuid.UUID,
     source_cidr: str,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    await list_service.remove_whitelist(
+    updated = await list_service.remove_whitelist(
         db,
         service_id=service.id,
         source_cidr=source_cidr,
         actor=actor,
     )
+    return _apply_mutation_response(updated)
 
 
 @router.post(
     "/services/{service_id}/blacklist",
-    response_model=BlacklistEntryResponse,
-    status_code=status.HTTP_201_CREATED,
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def add_service_blacklist(
     service_id: uuid.UUID,
     payload: ListEntryCreateRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> BlacklistEntryResponse:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    entry = await list_service.add_blacklist(
+    await list_service.add_blacklist(
         db,
         scope=BlacklistScope.service,
         service_id=service.id,
         source_cidr=payload.source_cidr,
         actor=actor,
     )
-    return _blacklist_response(entry)
+    return _apply_mutation_response(service)
 
 
 @router.get("/services/{service_id}/blacklist", response_model=list[BlacklistEntryResponse])
@@ -112,22 +118,29 @@ async def list_service_blacklist(
     ]
 
 
-@router.delete("/services/{service_id}/blacklist", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/services/{service_id}/blacklist",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def remove_service_blacklist(
     service_id: uuid.UUID,
     source_cidr: str,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    await list_service.remove_blacklist(
+    updated = await list_service.remove_blacklist(
         db,
         scope=BlacklistScope.service,
         service_id=service.id,
         source_cidr=source_cidr,
         actor=actor,
     )
+    if updated is None:
+        updated = service
+    return _apply_mutation_response(updated)
 
 
 async def _load_actor(db: AsyncSession, principal: Principal) -> User | None:
@@ -153,4 +166,12 @@ def _blacklist_response(entry: BlacklistEntry) -> BlacklistEntryResponse:
         source_cidr=str(entry.source_cidr),
         created_by=entry.created_by,
         created_at=entry.created_at,
+    )
+
+
+def _apply_mutation_response(service: ProtectedService) -> ApplyMutationResponse:
+    return ApplyMutationResponse(
+        apply_status=service.apply_status,
+        version=service.version,
+        active_version=service.active_version,
     )

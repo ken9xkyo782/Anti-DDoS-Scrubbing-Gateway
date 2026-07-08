@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas.apply import ApplyMutationResponse
 from app.api.schemas.rules import (
     RuleCreateRequest,
     RuleOverlapCheckRequest,
@@ -12,20 +13,20 @@ from app.api.schemas.rules import (
     RuleResponse,
 )
 from app.core.deps import Principal, get_current_user, load_service_for_principal
-from app.db.models import AllowRule, User
+from app.db.models import AllowRule, ProtectedService, User
 from app.db.session import get_db
 from app.services import rules as rule_service
 
 router = APIRouter(prefix="/services/{service_id}/rules", tags=["rules"])
 
 
-@router.post("", response_model=RuleResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApplyMutationResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_rule(
     service_id: uuid.UUID,
     payload: RuleCreateRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> RuleResponse:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
     result = await rule_service.create_rule(
@@ -42,7 +43,7 @@ async def create_rule(
         bps=payload.bps,
         enabled=payload.enabled,
     )
-    return _rule_response(result.rule, warnings=result.warnings)
+    return _apply_mutation_response(result.service)
 
 
 @router.get("", response_model=list[RuleResponse])
@@ -59,14 +60,18 @@ async def list_rules(
     ]
 
 
-@router.patch("/{rule_id}", response_model=RuleResponse)
+@router.patch(
+    "/{rule_id}",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def update_rule(
     service_id: uuid.UUID,
     rule_id: uuid.UUID,
     payload: RulePatchRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> RuleResponse:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
     result = await rule_service.update_rule(
@@ -84,19 +89,29 @@ async def update_rule(
         bps=payload.bps,
         enabled=payload.enabled,
     )
-    return _rule_response(result.rule, warnings=result.warnings)
+    return _apply_mutation_response(result.service)
 
 
-@router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{rule_id}",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def delete_rule(
     service_id: uuid.UUID,
     rule_id: uuid.UUID,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    await rule_service.delete_rule(db, service_id=service.id, rule_id=rule_id, actor=actor)
+    updated = await rule_service.delete_rule(
+        db,
+        service_id=service.id,
+        rule_id=rule_id,
+        actor=actor,
+    )
+    return _apply_mutation_response(updated)
 
 
 @router.post("/overlap-check", response_model=RuleOverlapCheckResponse)
@@ -141,4 +156,12 @@ def _rule_response(rule: AllowRule, *, warnings: list[str] | None = None) -> Rul
         warnings=warnings or [],
         created_at=rule.created_at,
         updated_at=rule.updated_at,
+    )
+
+
+def _apply_mutation_response(service: ProtectedService) -> ApplyMutationResponse:
+    return ApplyMutationResponse(
+        apply_status=service.apply_status,
+        version=service.version,
+        active_version=service.active_version,
     )

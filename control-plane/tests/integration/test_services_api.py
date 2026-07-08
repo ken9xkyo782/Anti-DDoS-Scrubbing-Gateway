@@ -1,5 +1,4 @@
 from collections.abc import AsyncGenerator
-from decimal import Decimal
 from ipaddress import IPv4Network
 
 import pytest
@@ -14,7 +13,7 @@ from app.core.config import get_settings
 from app.core.deps import get_session_store
 from app.core.security import hash_password
 from app.core.sessions import RedisSessionStore
-from app.db.models import AllowRule, AuditEvent, Protocol, Role, Tenant, User
+from app.db.models import AllowRule, AuditEvent, ProtectedService, Protocol, Role, Tenant, User
 from app.db.session import get_db
 from app.services import allocations as allocation_service
 
@@ -98,20 +97,34 @@ async def allocate(
 
 async def create_service_via_api(
     client: AsyncClient,
+    db_session: AsyncSession,
     *,
     tenant: Tenant,
     name: str = "edge",
     cidr_or_ip: str = "203.0.113.10/32",
-) -> dict[str, object]:
+) -> ProtectedService:
     response = await client.post(
         "/services",
         json={"tenant_id": str(tenant.id), "name": name, "cidr_or_ip": cidr_or_ip},
     )
-    assert response.status_code == 201
-    return response.json()
+    assert response.status_code == 202
+    assert response.json() == {
+        "apply_status": "queued",
+        "version": 1,
+        "active_version": None,
+    }
+    service = (
+        await db_session.execute(
+            select(ProtectedService).where(
+                ProtectedService.tenant_id == tenant.id,
+                ProtectedService.name == name,
+            )
+        )
+    ).scalar_one()
+    return service
 
 
-async def test_create_service_inside_allocation_returns_201(
+async def test_create_service_inside_allocation_returns_202_queued(
     db_session: AsyncSession,
     redis_client: Redis,
 ) -> None:
@@ -132,11 +145,12 @@ async def test_create_service_inside_allocation_returns_201(
             },
         )
 
-    assert response.status_code == 201
-    assert response.json()["enabled"] is False
-    assert response.json()["apply_status"] == "pending"
-    assert response.json()["version"] == 1
-    assert Decimal(response.json()["plan"]["committed_clean_gbps"]) == Decimal("2")
+    assert response.status_code == 202
+    assert response.json() == {
+        "apply_status": "queued",
+        "version": 1,
+        "active_version": None,
+    }
 
 
 async def test_create_service_outside_allocation_returns_403(
@@ -195,6 +209,7 @@ async def test_create_service_overlap_returns_409(
         await authenticate(client, store, admin)
         await create_service_via_api(
             client,
+            db_session,
             tenant=tenant,
             name="wide",
             cidr_or_ip="203.0.113.0/25",
@@ -252,38 +267,38 @@ async def test_tenant_user_plan_patch_returns_403_and_admin_warning(
         await authenticate(client, store, admin)
         first = await create_service_via_api(
             client,
+            db_session,
             tenant=tenant,
             name="first",
             cidr_or_ip="203.0.113.10/32",
         )
         second = await create_service_via_api(
             client,
+            db_session,
             tenant=tenant,
             name="second",
             cidr_or_ip="203.0.113.20/32",
         )
         await client.patch(
-            f"/services/{first['id']}/plan",
+            f"/services/{first.id}/plan",
             json={"committed_clean_gbps": "39", "ceiling_clean_gbps": "39"},
         )
-        await client.post(f"/services/{first['id']}/enable")
-        await client.post(f"/services/{second['id']}/enable")
+        await client.post(f"/services/{first.id}/enable")
+        await client.post(f"/services/{second.id}/enable")
         await authenticate(client, store, tenant_user)
         tenant_denied = await client.patch(
-            f"/services/{second['id']}/plan",
+            f"/services/{second.id}/plan",
             json={"committed_clean_gbps": "1", "ceiling_clean_gbps": "1"},
         )
         await authenticate(client, store, admin)
         admin_warning = await client.patch(
-            f"/services/{second['id']}/plan",
+            f"/services/{second.id}/plan",
             json={"committed_clean_gbps": "5", "ceiling_clean_gbps": "5"},
         )
 
     assert tenant_denied.status_code == 403
-    assert admin_warning.status_code == 200
-    assert admin_warning.json()["warnings"] == [
-        "Committed clean bandwidth 44.00 exceeds node capacity 40.00"
-    ]
+    assert admin_warning.status_code == 202
+    assert admin_warning.json()["apply_status"] == "queued"
 
 
 async def test_list_services_admin_owner_annotation_and_tenant_scope(
@@ -304,12 +319,14 @@ async def test_list_services_admin_owner_annotation_and_tenant_scope(
         await authenticate(client, store, admin)
         own = await create_service_via_api(
             client,
+            db_session,
             tenant=own_tenant,
             name="own",
             cidr_or_ip="203.0.113.10/32",
         )
         other = await create_service_via_api(
             client,
+            db_session,
             tenant=other_tenant,
             name="other",
             cidr_or_ip="198.51.100.10/32",
@@ -318,9 +335,9 @@ async def test_list_services_admin_owner_annotation_and_tenant_scope(
         await authenticate(client, store, tenant_user)
         tenant_list = await client.get("/services")
 
-    assert {row["id"] for row in admin_list.json()} == {own["id"], other["id"]}
+    assert {row["id"] for row in admin_list.json()} == {str(own.id), str(other.id)}
     assert admin_list.json()[0]["tenant_name"] is not None
-    assert [row["id"] for row in tenant_list.json()] == [own["id"]]
+    assert [row["id"] for row in tenant_list.json()] == [str(own.id)]
 
 
 async def test_enable_disable_confirm_and_idempotent_audit(
@@ -334,22 +351,22 @@ async def test_enable_disable_confirm_and_idempotent_audit(
 
     async for client in make_client(db_session, store):
         await authenticate(client, store, admin)
-        service = await create_service_via_api(client, tenant=tenant)
-        enabled = await client.post(f"/services/{service['id']}/enable")
-        missing_confirm = await client.post(f"/services/{service['id']}/disable", json={})
-        disabled = await client.post(f"/services/{service['id']}/disable", json={"confirm": True})
+        service = await create_service_via_api(client, db_session, tenant=tenant)
+        enabled = await client.post(f"/services/{service.id}/enable")
+        missing_confirm = await client.post(f"/services/{service.id}/disable", json={})
+        disabled = await client.post(f"/services/{service.id}/disable", json={"confirm": True})
         disabled_again = await client.post(
-            f"/services/{service['id']}/disable",
+            f"/services/{service.id}/disable",
             json={"confirm": True},
         )
 
     audits = (
         await db_session.execute(select(AuditEvent).where(AuditEvent.action == "service.disable"))
     ).scalars()
-    assert enabled.status_code == 200
+    assert enabled.status_code == 202
     assert missing_confirm.status_code == 422
-    assert disabled.status_code == 200
-    assert disabled_again.status_code == 200
+    assert disabled.status_code == 202
+    assert disabled_again.status_code == 202
     assert len(list(audits)) == 1
 
 
@@ -364,13 +381,13 @@ async def test_delete_enabled_then_disable_delete_cascades(
 
     async for client in make_client(db_session, store):
         await authenticate(client, store, admin)
-        service = await create_service_via_api(client, tenant=tenant)
-        db_session.add(AllowRule(service_id=service["id"], priority=10, protocol=Protocol.tcp))
+        service = await create_service_via_api(client, db_session, tenant=tenant)
+        db_session.add(AllowRule(service_id=service.id, priority=10, protocol=Protocol.tcp))
         await db_session.flush()
-        await client.post(f"/services/{service['id']}/enable")
-        enabled_delete = await client.delete(f"/services/{service['id']}")
-        await client.post(f"/services/{service['id']}/disable", json={"confirm": True})
-        disabled_delete = await client.delete(f"/services/{service['id']}")
+        await client.post(f"/services/{service.id}/enable")
+        enabled_delete = await client.delete(f"/services/{service.id}")
+        await client.post(f"/services/{service.id}/disable", json={"confirm": True})
+        disabled_delete = await client.delete(f"/services/{service.id}")
 
     assert enabled_delete.status_code == 409
     assert disabled_delete.status_code == 204
@@ -388,16 +405,22 @@ async def test_patch_destination_overlap_returns_409(
 
     async for client in make_client(db_session, store):
         await authenticate(client, store, admin)
-        first = await create_service_via_api(client, tenant=tenant, cidr_or_ip="203.0.113.10/32")
+        first = await create_service_via_api(
+            client,
+            db_session,
+            tenant=tenant,
+            cidr_or_ip="203.0.113.10/32",
+        )
         second = await create_service_via_api(
             client,
+            db_session,
             tenant=tenant,
             name="second",
             cidr_or_ip="203.0.113.20/32",
         )
         response = await client.patch(
-            f"/services/{second['id']}",
-            json={"cidr_or_ip": first["cidr_or_ip"]},
+            f"/services/{second.id}",
+            json={"cidr_or_ip": str(first.cidr_or_ip)},
         )
 
     assert response.status_code == 409
@@ -420,12 +443,13 @@ async def test_cross_tenant_service_access_is_zero_leak_404(
         await authenticate(client, store, admin)
         service = await create_service_via_api(
             client,
+            db_session,
             tenant=own_tenant,
             name="secret-edge",
             cidr_or_ip="203.0.113.10/32",
         )
         await authenticate(client, store, other_user)
-        response = await client.get(f"/services/{service['id']}")
+        response = await client.get(f"/services/{service.id}")
 
     assert response.status_code == 404
     assert "secret-edge" not in response.text

@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rulematch import PortRangeError, RuleView, find_overlaps, validate_port_range
-from app.db.models import AllowRule, ProtectedService, Protocol, Role, User
+from app.db.models import AllowRule, ChangeTrigger, ProtectedService, Protocol, Role, User
+from app.services.apply import enqueue_service_update
 from app.services.audit import record_event
 from app.services.services import bump_version
 
@@ -18,6 +19,7 @@ MAX_RULES_PER_SERVICE = 16
 class RuleMutationResult:
     rule: AllowRule
     warnings: list[str]
+    service: ProtectedService
 
 
 async def create_rule(
@@ -68,7 +70,8 @@ async def create_rule(
         await db.flush()
     except IntegrityError as exc:
         _raise_integrity_error(exc)
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.rule)
     await record_event(
         db,
         actor=actor,
@@ -79,7 +82,7 @@ async def create_rule(
         ip=ip,
         metadata={"service_id": str(service.id), "priority": priority},
     )
-    return RuleMutationResult(rule=rule, warnings=warnings)
+    return RuleMutationResult(rule=rule, warnings=warnings, service=service)
 
 
 async def list_rules(
@@ -171,7 +174,8 @@ async def update_rule(
         await db.flush()
     except IntegrityError as exc:
         _raise_integrity_error(exc)
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.rule)
     await record_event(
         db,
         actor=actor,
@@ -182,7 +186,7 @@ async def update_rule(
         ip=ip,
         metadata={"service_id": str(service.id), "priority": rule.priority},
     )
-    return RuleMutationResult(rule=rule, warnings=warnings)
+    return RuleMutationResult(rule=rule, warnings=warnings, service=service)
 
 
 async def delete_rule(
@@ -192,13 +196,14 @@ async def delete_rule(
     rule_id: uuid.UUID,
     actor: User | None,
     ip: str | None = None,
-) -> None:
+) -> ProtectedService:
     service = await _require_service_locked(db, service_id)
     _authorize_actor(actor, service)
     rule = await _require_rule(db, service.id, rule_id)
     await db.delete(rule)
     await db.flush()
-    await bump_version(db, service.id)
+    service = await bump_version(db, service.id)
+    await enqueue_service_update(db, service, actor, ChangeTrigger.rule)
     await record_event(
         db,
         actor=actor,
@@ -209,6 +214,7 @@ async def delete_rule(
         ip=ip,
         metadata={"service_id": str(service.id), "priority": rule.priority},
     )
+    return service
 
 
 async def overlap_dry_run(

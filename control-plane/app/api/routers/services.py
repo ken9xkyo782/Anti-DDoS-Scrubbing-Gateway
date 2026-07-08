@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas.apply import ApplyMutationResponse
 from app.api.schemas.services import (
     ServiceCreateRequest,
     ServiceDisableRequest,
@@ -20,7 +21,7 @@ from app.core.deps import (
     load_service_for_principal,
     require_admin,
 )
-from app.db.models import Role, User
+from app.db.models import ProtectedService, Role, User
 from app.db.session import get_db
 from app.services import services as service_service
 
@@ -33,12 +34,12 @@ async def get_admin_principal(
     return require_admin(principal)
 
 
-@router.post("", response_model=ServiceResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ApplyMutationResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_service(
     payload: ServiceCreateRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ServiceResponse:
+) -> ApplyMutationResponse:
     actor = await _load_actor(db, principal)
     tenant_id = _tenant_for_create(payload.tenant_id, principal)
     record = await service_service.create_service(
@@ -55,7 +56,7 @@ async def create_service(
         ),
         ceiling_clean_gbps=payload.plan.ceiling_clean_gbps if payload.plan is not None else None,
     )
-    return _service_response(record)
+    return _apply_mutation_response(record.service)
 
 
 @router.get("", response_model=list[ServiceResponse])
@@ -80,13 +81,17 @@ async def get_service(
     )
 
 
-@router.patch("/{service_id}", response_model=ServiceResponse)
+@router.patch(
+    "/{service_id}",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def update_service(
     service_id: uuid.UUID,
     payload: ServicePatchRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ServiceResponse:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
     record = await service_service.update_service(
@@ -99,7 +104,7 @@ async def update_service(
         vip_pps=payload.vip_pps,
         vip_bps=payload.vip_bps,
     )
-    return _service_response(record)
+    return _apply_mutation_response(record.service)
 
 
 @router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -113,27 +118,38 @@ async def delete_service(
     await service_service.delete_service(db, service_id=service.id, actor=actor)
 
 
-@router.post("/{service_id}/enable", response_model=ServiceResponse)
+@router.post(
+    "/{service_id}/enable",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def enable_service(
     service_id: uuid.UUID,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ServiceResponse:
+) -> ApplyMutationResponse:
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    await service_service.set_enabled(db, service_id=service.id, enabled=True, actor=actor)
-    return _service_response(
-        await service_service.get_service(db, service_id=service.id, principal=principal)
+    updated = await service_service.set_enabled(
+        db,
+        service_id=service.id,
+        enabled=True,
+        actor=actor,
     )
+    return _apply_mutation_response(updated)
 
 
-@router.post("/{service_id}/disable", response_model=ServiceResponse)
+@router.post(
+    "/{service_id}/disable",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def disable_service(
     service_id: uuid.UUID,
     payload: ServiceDisableRequest,
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ServiceResponse:
+) -> ApplyMutationResponse:
     if not payload.confirm:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -141,19 +157,26 @@ async def disable_service(
         )
     service = await load_service_for_principal(db, service_id, principal)
     actor = await _load_actor(db, principal)
-    await service_service.set_enabled(db, service_id=service.id, enabled=False, actor=actor)
-    return _service_response(
-        await service_service.get_service(db, service_id=service.id, principal=principal)
+    updated = await service_service.set_enabled(
+        db,
+        service_id=service.id,
+        enabled=False,
+        actor=actor,
     )
+    return _apply_mutation_response(updated)
 
 
-@router.patch("/{service_id}/plan", response_model=ServiceResponse)
+@router.patch(
+    "/{service_id}/plan",
+    response_model=ApplyMutationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def update_service_plan(
     service_id: uuid.UUID,
     payload: ServicePlanPatchRequest,
     principal: Annotated[Principal, Depends(get_admin_principal)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ServiceResponse:
+) -> ApplyMutationResponse:
     actor = await _load_actor(db, principal)
     result = await service_service.size_plan(
         db,
@@ -162,10 +185,7 @@ async def update_service_plan(
         committed_clean_gbps=payload.committed_clean_gbps,
         ceiling_clean_gbps=payload.ceiling_clean_gbps,
     )
-    record = await service_service.get_service(
-        db, service_id=result.service.id, principal=principal
-    )
-    return _service_response(record, warnings=result.warnings)
+    return _apply_mutation_response(result.service)
 
 
 async def _load_actor(db: AsyncSession, principal: Principal) -> User | None:
@@ -229,4 +249,12 @@ def _service_response(
         warnings=warnings or [],
         created_at=service.created_at,
         updated_at=service.updated_at,
+    )
+
+
+def _apply_mutation_response(service: ProtectedService) -> ApplyMutationResponse:
+    return ApplyMutationResponse(
+        apply_status=service.apply_status,
+        version=service.version,
+        active_version=service.active_version,
     )
