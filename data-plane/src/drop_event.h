@@ -20,6 +20,11 @@ struct sample_config {
 	__u64 burst;
 };
 
+struct sample_bucket_state {
+	__u64 tokens;
+	__u64 last_ns;
+};
+
 enum sample_stat {
 	SAMPLE_EMITTED = 0,
 	SAMPLE_SUPPRESSED = 1,

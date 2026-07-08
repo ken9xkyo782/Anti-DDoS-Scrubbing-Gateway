@@ -29,8 +29,15 @@ struct test_env {
 	int service_map_fd;
 	int active_config_fd;
 	int tx_devmap_fd;
+	int trigger_fd;
+	int ringbuf_fd;
+	int sample_config_fd;
+	int sample_bucket_fd;
+	int sample_stats_fd;
 	int possible_cpus;
 };
+
+static int build_default_udp_frame(struct pkt_frame *frame);
 
 static int env_open(struct test_env *env)
 {
@@ -66,10 +73,17 @@ static int env_open(struct test_env *env)
 	env->service_map_fd = bpf_map__fd(env->skel->maps.service_map);
 	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
 	env->tx_devmap_fd = bpf_map__fd(env->skel->maps.tx_devmap);
+	env->trigger_fd = bpf_map__fd(env->skel->maps.test_trigger_map);
+	env->ringbuf_fd = bpf_map__fd(env->skel->maps.drop_ringbuf);
+	env->sample_config_fd = bpf_map__fd(env->skel->maps.sample_config);
+	env->sample_bucket_fd = bpf_map__fd(env->skel->maps.sample_bucket);
+	env->sample_stats_fd = bpf_map__fd(env->skel->maps.sample_stats);
 	if (env->prog_fd < 0 || env->counter_fd < 0 || env->meta_fd < 0 ||
 	    env->service_inner0_fd < 0 || env->service_inner1_fd < 0 ||
 	    env->service_map_fd < 0 || env->active_config_fd < 0 ||
-	    env->tx_devmap_fd < 0) {
+	    env->tx_devmap_fd < 0 || env->trigger_fd < 0 ||
+	    env->ringbuf_fd < 0 || env->sample_config_fd < 0 ||
+	    env->sample_bucket_fd < 0 || env->sample_stats_fd < 0) {
 		fprintf(stderr, "failed to resolve BPF fds\n");
 		xdp_gateway_test_bpf__destroy(env->skel);
 		return -1;
@@ -86,13 +100,22 @@ static void env_close(struct test_env *env)
 static int reset_observability(struct test_env *env)
 {
 	__u64 *zero_counts;
+	struct sample_bucket_state *zero_buckets;
 	struct pkt_meta zero_meta = {};
+	struct sample_config zero_config = {};
+	__u32 zero_trigger = 0;
 	__u32 key;
 	int err = 0;
 
 	zero_counts = calloc(env->possible_cpus, sizeof(*zero_counts));
 	if (!zero_counts)
 		return -1;
+
+	zero_buckets = calloc(env->possible_cpus, sizeof(*zero_buckets));
+	if (!zero_buckets) {
+		free(zero_counts);
+		return -1;
+	}
 
 	for (key = 0; key < DROP_REASON_CAP; key++) {
 		if (bpf_map_update_elem(env->counter_fd, &key, zero_counts, 0) != 0) {
@@ -104,7 +127,19 @@ static int reset_observability(struct test_env *env)
 	key = 0;
 	if (!err && bpf_map_update_elem(env->meta_fd, &key, &zero_meta, 0) != 0)
 		err = -1;
+	if (!err && bpf_map_update_elem(env->trigger_fd, &key, &zero_trigger, 0) != 0)
+		err = -1;
+	if (!err && bpf_map_update_elem(env->sample_config_fd, &key, &zero_config, 0) != 0)
+		err = -1;
+	if (!err && bpf_map_update_elem(env->sample_bucket_fd, &key, zero_buckets, 0) != 0)
+		err = -1;
 
+	for (key = 0; !err && key < SAMPLE_STAT_MAX; key++) {
+		if (bpf_map_update_elem(env->sample_stats_fd, &key, zero_counts, 0) != 0)
+			err = -1;
+	}
+
+	free(zero_buckets);
 	free(zero_counts);
 	return err;
 }
@@ -189,6 +224,25 @@ static int set_active(struct test_env *env, __u32 slot, __u32 version)
 	return bpf_map_update_elem(env->active_config_fd, &key, &config, 0);
 }
 
+static int set_sample_config(struct test_env *env, __u64 rate_per_sec,
+			     __u64 burst)
+{
+	struct sample_config config = {
+		.rate_per_sec = rate_per_sec,
+		.burst = burst,
+	};
+	__u32 key = 0;
+
+	return bpf_map_update_elem(env->sample_config_fd, &key, &config, 0);
+}
+
+static int set_bad_reason_trigger(struct test_env *env, __u32 enabled)
+{
+	__u32 key = 0;
+
+	return bpf_map_update_elem(env->trigger_fd, &key, &enabled, 0);
+}
+
 static int read_counter(struct test_env *env, enum drop_reason reason, __u64 *sum)
 {
 	__u64 *values;
@@ -210,12 +264,73 @@ static int read_counter(struct test_env *env, enum drop_reason reason, __u64 *su
 	return err;
 }
 
+static int read_sample_stat(struct test_env *env, enum sample_stat stat,
+			    __u64 *sum)
+{
+	__u64 *values;
+	__u32 key = (__u32)stat;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->sample_stats_fd, &key, values);
+	if (err == 0) {
+		*sum = 0;
+		for (int i = 0; i < env->possible_cpus; i++)
+			*sum += values[i];
+	}
+
+	free(values);
+	return err;
+}
+
 static int __attribute__((unused)) read_meta(struct test_env *env,
 					    struct pkt_meta *meta)
 {
 	__u32 key = 0;
 
 	return bpf_map_lookup_elem(env->meta_fd, &key, meta);
+}
+
+struct event_capture {
+	struct drop_event events[8];
+	size_t count;
+	size_t bad_len;
+};
+
+static int capture_drop_event(void *ctx, void *data, size_t len)
+{
+	struct event_capture *capture = ctx;
+
+	if (len != sizeof(struct drop_event)) {
+		capture->bad_len = len;
+		return 0;
+	}
+
+	if (capture->count < sizeof(capture->events) / sizeof(capture->events[0]))
+		memcpy(&capture->events[capture->count], data,
+		       sizeof(capture->events[capture->count]));
+	capture->count++;
+	return 0;
+}
+
+static int consume_drop_events(struct test_env *env, struct event_capture *capture)
+{
+	struct ring_buffer *ring;
+	int err;
+
+	memset(capture, 0, sizeof(*capture));
+	ring = ring_buffer__new(env->ringbuf_fd, capture_drop_event, capture, NULL);
+	if (!ring)
+		return -1;
+
+	err = ring_buffer__consume(ring);
+	ring_buffer__free(ring);
+	if (err < 0)
+		return -1;
+	return 0;
 }
 
 static int run_frame_current_maps(struct test_env *env,
@@ -333,6 +448,25 @@ static int expect_counter(struct test_env *env, enum drop_reason reason,
 	return -1;
 }
 
+static int expect_sample_stat(struct test_env *env, enum sample_stat stat,
+			      __u64 want)
+{
+	__u64 got = 0;
+
+	if (read_sample_stat(env, stat, &got) != 0) {
+		fprintf(stderr, "sample_stat[%u]: read failed: %s\n", stat,
+			strerror(errno));
+		return -1;
+	}
+
+	if (got == want)
+		return 0;
+
+	fprintf(stderr, "sample_stat[%u]: got %llu, want %llu\n", stat,
+		(unsigned long long)got, (unsigned long long)want);
+	return -1;
+}
+
 static int expect_all_drop_counters_zero(struct test_env *env)
 {
 	for (enum drop_reason reason = DR_IPV6_UNSUPPORTED;
@@ -381,6 +515,171 @@ static int test_drop_reason_abi_exposes_16_slots(void)
 		err = expect_reason_zero(&env, DR_INGRESS_CAP_DROP);
 	if (!err)
 		err = expect_reason_zero(&env, DR_VIP_CEILING_DROP);
+
+	env_close(&env);
+	return err;
+}
+
+static int expect_default_udp_miss_event(const struct drop_event *event)
+{
+	if (expect_u8("event.reason", event->reason, DR_SERVICE_MISS) != 0)
+		return -1;
+	if (expect_u32("event.src_ip", event->src_ip, htonl(0x0a000001)) != 0)
+		return -1;
+	if (expect_u32("event.dst_ip", event->dst_ip, DEFAULT_DST) != 0)
+		return -1;
+	if (expect_u32("event.service_id", event->service_id, 0) != 0)
+		return -1;
+	if (expect_u16("event.sport", event->sport, htons(1234)) != 0)
+		return -1;
+	if (expect_u16("event.dport", event->dport, htons(53)) != 0)
+		return -1;
+	return expect_u8("event.ip_proto", event->ip_proto, IPPROTO_UDP);
+}
+
+static int test_ringbuf_delivers_after_test_run(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct event_capture capture;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IPV6) != 0 || build_ipv6(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_sample_config(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = consume_drop_events(&env, &capture);
+	if (!err)
+		err = expect_u32("captured events", capture.count, 1);
+	if (!err)
+		err = expect_u32("bad event length", capture.bad_len, 0);
+	if (!err)
+		err = expect_u8("event.reason", capture.events[0].reason,
+				DR_IPV6_UNSUPPORTED);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_EMITTED, 1);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_SUPPRESSED, 0);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_LOST, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_sampling_disabled_keeps_counters_exact(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_MISS, 1);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_EMITTED, 0);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_SUPPRESSED, 0);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_LOST, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_sampling_budget_limits_events_and_keeps_content(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct event_capture capture;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_sample_config(&env, 0, 2);
+	for (int i = 0; !err && i < 5; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err)
+			err = expect_u32("retval", retval, XDP_DROP);
+	}
+
+	if (!err)
+		err = consume_drop_events(&env, &capture);
+	if (!err)
+		err = expect_u32("captured events", capture.count, 2);
+	if (!err)
+		err = expect_u32("bad event length", capture.bad_len, 0);
+	if (!err)
+		err = expect_default_udp_miss_event(&capture.events[0]);
+	if (!err)
+		err = expect_default_udp_miss_event(&capture.events[1]);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_MISS, 5);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_EMITTED, 2);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_SUPPRESSED, 3);
+	if (!err)
+		err = expect_sample_stat(&env, SAMPLE_LOST, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_bad_reason_clamps_to_map_error(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_bad_reason_trigger(&env, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
 
 	env_close(&env);
 	return err;
@@ -436,6 +735,16 @@ static int test_config_maps_load(void)
 		err = expect_fd("active_config", env.active_config_fd);
 	if (!err)
 		err = expect_fd("tx_devmap", env.tx_devmap_fd);
+	if (!err)
+		err = expect_fd("test_trigger_map", env.trigger_fd);
+	if (!err)
+		err = expect_fd("drop_ringbuf", env.ringbuf_fd);
+	if (!err)
+		err = expect_fd("sample_config", env.sample_config_fd);
+	if (!err)
+		err = expect_fd("sample_bucket", env.sample_bucket_fd);
+	if (!err)
+		err = expect_fd("sample_stats", env.sample_stats_fd);
 
 	env_close(&env);
 	return err;
@@ -1233,6 +1542,14 @@ int main(void)
 		{ "config maps load", test_config_maps_load },
 		{ "drop reason ABI exposes 16 slots",
 		  test_drop_reason_abi_exposes_16_slots },
+		{ "ringbuf delivers after test_run",
+		  test_ringbuf_delivers_after_test_run },
+		{ "sampling disabled keeps counters exact",
+		  test_sampling_disabled_keeps_counters_exact },
+		{ "sampling budget limits events and keeps content",
+		  test_sampling_budget_limits_events_and_keeps_content },
+		{ "bad reason clamps to map_error",
+		  test_bad_reason_clamps_to_map_error },
 		{ "service miss drops", test_service_miss_drops },
 		{ "service disabled drops", test_service_disabled_drops },
 		{ "enabled service sets redirect meta",

@@ -51,6 +51,13 @@ struct {
 	__type(key, __u32);
 	__type(value, struct pkt_meta);
 } test_meta_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u32);
+} test_trigger_map SEC(".maps");
 #endif
 
 static __always_inline void write_test_meta(const struct pkt_meta *meta)
@@ -61,6 +68,18 @@ static __always_inline void write_test_meta(const struct pkt_meta *meta)
 	bpf_map_update_elem(&test_meta_map, &key, meta, BPF_ANY);
 #else
 	(void)meta;
+#endif
+}
+
+static __always_inline int test_bad_reason_enabled(void)
+{
+#ifdef PKT_TEST_HOOKS
+	__u32 key = 0;
+	__u32 *trigger = bpf_map_lookup_elem(&test_trigger_map, &key);
+
+	return trigger && *trigger == 1;
+#else
+	return 0;
 #endif
 }
 
@@ -116,6 +135,9 @@ int xdp_gateway(struct xdp_md *ctx)
 	};
 	struct pkt_meta meta = {};
 	enum parse_result res;
+
+	if (test_bad_reason_enabled())
+		return record_drop(&meta, (enum drop_reason)DROP_REASON_CAP);
 
 	res = parse_eth(&cur, data_end, &meta);
 	if (res != PARSE_OK)

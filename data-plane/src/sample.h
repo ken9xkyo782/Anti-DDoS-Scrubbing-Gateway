@@ -10,11 +10,6 @@
 #define DROP_RINGBUF_SIZE (256 * 1024)
 #define NSEC_PER_SEC 1000000000ULL
 
-struct sample_bucket_state {
-	__u64 tokens;
-	__u64 last_ns;
-};
-
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, DROP_RINGBUF_SIZE);
