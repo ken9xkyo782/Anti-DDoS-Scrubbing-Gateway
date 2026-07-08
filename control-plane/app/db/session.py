@@ -1,4 +1,5 @@
-from collections.abc import AsyncGenerator
+import logging
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -9,6 +10,11 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+PostCommitCallback = Callable[[], Awaitable[None]]
+_POST_COMMIT_CALLBACKS_KEY = "post_commit_callbacks"
 
 
 class Base(DeclarativeBase):
@@ -44,9 +50,29 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
+            await run_post_commit_callbacks(session)
         except Exception:
+            discard_post_commit_callbacks(session)
             await session.rollback()
             raise
+
+
+def add_post_commit_callback(session: AsyncSession, callback: PostCommitCallback) -> None:
+    callbacks = session.info.setdefault(_POST_COMMIT_CALLBACKS_KEY, [])
+    callbacks.append(callback)
+
+
+def discard_post_commit_callbacks(session: AsyncSession) -> None:
+    session.info.pop(_POST_COMMIT_CALLBACKS_KEY, None)
+
+
+async def run_post_commit_callbacks(session: AsyncSession) -> None:
+    callbacks = session.info.pop(_POST_COMMIT_CALLBACKS_KEY, [])
+    for callback in callbacks:
+        try:
+            await callback()
+        except Exception:
+            logger.exception("Post-commit callback failed")
 
 
 async def dispose_engine() -> None:
