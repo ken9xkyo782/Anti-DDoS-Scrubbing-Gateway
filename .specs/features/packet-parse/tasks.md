@@ -2,9 +2,9 @@
 
 **Design:** `.specs/features/packet-parse/design.md`
 **Spec:** `.specs/features/packet-parse/spec.md` (PKT-01..24 — **finalized below**)
-**Status:** **Approved** (2026-07-08) — Execute deferred (user go-ahead pending)
+**Status:** **Verified** (2026-07-08) — Execute complete; final gates passed (`make bpf skel loader`, `make test` → 21 passed)
 **Execute tooling (chosen):** Skill `coding-guidelines` on the C/XDP tasks (T1–T7); MCPs: none configured.
-Execution mode (sub-agents vs inline) to be decided when Execute is triggered.
+Execution mode: inline.
 
 > **Requirement IDs finalized here** (spec noted "finalized in Design/Tasks"): Scaffold/loader/harness
 > **PKT-01..06**, fail-fast + enum/counter **PKT-07..12**, `pkt_meta`/single-parse **PKT-13..18**,

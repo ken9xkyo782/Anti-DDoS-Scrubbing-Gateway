@@ -2,7 +2,7 @@
 
 **Spec:** `.specs/features/packet-parse/spec.md` (PKT-01..24)
 **Context:** `.specs/features/packet-parse/context.md` (D-PKT-1..4, A-PKT-1..7)
-**Status:** Draft — awaiting approval → Tasks
+**Status:** Verified — Execute complete (2026-07-08)
 **Domain:** first C / XDP / eBPF code in the repo (bootstraps `data-plane/`)
 
 ---

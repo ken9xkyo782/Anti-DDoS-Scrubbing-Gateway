@@ -52,7 +52,7 @@
 
 ### Features
 
-**Packet parse & fail-fast** - IN PROGRESS (spec + context + design + tasks)
+**Packet parse & fail-fast** - VERIFIED (executed)
 - L2/VLAN/QinQ EtherType, IPv4+L4 parse into `pkt_meta` (single parse)
 - Drops: `ipv6_unsupported`, `unsupported_ethertype`, `malformed_ipv4`, `fragment_unsupported`; ARP = classify + `XDP_PASS` (redirect seam deferred)
 - **Bootstraps `data-plane/`**: `clang -target bpf` + libbpf-skeleton build, native/DRV-mode loader on `IN` (fail-loud, no generic fallback), `BPF_PROG_TEST_RUN` test harness; valid IPv4 exits at a marked `XDP_PASS` service-lookup seam
