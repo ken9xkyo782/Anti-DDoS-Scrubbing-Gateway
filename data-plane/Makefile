@@ -7,6 +7,7 @@ BUILD_DIR := build
 SRC_DIR := src
 LOADER_DIR := loader
 TEST_DIR := tests
+TOOLS_DIR := tools
 
 BPF_SRC := $(SRC_DIR)/xdp_gateway.bpf.c
 BPF_OBJ := $(BUILD_DIR)/xdp_gateway.bpf.o
@@ -15,6 +16,8 @@ SKEL := $(BUILD_DIR)/xdp_gateway.skel.h
 TEST_SKEL := $(BUILD_DIR)/xdp_gateway.test.skel.h
 LOADER_SRC := $(LOADER_DIR)/loader.c
 LOADER := $(BUILD_DIR)/xdp_gateway_loader
+DPSTAT_SRC := $(TOOLS_DIR)/dpstat.c
+DPSTAT := $(BUILD_DIR)/dpstat
 TEST_SRC := $(TEST_DIR)/test_parse.c
 TEST_BIN := $(BUILD_DIR)/test_parse
 
@@ -26,7 +29,7 @@ LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
 USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
-.PHONY: all bpf skel loader test smoke clean run
+.PHONY: all bpf skel loader dpstat test smoke clean run
 
 all: bpf skel loader
 
@@ -54,6 +57,11 @@ $(TEST_SKEL): $(TEST_BPF_OBJ)
 loader: $(LOADER)
 
 $(LOADER): $(LOADER_SRC) $(SKEL) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
+
+dpstat: $(DPSTAT)
+
+$(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 test: $(TEST_BIN)
