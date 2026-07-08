@@ -1,0 +1,46 @@
+%% Diagram: Service lookup & redirect config-map architecture (slot pin, tx_devmap, seed, M4 handoff)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TB
+    subgraph prog["xdp_gateway.bpf.c (native XDP on IN)"]
+        parse["parse chain (packet-parse)<br/>&rarr; pkt_meta"]
+        pinlk["slot pin + service lookup<br/>+ redirect decision"]
+        parse --> pinlk
+    end
+
+    subgraph cfg["Config maps (slot-aware, double-buffer-ready)"]
+        ac["active_config[0]<br/>{active_slot, version}"]
+        sm["service_map<br/>ARRAY_OF_MAPS[2]"]
+        in0["service_inner_0<br/>LPM_TRIE (slot 0)"]
+        in1["service_inner_1<br/>LPM_TRIE (slot 1)"]
+        sm --> in0
+        sm --> in1
+    end
+
+    subgraph rt["Runtime-state maps (unslotted)"]
+        dev["tx_devmap<br/>DEVMAP[0] &rarr; OUT ifindex"]
+        cnt["counter_map<br/>PERCPU_ARRAY[32]"]
+    end
+
+    pinlk -- "read active_slot" --> ac
+    pinlk -- "lookup dst_ip (pinned slot)" --> sm
+    pinlk -- "XDP_REDIRECT" --> dev
+    pinlk -- "record_drop" --> cnt
+    dev -. "verbatim frame" .-> out(["OUT (protected hosts)"])
+
+    subgraph seed["Populates the config side"]
+        loader["loader / test seed helper<br/>(v1, throwaway)"]
+        worker["M4 worker (future)<br/>Postgres build + atomic active_slot flip"]
+    end
+    loader -. "seed slot + set active_slot (v1)" .-> cfg
+    worker -. "build inactive slot, verify, flip (M4)" .-> cfg
+
+    tmm["test_meta_map (-DPKT_TEST_HOOKS)<br/>decision observability"]
+    pinlk -. "write verdict/service_id (tests)" .-> tmm

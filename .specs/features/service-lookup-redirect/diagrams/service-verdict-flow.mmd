@@ -1,0 +1,26 @@
+%% Diagram: Service lookup & redirect verdict flow (replaces both packet-parse seams)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TD
+    seam(["valid IPv4 exits parse<br/>(pkt_meta filled)"]) --> pin["pin: read active_config.active_slot once<br/>&rarr; pkt_meta.active_slot"]
+    pin --> inner{"service_map[slot]<br/>inner LPM present?"}
+    inner -- "no (bad slot)" --> me["XDP_DROP<br/>DR_MAP_ERROR"]
+    inner -- "yes" --> lpm{"LPM lookup dst_ip<br/>(prefixlen=32)"}
+    lpm -- "no match" --> miss["XDP_DROP<br/>DR_SERVICE_MISS"]
+    lpm -- "match, enabled=0" --> dis["XDP_DROP<br/>DR_SERVICE_DISABLED"]
+    lpm -- "match, enabled=1" --> hit["set service_id, verdict=REDIRECT<br/>write_test_meta (hooks)"]
+    hit --> rdr["bpf_redirect_map(&tx_devmap,0,XDP_DROP)<br/>= XDP_REDIRECT IN&rarr;OUT (verbatim)"]
+
+    arp(["EtherType = ARP"]) --> arpv["verdict=REDIRECT<br/>write_test_meta (hooks)"]
+    arpv --> rdr
+
+    miss --> cnt["record_drop &rarr; counter_map (per-CPU)"]
+    dis --> cnt
+    me --> cnt

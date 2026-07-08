@@ -62,15 +62,17 @@
 - Tasks: **T1** scaffold+contracts+trivial prog (build) · **T2** native loader `[P]` · **T3** `BPF_PROG_TEST_RUN` harness · **T4** EtherType+IPv6/unsupported+ARP · **T5** IPv4+malformed+fragment · **T6** L4+`pkt_meta`+seam · **T7** VLAN/QinQ · **T8** TESTING.md data-plane section `[P]`. Only T2/T8 `[P]`; T3→T7 serialize on shared files. Establishes data-plane `TESTING.md` conventions (T8).
 - First data-plane feature — no control-plane change; consumed by *Service lookup & transparent redirect* (replaces both seams) and all of M3
 
-**Service lookup & transparent redirect** - IN PROGRESS (spec + context drafted)
+**Service lookup & transparent redirect** - IN PROGRESS (spec + context + design + tasks APPROVED; Execute deferred)
 - `service_map` match (LPM by dst IPv4); `service_miss` vs `service_disabled` (drop-all, not pass-through)
 - `XDP_REDIRECT IN→OUT` via `tx_devmap`, TTL/checksum preserved (verbatim frame, no L3 mutation)
 - `active_slot` snapshot/pin at ingress (consistent per-packet view); first **config maps** + slot pin
 - Replaces packet-parse's two seams (service-lookup + ARP); **ARP now redirects `IN→OUT`** (D-SLRD-3)
 - Owns the config-map **read/pin side** + a userspace seed helper; DB build + **atomic swap** = M4 (D-SLRD-1)
-- Verified by `BPF_PROG_TEST_RUN` (decision) + a gated live two-veth smoke (TTL/csum, D-SLRD-2)
-- Spec `spec.md` (SLRD-01..26); context `context.md` (D-SLRD-1..3, A-SLRD-1..8)
-- Requires packet-parse executed first (reuses `pkt_meta`/`drop_reason`/loader/`BPF_PROG_TEST_RUN`)
+- Verified by `BPF_PROG_TEST_RUN` (decision via `test_meta_map`) + a gated live two-veth smoke (TTL/csum, D-SLRD-2)
+- Spec `spec.md` (SLRD-01..26); context `context.md` (D-SLRD-1..3, A-SLRD-1..8); `design.md` + rendered diagrams (verdict flow + config-map architecture); `tasks.md` (T1–T7, all 26 mapped)
+- Design (AD-015): `service_map` = `ARRAY_OF_MAPS`[2] of `LPM_TRIE` inners (double-buffer) + `active_config` + `tx_devmap`; hot-path slot-pin → LPM → verdict → `bpf_redirect_map(&tx_devmap,0,XDP_DROP)` (fail-closed); adds `DR_SERVICE_MISS`/`DR_SERVICE_DISABLED` + `pkt_meta.{service_id,active_slot,verdict}`; extends loader (`OUT`+seed) & migrates the 21 parse tests' verdict expectations. 3 kernel semantics web-verified.
+- Tasks: **T1** contract headers (build) · **T2** config maps + **load de-risk** (map-in-map/LPM feasibility here, else fallback) · **T3** service seam (pin+LPM+verdicts+redirect+tests+migrate IPv4 tests) · **T4** ARP redirect seam · **T5** loader `OUT`+populate+seed `[P]` · **T6** live-veth smoke (dp-integration, TTL/csum) · **T7** TESTING.md. Only **T5** `[P]`; T3→T4 serialize on shared files; T6 not parallel-safe.
+- Requires packet-parse executed first (**satisfied** — packet-parse VERIFIED); reuses `pkt_meta`/`drop_reason`/loader/`BPF_PROG_TEST_RUN`
 
 **Drop-reason counters** - PLANNED
 - Per-CPU `counter_map`; standardized drop reasons (10.2); rate-limited ringbuf/perf sampling
