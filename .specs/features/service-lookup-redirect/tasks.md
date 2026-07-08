@@ -264,7 +264,7 @@ program to decrement TTL → smoke fails (guards the assertion).
 
 ### T7: TESTING.md — populate dp-integration / redirect smoke conventions
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`.specs/codebase/TESTING.md` documents `make smoke` dp-integration)
 **What:** Fill the previously-"Future" `dp-integration` row with the concrete `make smoke` two-veth
 redirect/TTL-csum convention and add `make smoke` to the gate table.
 **Where:** `.specs/codebase/TESTING.md` (Data-plane section)

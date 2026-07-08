@@ -70,7 +70,7 @@ Every task's **Done when** cites the expected pass count (e.g. "N tests pass") t
 | Type | Definition | Needs | Parallel-Safe |
 | --- | --- | --- | --- |
 | **dp-unit** | Runs the verifier-approved XDP program through `BPF_PROG_TEST_RUN` with synthetic frames and asserts verdicts, drop counters, and test-only `pkt_meta` output | BPF-capable kernel and permission to load BPF programs | **Yes** as infrastructure; individual parse tasks serialize when they edit shared parser/test files |
-| **dp-integration** | Future live veth/NIC attach smoke for native XDP attach/redirect behavior | `CAP_NET_ADMIN`/root, veth or native-XDP-capable NIC | **No**; shared interfaces/kernel attach state |
+| **dp-integration** | Runs a privileged two-veth `IN` to `OUT` smoke through the native-XDP loader, seeds one enabled service, sends a crafted IPv4 frame, and asserts real `XDP_REDIRECT` delivery with TTL and IPv4 checksum unchanged | `CAP_NET_ADMIN`/root, veth with XDP redirect support, `clang`, `bpftool`, Python 3 | **No**; shared interfaces/kernel attach state |
 
 ### Data-plane Gate Check Commands
 
@@ -80,12 +80,12 @@ Run these from `data-plane/`.
 | --- | --- | --- |
 | **build** | `make bpf skel loader` | Scaffold, loader, and wiring tasks |
 | **quick** | `make test` | Parser/verdict tasks with `dp-unit` coverage |
-| **full** | `make test` plus optional privileged live-veth smoke | Pre-merge checks on a BPF-capable runner |
+| **full** | `make test && sudo make smoke` | Pre-merge checks on a BPF+veth-capable runner; `make smoke` is privileged and not parallel-safe |
 
 The native-mode loader is verified by the build gate plus a manual veth/NIC smoke:
-`sudo ./build/xdp_gateway_loader <ifname>` should attach in native/DRV mode or fail clearly with no
-generic/SKB fallback, and Ctrl-C should detach cleanly. There is no automated privileged loader smoke in
-v1.
+`SERVICE_DEST=<ipv4-or-cidr> sudo ./build/xdp_gateway_loader <in-ifname> <out-ifname>` should attach to
+IN in native/DRV mode, populate `tx_devmap[0]` with OUT, seed the demo service when provided, or fail
+clearly with no generic/SKB fallback. Ctrl-C should detach cleanly.
 
 ### Data-plane Corpus
 
