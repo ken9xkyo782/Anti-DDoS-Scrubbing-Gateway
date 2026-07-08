@@ -335,7 +335,7 @@ static int expect_counter(struct test_env *env, enum drop_reason reason,
 static int expect_all_drop_counters_zero(struct test_env *env)
 {
 	for (enum drop_reason reason = DR_IPV6_UNSUPPORTED;
-	     reason <= DR_MAP_ERROR; reason++) {
+	     reason <= DR_SERVICE_DISABLED; reason++) {
 		if (expect_counter(env, reason, 0) != 0)
 			return -1;
 	}
@@ -1155,6 +1155,7 @@ static int test_arp_passes_without_drop_counter(void)
 {
 	struct pkt_frame frame;
 	struct test_env env;
+	struct pkt_meta meta;
 	__u32 retval = 0;
 	int err;
 
@@ -1168,7 +1169,9 @@ static int test_arp_passes_without_drop_counter(void)
 
 	err = run_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("verdict", meta.verdict, PKT_VERDICT_REDIRECT);
 	if (!err)
 		err = expect_all_drop_counters_zero(&env);
 

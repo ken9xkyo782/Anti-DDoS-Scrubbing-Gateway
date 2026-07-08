@@ -175,7 +175,7 @@ SLRD-12, SLRD-13, SLRD-14, SLRD-17 (test seed), SLRD-23
 
 ### T4: ARP redirect seam (+ migrate ARP test)
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`make test` → 29 passed)
 **What:** Switch the ARP seam from `XDP_PASS` to the same `tx_devmap` redirect (verbatim), and migrate the
 ARP test to assert the redirect decision with no drop counter.
 **Where:** `data-plane/src/xdp_gateway.bpf.c` (ARP branch), `data-plane/tests/test_parse.c` (migrate ARP

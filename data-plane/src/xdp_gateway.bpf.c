@@ -125,8 +125,7 @@ int xdp_gateway(struct xdp_md *ctx)
 	case ETH_P_IPV6:
 		return record_drop(DR_IPV6_UNSUPPORTED);
 	case ETH_P_ARP:
-		/* SEAM: redirect ARP in service lookup feature */
-		return XDP_PASS;
+		return redirect_out(&meta);
 	case ETH_P_IP:
 		res = parse_ipv4(&cur, data_end, &meta);
 		if (res == PARSE_FRAGMENT)
