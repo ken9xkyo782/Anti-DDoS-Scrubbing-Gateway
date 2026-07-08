@@ -121,6 +121,7 @@ native-unsupported error; Ctrl-C leaves the iface with no XDP prog (`ip link sho
 
 ### T3: Test harness walking skeleton (BPF_PROG_TEST_RUN)
 
+**Status:** Blocked (2026-07-08) — environment cannot load BPF as current user; see STATE B-002.
 **What:** Synthetic-frame builders + a `BPF_PROG_TEST_RUN` runner with one trivial assertion, proving the
 compile→load→test loop end-to-end against the trivial program.
 **Where:** `data-plane/tests/pkt_build.h`, `data-plane/tests/test_parse.c` (+ Makefile `test` target
