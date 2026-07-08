@@ -241,6 +241,7 @@ values and `retval==XDP_PASS`.
 
 ### T7: VLAN / QinQ EtherType resolution
 
+**Status:** Verified (2026-07-08)
 **What:** Unwrap up to two 802.1Q/802.1ad tags to the inner EtherType (tags preserved), dropping deeper
 stacks/truncated tags as unsupported; all EtherType branching then applies to tagged frames.
 **Where:** `data-plane/src/parse.h` (add `parse_vlan`, call from `parse_eth`),
@@ -252,13 +253,13 @@ stacks/truncated tags as unsupported; all EtherType branching then applies to ta
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `parse_vlan` unwraps ≤2 tags (`ETH_P_8021Q`/`ETH_P_8021AD`) via a **bounded** `for(i<2)` loop to the
+- [x] `parse_vlan` unwraps ≤2 tags (`ETH_P_8021Q`/`ETH_P_8021AD`) via a **bounded** `for(i<2)` loop to the
       inner `eth_proto`, sets `vlan_depth` (PKT-19/20); tags preserved (not stripped, A-PKT-1).
-- [ ] `>2` tags or a truncated tag → `record_drop(DR_UNSUPPORTED_ETHERTYPE)` (PKT-21).
-- [ ] After unwrap, all P1/P2 EtherType branches apply identically to the tagged frame (PKT-22).
-- [ ] Tests added: single-VLAN IPv4 → `XDP_PASS` + correct `pkt_meta` (`vlan_depth==1`); QinQ IPv4 →
+- [x] `>2` tags or a truncated tag → `record_drop(DR_UNSUPPORTED_ETHERTYPE)` (PKT-21).
+- [x] After unwrap, all P1/P2 EtherType branches apply identically to the tagged frame (PKT-22).
+- [x] Tests added: single-VLAN IPv4 → `XDP_PASS` + correct `pkt_meta` (`vlan_depth==1`); QinQ IPv4 →
       `XDP_PASS` (`vlan_depth==2`); triple-tag → `unsupported_ethertype`; VLAN-wrapped IPv6 → `ipv6_unsupported`.
-- [ ] Gate check passes: `make test`. Test count: **≥20** dp-unit tests pass (≥4 new).
+- [x] Gate check passes: `make test`. Test count: **21** dp-unit tests pass (4 new).
 **Tests:** dp-unit · **Gate:** quick
 
 **Verify:** `make test` → all pass; QinQ IPv4 asserts inner fields resolved and `retval==XDP_PASS`.

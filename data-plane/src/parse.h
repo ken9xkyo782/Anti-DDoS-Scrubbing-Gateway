@@ -30,6 +30,16 @@ struct hdr_cursor {
 	__u16 off;
 };
 
+struct vlan_hdr {
+	__be16 h_vlan_TCI;
+	__be16 h_vlan_encapsulated_proto;
+};
+
+static __always_inline int is_vlan_proto(__u16 proto)
+{
+	return proto == ETH_P_8021Q || proto == ETH_P_8021AD;
+}
+
 static __always_inline enum parse_result cursor_advance(struct hdr_cursor *cur,
 							void *data_end,
 							__u16 len,
@@ -46,6 +56,33 @@ static __always_inline enum parse_result cursor_advance(struct hdr_cursor *cur,
 	return PARSE_OK;
 }
 
+static __always_inline enum parse_result parse_vlan(struct hdr_cursor *cur,
+						    void *data_end,
+						    struct pkt_meta *meta)
+{
+#pragma unroll
+	for (int i = 0; i < 2; i++) {
+		struct vlan_hdr *vlan;
+		enum parse_result res;
+
+		if (!is_vlan_proto(meta->eth_proto))
+			return PARSE_OK;
+
+		res = cursor_advance(cur, data_end, sizeof(*vlan),
+				     (void **)&vlan);
+		if (res != PARSE_OK)
+			return res;
+
+		meta->vlan_depth++;
+		meta->eth_proto = bpf_ntohs(vlan->h_vlan_encapsulated_proto);
+	}
+
+	if (is_vlan_proto(meta->eth_proto))
+		return PARSE_TOO_DEEP;
+
+	return PARSE_OK;
+}
+
 static __always_inline enum parse_result parse_eth(struct hdr_cursor *cur,
 						   void *data_end,
 						   struct pkt_meta *meta)
@@ -58,7 +95,7 @@ static __always_inline enum parse_result parse_eth(struct hdr_cursor *cur,
 		return res;
 
 	meta->eth_proto = bpf_ntohs(eth->h_proto);
-	return PARSE_OK;
+	return parse_vlan(cur, data_end, meta);
 }
 
 static __always_inline enum parse_result parse_ipv4(struct hdr_cursor *cur,

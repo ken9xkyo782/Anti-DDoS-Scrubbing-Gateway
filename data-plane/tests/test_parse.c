@@ -592,6 +592,128 @@ static int test_truncated_tcp_drops_malformed(void)
 	return err;
 }
 
+static int test_single_vlan_ipv4_passes_with_meta(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_vlan(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0 ||
+	    build_udp(&frame, 5555, 8080) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("vlan_depth", meta.vlan_depth, 1);
+	if (!err)
+		err = expect_u16("eth_proto", meta.eth_proto, ETH_P_IP);
+	if (!err)
+		err = expect_u16("dport", meta.dport, htons(8080));
+
+	env_close(&env);
+	return err;
+}
+
+static int test_qinq_ipv4_passes_with_meta(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_qinq(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_TCP, 0, 5) != 0 ||
+	    build_tcp(&frame, 4444, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("vlan_depth", meta.vlan_depth, 2);
+	if (!err)
+		err = expect_u16("eth_proto", meta.eth_proto, ETH_P_IP);
+	if (!err)
+		err = expect_u16("sport", meta.sport, htons(4444));
+
+	env_close(&env);
+	return err;
+}
+
+static int test_triple_vlan_drops_unsupported(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_8021AD) != 0 ||
+	    append_vlan_tag(&frame, ETH_P_8021Q) != 0 ||
+	    append_vlan_tag(&frame, ETH_P_8021Q) != 0 ||
+	    append_vlan_tag(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UNSUPPORTED_ETHERTYPE, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vlan_ipv6_drops_ipv6_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_vlan(&frame, ETH_P_IPV6) != 0 || build_ipv6(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_IPV6_UNSUPPORTED, 1);
+
+	env_close(&env);
+	return err;
+}
+
 static int test_ipv6_drops_with_counter(void)
 {
 	struct pkt_frame frame;
@@ -731,6 +853,13 @@ int main(void)
 		  test_truncated_udp_drops_malformed },
 		{ "truncated TCP drops malformed",
 		  test_truncated_tcp_drops_malformed },
+		{ "single VLAN IPv4 passes with meta",
+		  test_single_vlan_ipv4_passes_with_meta },
+		{ "QinQ IPv4 passes with meta", test_qinq_ipv4_passes_with_meta },
+		{ "triple VLAN drops unsupported",
+		  test_triple_vlan_drops_unsupported },
+		{ "VLAN IPv6 drops IPv6 counter",
+		  test_vlan_ipv6_drops_ipv6_counter },
 	};
 	size_t passed = 0;
 	size_t count = sizeof(tests) / sizeof(tests[0]);
