@@ -64,6 +64,46 @@ static __always_inline void write_test_meta(const struct pkt_meta *meta)
 #endif
 }
 
+static __always_inline int redirect_out(struct pkt_meta *meta)
+{
+	meta->verdict = PKT_VERDICT_REDIRECT;
+	write_test_meta(meta);
+	return bpf_redirect_map(&tx_devmap, 0, XDP_DROP);
+}
+
+static __always_inline int service_lookup_redirect(struct pkt_meta *meta)
+{
+	__u32 config_key = 0;
+	struct active_config *config;
+	struct service_key key = {};
+	struct service_val *service;
+	void *inner;
+	__u32 slot;
+
+	config = bpf_map_lookup_elem(&active_config, &config_key);
+	if (!config)
+		return record_drop(DR_MAP_ERROR);
+
+	slot = config->active_slot;
+	meta->active_slot = (__u8)slot;
+
+	inner = bpf_map_lookup_elem(&service_map, &slot);
+	if (!inner)
+		return record_drop(DR_MAP_ERROR);
+
+	key.prefixlen = 32;
+	key.addr = meta->dst_ip;
+	service = bpf_map_lookup_elem(inner, &key);
+	if (!service)
+		return record_drop(DR_SERVICE_MISS);
+
+	if (!service->enabled)
+		return record_drop(DR_SERVICE_DISABLED);
+
+	meta->service_id = service->service_id;
+	return redirect_out(meta);
+}
+
 SEC("xdp")
 int xdp_gateway(struct xdp_md *ctx)
 {
@@ -98,10 +138,7 @@ int xdp_gateway(struct xdp_md *ctx)
 		if (res != PARSE_OK)
 			return record_drop(DR_MALFORMED_IPV4);
 
-		write_test_meta(&meta);
-
-		/* SEAM: service lookup (next feature) */
-		return XDP_PASS;
+		return service_lookup_redirect(&meta);
 	default:
 		return record_drop(DR_UNSUPPORTED_ETHERTYPE);
 	}

@@ -135,7 +135,7 @@ representation doesn't load (proving/denying feasibility here, not later).
 
 ### T3: Service-lookup seam — slot pin + LPM + verdicts + redirect (+ migrate clean-IPv4 tests)
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`make test` → 29 passed)
 **What:** Replace the service-lookup seam: pin `active_slot`, LPM-lookup `dst_ip` in the pinned slot, emit
 `service_miss`/`service_disabled`/`map_error` or `bpf_redirect_map`; add seed helpers + the service dp-unit
 tests; migrate the clean-IPv4 tests whose `XDP_PASS` terminal is gone.

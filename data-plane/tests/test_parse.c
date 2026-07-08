@@ -15,6 +15,9 @@
 #include "service.h"
 #include "xdp_gateway.test.skel.h"
 
+#define DEFAULT_SERVICE_ID 42
+#define DEFAULT_DST htonl(0x0a000002)
+
 struct test_env {
 	struct xdp_gateway_test_bpf *skel;
 	int prog_fd;
@@ -79,7 +82,7 @@ static void env_close(struct test_env *env)
 	xdp_gateway_test_bpf__destroy(env->skel);
 }
 
-static int reset_maps(struct test_env *env)
+static int reset_observability(struct test_env *env)
 {
 	__u64 *zero_counts;
 	struct pkt_meta zero_meta = {};
@@ -103,6 +106,86 @@ static int reset_maps(struct test_env *env)
 
 	free(zero_counts);
 	return err;
+}
+
+static int clear_service_map(int fd)
+{
+	struct service_key key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int reset_config(struct test_env *env)
+{
+	struct active_config config = {};
+	__u32 key = 0;
+
+	if (clear_service_map(env->service_inner0_fd) != 0 ||
+	    clear_service_map(env->service_inner1_fd) != 0)
+		return -1;
+
+	if (bpf_map_update_elem(env->active_config_fd, &key, &config, 0) != 0)
+		return -1;
+
+	if (bpf_map_delete_elem(env->tx_devmap_fd, &key) != 0 &&
+	    errno != ENOENT)
+		return -1;
+
+	return 0;
+}
+
+static int reset_maps(struct test_env *env)
+{
+	if (reset_observability(env) != 0)
+		return -1;
+
+	return reset_config(env);
+}
+
+static int service_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->service_inner0_fd;
+	if (slot == 1)
+		return env->service_inner1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
+			__u32 prefixlen, __u32 service_id, __u8 enabled)
+{
+	struct service_key key = {
+		.prefixlen = prefixlen,
+		.addr = addr,
+	};
+	struct service_val val = {
+		.service_id = service_id,
+		.enabled = enabled,
+	};
+	int fd = service_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+}
+
+static int set_active(struct test_env *env, __u32 slot, __u32 version)
+{
+	struct active_config config = {
+		.active_slot = slot,
+		.version = version,
+	};
+	__u32 key = 0;
+
+	return bpf_map_update_elem(env->active_config_fd, &key, &config, 0);
 }
 
 static int read_counter(struct test_env *env, enum drop_reason reason, __u64 *sum)
@@ -134,8 +217,9 @@ static int __attribute__((unused)) read_meta(struct test_env *env,
 	return bpf_map_lookup_elem(env->meta_fd, &key, meta);
 }
 
-static int run_frame(struct test_env *env, const struct pkt_frame *frame,
-		     __u32 *retval)
+static int run_frame_current_maps(struct test_env *env,
+				  const struct pkt_frame *frame,
+				  __u32 *retval)
 {
 	struct bpf_test_run_opts opts = {
 		.sz = sizeof(opts),
@@ -145,12 +229,6 @@ static int run_frame(struct test_env *env, const struct pkt_frame *frame,
 	};
 	int err;
 
-	err = reset_maps(env);
-	if (err) {
-		fprintf(stderr, "failed to reset maps: %s\n", strerror(errno));
-		return -1;
-	}
-
 	err = bpf_prog_test_run_opts(env->prog_fd, &opts);
 	if (err) {
 		fprintf(stderr, "BPF_PROG_TEST_RUN failed: %s\n", strerror(errno));
@@ -159,6 +237,32 @@ static int run_frame(struct test_env *env, const struct pkt_frame *frame,
 
 	*retval = opts.retval;
 	return 0;
+}
+
+static int run_frame(struct test_env *env, const struct pkt_frame *frame,
+		     __u32 *retval)
+{
+	int err;
+
+	err = reset_maps(env);
+	if (err) {
+		fprintf(stderr, "failed to reset maps: %s\n", strerror(errno));
+		return -1;
+	}
+
+	return run_frame_current_maps(env, frame, retval);
+}
+
+static int run_enabled_service_frame(struct test_env *env,
+				     const struct pkt_frame *frame,
+				     __u32 *retval)
+{
+	if (reset_maps(env) != 0 ||
+	    seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0 ||
+	    set_active(env, 0, 1) != 0)
+		return -1;
+
+	return run_frame_current_maps(env, frame, retval);
 }
 
 static int expect_u32(const char *label, __u32 got, __u32 want)
@@ -195,6 +299,18 @@ static int expect_fd(const char *label, int fd)
 
 	fprintf(stderr, "%s: invalid fd %d\n", label, fd);
 	return -1;
+}
+
+static int expect_redirect_meta(struct test_env *env, struct pkt_meta *meta,
+				__u32 service_id, __u8 active_slot)
+{
+	if (read_meta(env, meta) != 0)
+		return -1;
+	if (expect_u8("verdict", meta->verdict, PKT_VERDICT_REDIRECT) != 0)
+		return -1;
+	if (expect_u32("service_id", meta->service_id, service_id) != 0)
+		return -1;
+	return expect_u8("active_slot", meta->active_slot, active_slot);
 }
 
 static int expect_counter(struct test_env *env, enum drop_reason reason,
@@ -244,11 +360,9 @@ static int test_valid_other_ipv4_passes_with_zero_ports(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u8("ip_proto", meta.ip_proto, IPPROTO_GRE);
 	if (!err)
@@ -284,6 +398,219 @@ static int test_config_maps_load(void)
 	return err;
 }
 
+static int build_default_udp_frame(struct pkt_frame *frame)
+{
+	pkt_frame_init(frame);
+	return build_eth(frame, ETH_P_IP) ||
+	       build_ipv4(frame, IPPROTO_UDP, 0, 5) ||
+	       build_udp(frame, 1234, 53);
+}
+
+static int test_service_miss_drops(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_MISS, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_service_disabled_drops(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, 7, 0);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_DISABLED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_enabled_service_sets_redirect_meta(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_cidr_service_matches_host(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, htonl(0x0a000000), 24, 99, 1);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, 99, 0);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_slot_pin_flip_changes_service_view(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, 11, 1);
+	if (!err)
+		err = seed_service(&env, 1, DEFAULT_DST, 32, 11, 0);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, 11, 0);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+	if (!err)
+		err = reset_observability(&env);
+	if (!err)
+		err = set_active(&env, 1, 2);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_DISABLED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_empty_config_drops_service_miss(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_MISS, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_invalid_active_slot_drops_map_error(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_active(&env, SERVICE_SLOTS, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
 static int test_esp_ipv4_passes_with_zero_ports(void)
 {
 	struct pkt_frame frame;
@@ -301,11 +628,9 @@ static int test_esp_ipv4_passes_with_zero_ports(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u8("ip_proto", meta.ip_proto, IPPROTO_ESP);
 	if (!err)
@@ -498,11 +823,9 @@ static int test_tcp_ports_written_to_meta(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u16("sport", meta.sport, htons(12345));
 	if (!err)
@@ -537,11 +860,9 @@ static int test_udp_ports_written_to_meta(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u16("sport", meta.sport, htons(1234));
 	if (!err)
@@ -571,11 +892,9 @@ static int test_icmp_type_code_written_to_meta(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u8("icmp_type", meta.icmp_type, 8);
 	if (!err)
@@ -657,11 +976,9 @@ static int test_single_vlan_ipv4_passes_with_meta(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u8("vlan_depth", meta.vlan_depth, 1);
 	if (!err)
@@ -691,11 +1008,9 @@ static int test_qinq_ipv4_passes_with_meta(void)
 	if (err)
 		return -1;
 
-	err = run_frame(&env, &frame, &retval);
+	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err && read_meta(&env, &meta) != 0)
-		err = -1;
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_u8("vlan_depth", meta.vlan_depth, 2);
 	if (!err)
@@ -870,6 +1185,17 @@ int main(void)
 {
 	const struct test_case tests[] = {
 		{ "config maps load", test_config_maps_load },
+		{ "service miss drops", test_service_miss_drops },
+		{ "service disabled drops", test_service_disabled_drops },
+		{ "enabled service sets redirect meta",
+		  test_enabled_service_sets_redirect_meta },
+		{ "CIDR service matches host", test_cidr_service_matches_host },
+		{ "slot pin flip changes service view",
+		  test_slot_pin_flip_changes_service_view },
+		{ "empty config drops service miss",
+		  test_empty_config_drops_service_miss },
+		{ "invalid active slot drops map error",
+		  test_invalid_active_slot_drops_map_error },
 		{ "valid other IPv4 passes with zero ports",
 		  test_valid_other_ipv4_passes_with_zero_ports },
 		{ "ESP IPv4 passes with zero ports",
