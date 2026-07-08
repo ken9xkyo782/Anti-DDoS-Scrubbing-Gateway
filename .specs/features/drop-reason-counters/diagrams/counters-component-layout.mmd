@@ -1,0 +1,37 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    subgraph kernelSide["Kernel — xdp_gateway.bpf.c"]
+        xdpProg["record_drop(meta, reason)<br/>drop_reason.h + sample.h"]
+        counterMap[("counter_map<br/>PERCPU_ARRAY ×32 — frozen ABI")]
+        dropRingbuf[("drop_ringbuf<br/>RINGBUF 256 KiB")]
+        sampleConfig[("sample_config<br/>ARRAY ×1 — rate/burst")]
+        sampleStats[("sample_stats<br/>PERCPU_ARRAY ×3")]
+        sampleBucket[("sample_bucket<br/>PERCPU_ARRAY ×1 — internal")]
+        xdpProg --> counterMap
+        xdpProg --> dropRingbuf
+        xdpProg --> sampleStats
+        sampleConfig -.->|"budget knobs"| xdpProg
+        sampleBucket -.->|"tokens"| xdpProg
+    end
+
+    subgraph bpffs["/sys/fs/bpf/xdp_gateway/"]
+        pins["pinned: counter_map · drop_ringbuf<br/>sample_config · sample_stats"]
+    end
+
+    loader["loader<br/>set_pin_path + seed defaults"] -->|"pin at load / unpin at detach"| pins
+    counterMap & dropRingbuf & sampleConfig & sampleStats --- pins
+
+    subgraph consumers["Consumers"]
+        dpstat["dpstat CLI<br/>counters · tail · rate"]
+        tests["dp-unit tests<br/>BPF_PROG_TEST_RUN"]
+        worker["M4 worker (future)<br/>TELEMETRY_AGGREGATE"]
+    end
+
+    pins --> dpstat
+    pins -.-> worker
+    tests -->|"skeleton fds (unpinned)"| xdpProg
+
+    classDef store fill:#10b981,stroke:#059669,color:#ffffff
+    classDef future stroke-dasharray: 5 5
+    class counterMap,dropRingbuf,sampleConfig,sampleStats,sampleBucket store
+    class worker future

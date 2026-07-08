@@ -74,8 +74,15 @@
 - Tasks: **T1** contract headers (build) · **T2** config maps + **load de-risk** (map-in-map/LPM feasibility here, else fallback) · **T3** service seam (pin+LPM+verdicts+redirect+tests+migrate IPv4 tests) · **T4** ARP redirect seam · **T5** loader `OUT`+populate+seed `[P]` · **T6** live-veth smoke (dp-integration, TTL/csum) · **T7** TESTING.md. Only **T5** `[P]`; T3→T4 serialize on shared files; T6 not parallel-safe.
 - Requires packet-parse executed first (**satisfied** — packet-parse VERIFIED); reuses `pkt_meta`/`drop_reason`/loader/`BPF_PROG_TEST_RUN`
 
-**Drop-reason counters** - PLANNED
-- Per-CPU `counter_map`; standardized drop reasons (10.2); rate-limited ringbuf/perf sampling
+**Drop-reason counters** - IN PROGRESS (spec + context + design + tasks APPROVED; Execute after SLRD)
+- Full §9.2 16-reason `enum drop_reason` as **frozen index ABI** (§9.2 doc order 0..15; one-move migration `map_error` 4→15; name table in header = source of truth; append-only growth within `DROP_REASON_CAP=32`)
+- Exact lock-free per-CPU `counter_map` for every reason (9 M3 reasons = enum+slot only, read 0 until wired); fail-closed on bad reason (`map_error`); reset-on-reload documented
+- Rate-limited ringbuf/perf drop-event sampling (reason + pkt context; hard events/sec budget; safe with no reader; suppression observable; counters exact regardless) + P3 operator CLI (dump + sample tail)
+- Spec `spec.md` (DRC-01..17); context `context.md` (D-DRC-1: numbering); `design.md` + rendered diagrams (drop-path flow + component/map layout)
+- Design (AD-017): sampling = **ringbuf** (256 KiB, non-blocking reserve, fail-open to `LOST`) + per-CPU token bucket with runtime-tunable `sample_config` (defaults 256/s, burst 64 per CPU); `record_drop(meta, reason)` fuses count+sample; maps pinned `/sys/fs/bpf/xdp_gateway/`; new `tools/dpstat` CLI (counters/tail/rate); `sample_stats` separate from the counter ABI. 3 kernel semantics web-verified; test_run→ringbuf delivery de-risked fail-fast with stats-only fallback
+- Tasks `tasks.md` (T1–T6; all 17 reqs mapped): **T1** ABI freeze + `drop_event.h` + DRC-04 case · **T2** `sample.h` ringbuf/bucket + fused `record_drop(meta,r)` · **T3** ringbuf de-risk-first + budget/content/fail-closed cases · **T4** loader pin `/sys/fs/bpf/xdp_gateway/` + seed `[P]` · **T5** `tools/dpstat` · **T6** TESTING.md/README. Only T4 `[P]`; T1→T2→T3 serialize on shared files. Baseline **B** = suite count at start; T1/T2 = B+1, T3+ = B+5
+- Requires SLRD executed first (D-DRC-1d); no control-plane change
+- Requires packet-parse (VERIFIED); intended after service-lookup-redirect Execute (slots 5/6 already §9.2-correct). Out of scope: M3 drop paths, per-service/billing counters, `bloom_hit_lpm_miss`, worker aggregation
 
 ---
 

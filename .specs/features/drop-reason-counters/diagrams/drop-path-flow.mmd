@@ -1,0 +1,20 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart TD
+    dropPath(["Any drop path<br/>parse fail-fast · service_miss/disabled · future M3"]) -->|"record_drop(&amp;meta, reason)"| clampCheck{"reason &lt; DROP_REASON_COUNT?"}
+    clampCheck -- "no — fail-closed" --> clampFix["reason = DR_MAP_ERROR"]
+    clampFix --> counterInc
+    clampCheck -- yes --> counterInc["counter_map[reason]++<br/>per-CPU · exact · unconditional"]
+    counterInc --> tokenCheck{"token bucket has budget?<br/>per-CPU · refill rate/s · cap burst"}
+    tokenCheck -- no --> suppressed["sample_stats[SUPPRESSED]++"]
+    tokenCheck -- yes --> reserve{"bpf_ringbuf_reserve(32 B)"}
+    reserve -- "NULL — buffer full" --> lost["sample_stats[LOST]++"]
+    reserve -- ok --> submit["fill drop_event from pkt_meta<br/>bpf_ringbuf_submit"]
+    submit --> emitted["sample_stats[EMITTED]++"]
+    suppressed --> verdict(["return XDP_DROP"])
+    lost --> verdict
+    emitted --> verdict
+
+    classDef exact fill:#10b981,stroke:#059669,color:#ffffff
+    classDef bestEffort fill:#f59e0b,stroke:#d97706,color:#ffffff
+    class counterInc exact
+    class suppressed,lost,emitted,submit bestEffort
