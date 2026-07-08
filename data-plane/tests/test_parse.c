@@ -91,9 +91,7 @@ static int reset_maps(struct test_env *env)
 	return err;
 }
 
-static int __attribute__((unused)) read_counter(struct test_env *env,
-					       enum drop_reason reason,
-					       __u64 *sum)
+static int read_counter(struct test_env *env, enum drop_reason reason, __u64 *sum)
 {
 	__u64 *values;
 	__u32 key = (__u32)reason;
@@ -158,6 +156,36 @@ static int expect_u32(const char *label, __u32 got, __u32 want)
 	return -1;
 }
 
+static int expect_counter(struct test_env *env, enum drop_reason reason,
+			  __u64 want)
+{
+	__u64 got = 0;
+
+	if (read_counter(env, reason, &got) != 0) {
+		fprintf(stderr, "counter[%u]: read failed: %s\n", reason,
+			strerror(errno));
+		return -1;
+	}
+
+	if (got == want)
+		return 0;
+
+	fprintf(stderr, "counter[%u]: got %llu, want %llu\n", reason,
+		(unsigned long long)got, (unsigned long long)want);
+	return -1;
+}
+
+static int expect_all_drop_counters_zero(struct test_env *env)
+{
+	for (enum drop_reason reason = DR_IPV6_UNSUPPORTED;
+	     reason <= DR_MAP_ERROR; reason++) {
+		if (expect_counter(env, reason, 0) != 0)
+			return -1;
+	}
+
+	return 0;
+}
+
 static int test_trivial_pass(void)
 {
 	struct pkt_frame frame;
@@ -181,6 +209,106 @@ static int test_trivial_pass(void)
 	return err;
 }
 
+static int test_ipv6_drops_with_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IPV6) != 0 || build_ipv6(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_IPV6_UNSUPPORTED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_unsupported_ethertype_drops_with_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, 0x0000) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UNSUPPORTED_ETHERTYPE, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_truncated_vlan_drops_with_unsupported_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_8021Q) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UNSUPPORTED_ETHERTYPE, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_arp_passes_without_drop_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_ARP) != 0 || build_arp(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
 struct test_case {
 	const char *name;
 	int (*run)(void);
@@ -190,6 +318,13 @@ int main(void)
 {
 	const struct test_case tests[] = {
 		{ "trivial pass", test_trivial_pass },
+		{ "IPv6 drops with counter", test_ipv6_drops_with_counter },
+		{ "unsupported EtherType drops with counter",
+		  test_unsupported_ethertype_drops_with_counter },
+		{ "truncated VLAN drops with unsupported counter",
+		  test_truncated_vlan_drops_with_unsupported_counter },
+		{ "ARP passes without drop counter",
+		  test_arp_passes_without_drop_counter },
 	};
 	size_t passed = 0;
 	size_t count = sizeof(tests) / sizeof(tests[0]);

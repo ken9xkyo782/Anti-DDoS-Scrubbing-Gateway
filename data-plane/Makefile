@@ -35,11 +35,11 @@ $(BUILD_DIR):
 
 bpf: $(BPF_OBJ)
 
-$(BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h | $(BUILD_DIR)
+$(BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/parse.h | $(BUILD_DIR)
 	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@
 	$(LLVM_STRIP) -g $@
 
-$(TEST_BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h | $(BUILD_DIR)
+$(TEST_BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/parse.h | $(BUILD_DIR)
 	$(BPF_CLANG) $(BPF_CFLAGS) -DPKT_TEST_HOOKS -c $< -o $@
 	$(LLVM_STRIP) -g $@
 

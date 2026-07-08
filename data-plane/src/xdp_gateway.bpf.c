@@ -1,7 +1,9 @@
 #include <linux/bpf.h>
+#include <linux/if_ether.h>
 #include <bpf/bpf_helpers.h>
 
 #include "drop_reason.h"
+#include "parse.h"
 #include "pkt_meta.h"
 
 #ifdef PKT_TEST_HOOKS
@@ -16,7 +18,32 @@ struct {
 SEC("xdp")
 int xdp_gateway(struct xdp_md *ctx)
 {
-	(void)ctx;
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+	struct hdr_cursor cur = {
+		.data = data,
+		.pos = data,
+		.off = 0,
+	};
+	struct pkt_meta meta = {};
+	enum parse_result res;
+
+	res = parse_eth(&cur, data_end, &meta);
+	if (res != PARSE_OK)
+		return record_drop(DR_UNSUPPORTED_ETHERTYPE);
+
+	switch (meta.eth_proto) {
+	case ETH_P_IPV6:
+		return record_drop(DR_IPV6_UNSUPPORTED);
+	case ETH_P_ARP:
+		/* SEAM: redirect ARP in service lookup feature */
+		return XDP_PASS;
+	case ETH_P_IP:
+		/* SEAM: IPv4 parse (T5) */
+		return XDP_PASS;
+	default:
+		return record_drop(DR_UNSUPPORTED_ETHERTYPE);
+	}
 
 	return XDP_PASS;
 }

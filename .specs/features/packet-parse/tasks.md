@@ -149,6 +149,7 @@ compiling the BPF obj with `-DPKT_TEST_HOOKS`)
 
 ### T4: EtherType resolution + fail-fast drops (IPv6 / unsupported) + ARP pass
 
+**Status:** Verified (2026-07-08)
 **What:** Parse L2, branch on EtherType — IPv6 → drop, ARP → `XDP_PASS` (marked seam), other → drop —
 each drop recorded, all reads bounds-checked; the IPv4 case passes through (parsed in T5).
 **Where:** `data-plane/src/parse.h` (new: `hdr_cursor`, `parse_eth`), `data-plane/src/xdp_gateway.bpf.c`
@@ -160,15 +161,17 @@ each drop recorded, all reads bounds-checked; the IPv4 case passes through (pars
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `parse_eth` advances a `data_end`-checked cursor, sets `pkt_meta.eth_proto`; truncated L2 →
+- [x] `parse_eth` advances a `data_end`-checked cursor, sets `pkt_meta.eth_proto`; truncated L2 →
       `unsupported_ethertype` (fail-closed, PKT-11).
-- [ ] Entry: `ETH_P_IPV6` → `record_drop(DR_IPV6_UNSUPPORTED)`; non-IPv4/non-ARP → `DR_UNSUPPORTED_ETHERTYPE`;
+- [x] Entry: `ETH_P_IPV6` → `record_drop(DR_IPV6_UNSUPPORTED)`; non-IPv4/non-ARP → `DR_UNSUPPORTED_ETHERTYPE`;
       `ETH_P_ARP` → `XDP_PASS` with a `/* SEAM: redirect */` comment, **no** counter (PKT-23/24);
       `ETH_P_IP` → `XDP_PASS` placeholder `/* SEAM: IPv4 parse (T5) */`.
-- [ ] No per-source-IP state on the path (PKT-17).
-- [ ] Tests added: IPv6 → `XDP_DROP` + `counter[ipv6]==1`; non-IP (e.g. `0x0000`) → drop + `unsupported`
-      counter; runt/short-L2 → `unsupported`; ARP → `XDP_PASS` + no drop counter.
-- [ ] Gate check passes: `make test`. Test count: **≥5** dp-unit tests pass (1 trivial + ≥4 new).
+- [x] No per-source-IP state on the path (PKT-17).
+- [x] Tests added: IPv6 → `XDP_DROP` + `counter[ipv6]==1`; non-IP (e.g. `0x0000`) → drop + `unsupported`
+      counter; truncated VLAN-tag frame → `unsupported`; ARP → `XDP_PASS` + no drop counter. `parse_eth`
+      retains the short-L2 bounds check; `BPF_PROG_TEST_RUN` rejects sub-Ethernet `data_in` before the
+      program runs on this kernel.
+- [x] Gate check passes: `make test`. Test count: **5** dp-unit tests pass (1 trivial + 4 new).
 **Tests:** dp-unit · **Gate:** quick
 
 **Verify:** `make test` → all pass; ARP case asserts `retval==XDP_PASS` and every drop counter `==0`.
