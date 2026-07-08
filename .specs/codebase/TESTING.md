@@ -57,3 +57,39 @@ Every task's **Done when** cites the expected pass count (e.g. "N tests pass") t
 - Async tests: `pytest-asyncio` in `auto` mode; fixtures yield `AsyncSession` / `redis.asyncio` clients bound to `compose.test.yml`.
 - Shared fixtures in `tests/conftest.py`: `db_session` (transaction-rolled-back), `redis_client` (flushed per test), `client` (httpx `AsyncClient` over the ASGI app), `admin_principal` / `tenant_principal` factories.
 - Secrets: tests never assert on plaintext passwords; a log-capture fixture asserts **no** credential material is emitted (Success Criteria).
+
+---
+
+## Data-plane (C/XDP)
+
+**Stack:** C · XDP/eBPF · libbpf skeletons · `BPF_PROG_TEST_RUN` synthetic packet tests.
+**Location:** `data-plane/`
+
+### Data-plane Test Types
+
+| Type | Definition | Needs | Parallel-Safe |
+| --- | --- | --- | --- |
+| **dp-unit** | Runs the verifier-approved XDP program through `BPF_PROG_TEST_RUN` with synthetic frames and asserts verdicts, drop counters, and test-only `pkt_meta` output | BPF-capable kernel and permission to load BPF programs | **Yes** as infrastructure; individual parse tasks serialize when they edit shared parser/test files |
+| **dp-integration** | Future live veth/NIC attach smoke for native XDP attach/redirect behavior | `CAP_NET_ADMIN`/root, veth or native-XDP-capable NIC | **No**; shared interfaces/kernel attach state |
+
+### Data-plane Gate Check Commands
+
+Run these from `data-plane/`.
+
+| Gate | Command | When |
+| --- | --- | --- |
+| **build** | `make bpf skel loader` | Scaffold, loader, and wiring tasks |
+| **quick** | `make test` | Parser/verdict tasks with `dp-unit` coverage |
+| **full** | `make test` plus optional privileged live-veth smoke | Pre-merge checks on a BPF-capable runner |
+
+The native-mode loader is verified by the build gate plus a manual veth/NIC smoke:
+`sudo ./build/xdp_gateway_loader <ifname>` should attach in native/DRV mode or fail clearly with no
+generic/SKB fallback, and Ctrl-C should detach cleanly. There is no automated privileged loader smoke in
+v1.
+
+### Data-plane Corpus
+
+`dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
+malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, and
+too-deep VLAN stacks. Each verdict task states the expected passing test count to prevent silent
+deletions or skipped coverage.

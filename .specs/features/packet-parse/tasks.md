@@ -263,6 +263,7 @@ stacks/truncated tags as unsupported; all EtherType branching then applies to ta
 
 ### T8: Data-plane section in TESTING.md [P]
 
+**Status:** Verified (2026-07-08)
 **What:** Add the data-plane test conventions (gates, `dp-unit` type, parallel-safety, corpus) to the
 codebase testing doc.
 **Where:** `.specs/codebase/TESTING.md` (append a **Data-plane (C/XDP)** section)
@@ -273,11 +274,11 @@ codebase testing doc.
 **Tools:** MCP: NONE · Skill: NONE
 
 **Done when:**
-- [ ] New section documents: gates (build/quick/full `make` commands), `dp-unit` = `BPF_PROG_TEST_RUN`
+- [x] New section documents: gates (build/quick/full `make` commands), `dp-unit` = `BPF_PROG_TEST_RUN`
       synthetic packets (parallel-safe as infra; parse tasks serialize on shared files), loader = build +
       manual veth smoke (no automated test in v1), and the adversarial-frame corpus.
-- [ ] States a future `dp-integration` (live veth/NIC) would need `CAP_NET_ADMIN` and is not parallel-safe.
-- [ ] Existing control-plane content unchanged.
+- [x] States a future `dp-integration` (live veth/NIC) would need `CAP_NET_ADMIN` and is not parallel-safe.
+- [x] Existing control-plane content unchanged.
 **Tests:** none · **Gate:** none
 
 **Verify:** `.specs/codebase/TESTING.md` renders with a Data-plane section; control-plane section intact.
