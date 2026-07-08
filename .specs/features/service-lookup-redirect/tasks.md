@@ -3,7 +3,9 @@
 **Design:** `.specs/features/service-lookup-redirect/design.md`
 **Spec:** `.specs/features/service-lookup-redirect/spec.md` (SLRD-01..26)
 **Context:** `.specs/features/service-lookup-redirect/context.md` (D-SLRD-1..3, A-SLRD-1..8)
-**Status:** **APPROVED (2026-07-08)** — Execute **deferred** at user request (approve-only). Resume = Execute T1.
+**Status:** **VERIFIED / EXECUTED (2026-07-08)** — T1–T7 complete and committed; final full gate passed
+(`make test && sudo make smoke` → 29 dp-unit tests + delivered TTL/csum unchanged). Resume = next M2
+feature.
 **Execute tooling (chosen):** Skill `coding-guidelines` on the C/XDP + shell tasks (T1–T6); MCPs: none
 configured. Docs (T7): none. **Execution mode: inline** (like packet-parse).
 
@@ -14,10 +16,9 @@ configured. Docs (T7): none. **Execution mode: inline** (like packet-parse).
 > serialize); **dp-integration** = live veth (privileged, **not** parallel-safe) — this feature populates
 > it for the first time (T6/T7).
 >
-> **Baseline:** the suite currently passes **21** dp-unit tests. The clean-IPv4 and ARP terminals change
-> from `XDP_PASS` to redirect, so **T3 migrates the clean-IPv4 tests and T4 the ARP test in place** (no
-> silent deletions — counts only grow). Target counts below are finalized at Execute against the design
-> test table.
+> **Execution result:** the pre-execute baseline was **21** dp-unit tests; the final suite passes **29**
+> dp-unit tests. The clean-IPv4 and ARP terminals changed from `XDP_PASS` to redirect, with their tests
+> migrated in place (no silent deletions).
 >
 > **De-risk note:** the `ARRAY_OF_MAPS`-of-`LPM_TRIE` representation (design Open Q#1) is **proven at load
 > in T2** — if the toolchain/verifier rejects it, T2 switches to the documented fallback (two named
