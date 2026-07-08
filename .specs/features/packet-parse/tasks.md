@@ -60,6 +60,7 @@ sequential `T3→T4→T5→T6→T7` chain. The chain itself is **not** parallel:
 
 ### T1: Data-plane scaffold + contract headers + trivial XDP program
 
+**Status:** Verified (2026-07-08)
 **What:** Create `data-plane/` with a working `clang -target bpf` + `bpftool` skeleton build, the two
 contract headers, and a trivial XDP program that compiles and returns `XDP_PASS`.
 **Where:** `data-plane/Makefile`, `data-plane/README.md`, `data-plane/.gitignore`,
@@ -71,14 +72,14 @@ contract headers, and a trivial XDP program that compiles and returns `XDP_PASS`
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `data-plane/` tree matches `design.md` layout; `build/` is git-ignored.
-- [ ] `pkt_meta.h` defines `struct pkt_meta` (fields per design, explicit padding, zero-init convention).
-- [ ] `drop_reason.h` defines `enum drop_reason` (4 fail-fast + `DR_MAP_ERROR`, `DROP_REASON_CAP=32`),
+- [x] `data-plane/` tree matches `design.md` layout; `build/` is git-ignored.
+- [x] `pkt_meta.h` defines `struct pkt_meta` (fields per design, explicit padding, zero-init convention).
+- [x] `drop_reason.h` defines `enum drop_reason` (4 fail-fast + `DR_MAP_ERROR`, `DROP_REASON_CAP=32`),
       the `counter_map` (`PERCPU_ARRAY`, `DROP_REASON_CAP`), and `static __always_inline record_drop()`.
-- [ ] `xdp_gateway.bpf.c` = `SEC("xdp") int xdp_gateway(struct xdp_md *ctx) { return XDP_PASS; }`,
+- [x] `xdp_gateway.bpf.c` = `SEC("xdp") int xdp_gateway(struct xdp_md *ctx) { return XDP_PASS; }`,
       declares `counter_map` + (`#ifdef PKT_TEST_HOOKS`) `test_meta_map`; uses plain uapi headers, no
       `vmlinux.h`.
-- [ ] Gate check passes: `make bpf skel` builds `build/xdp_gateway.bpf.o` + `build/xdp_gateway.skel.h`
+- [x] Gate check passes: `make bpf skel` builds `build/xdp_gateway.bpf.o` + `build/xdp_gateway.skel.h`
       with no clang/verifier-invalidating errors.
 **Tests:** none · **Gate:** build
 
