@@ -1,12 +1,19 @@
 # State
 
-**Last Updated:** 2026-07-07
-**Current Work:** M1 → **Service, rule & list management (API)** — spec + context + **design** complete (`.specs/features/service-rule-list/`, SRL-01..44; D-SRL-1..4; A-SRL-1/3 confirmed admin-only + version-bump-owned-here). Design adds 5 tables + `protected_service_dest_no_overlap` GiST exclusion + `UNIQUE(service_id,priority)` + app row-lock ≤16 + `core/rulematch.py`; wires TCA-16 by modifying `allocations.revoke` (lazy import `services_in_cidr`). Diagrams rendered (component + service-create sequence). Awaiting approval → Tasks. Pure control-plane CRUD; requires auth-rbac + tenant-cidr executed first.
-**Prior M1 work:** **Tenant & CIDR allocation** — spec + design + tasks complete (`.specs/features/tenant-cidr/`, TCA-01..32 → T1–T7). Awaiting approval → Execute. **Auth & RBAC** complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
+**Last Updated:** 2026-07-08
+**Current Work:** M1 → **Apply-status state machine** — spec + context complete (`.specs/features/apply-status/`, APLY-01..40; D-APLY-1..3; A-APLY-1..6). Owns the `pending→queued→applying→active|failed` machine behind one guard, the API auto-enqueue (`pending→queued` + real Redis + `AgentJob` ledger, idempotent by version), the worker-facing `mark_applying/active/failed` (version-guarded, "no stale-over-new"), and the per-service apply-status read API (9.2) + admin job-list. Picks up service-rule-list's A-SRL-3 handoff (reads its `version`, **modifies** its service/rule/list services to enqueue). Awaiting approval → Design. Requires service-rule-list executed first; adds enqueue-only Redis + `AgentJob` model (worker loop = M4).
+**Prior M1 work:** **Service, rule & list management (API)** — spec + context + design complete (`.specs/features/service-rule-list/`, SRL-01..44; D-SRL-1..4). Awaiting approval → Tasks. **Tenant & CIDR allocation** — spec + design + tasks complete (`.specs/features/tenant-cidr/`, TCA-01..32 → T1–T7). Awaiting approval → Execute. **Auth & RBAC** complete (T1–T12, AUTH-01..39), awaiting approval → Execute.
 
 ---
 
 ## Recent Decisions (Last 60 days)
+
+### AD-012: Apply-status state machine policy — 3 gray areas (2026-07-08)
+
+**Decision:** (a) **auto-enqueue** — every committed service/rule/list mutation immediately creates a job and moves the service `pending→queued`, returning **202** `{apply_status, version, active_version}` (TDD 4.5/4.6); no explicit apply/publish action in v1; (b) **M1 owns machine + guard + real Redis enqueue + `AgentJob` ledger + worker-facing `mark_applying/active/failed` (version-guarded)** — the full machine is unit+integration testable in M1 without a data-plane; M4 adds only the worker loop that calls the mark_* functions; (c) **per-service** apply targets in v1 (status/version/active_version on `ProtectedService`; scoped rule/list edits roll up to the parent service); global-blacklist/feed apply-status deferred to M4 (no generic `ApplyTarget`). Full context in `.specs/features/apply-status/context.md` (D-APLY-1..3).
+**Reason:** Auto-enqueue meets ≤5s propagation by construction (idempotent-by-version collapses rapid edits); owning the whole machine now maximises what's verifiable in M1 and hands M4 a clean tested interface; per-service reuses the columns service-rule-list already added — no speculative modeling for targets with no data-plane consumer yet.
+**Trade-off:** Redis becomes an enqueue-only dependency one milestone before its consumer; mark_* ship "callable, only called by tests" until M4; N rapid edits enqueue N jobs (superseded via the version guard, not cancelled); a global-blacklist edit gets no own apply-status until M4.
+**Impact:** M1 Apply-status feature (APLY-01..40). **Reads** service-rule-list's `version` (A-SRL-3) and **modifies** its service/rule/list services to enqueue (mirrors the tenant-cidr `revoke` modification pattern). New `AgentJob` model + Alembic revision + enqueue-only Redis client. Flagged: A-APLY-1 Redis outage = graceful-degrade via ledger (transactional outbox), A-APLY-3 version guard is the only concurrency control (no job cancellation), A-APLY-6 retry-failed P2 / rollback (OP-05) deferred.
 
 ### AD-011: Service/rule/list management policy — 4 gray areas (2026-07-07)
 
