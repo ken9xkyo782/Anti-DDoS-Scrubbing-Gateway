@@ -83,15 +83,15 @@ program building and every existing field/name intact.
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `service.h` defines `SERVICE_SLOTS 2`, `struct service_key {u32 prefixlen; __be32 addr;}`,
+- [x] `service.h` defines `SERVICE_SLOTS 2`, `struct service_key {u32 prefixlen; __be32 addr;}`,
       `struct service_val {u32 service_id; u8 enabled; u8 _pad[3];}`, `struct active_config {u32 active_slot; u32 version;}`,
       and `enum pkt_verdict {PKT_VERDICT_NONE=0, PKT_VERDICT_REDIRECT=1}` (plain header, `<linux/types.h>`).
-- [ ] `drop_reason.h` **appends** `DR_SERVICE_MISS`, `DR_SERVICE_DISABLED` after `DR_MAP_ERROR` (indices
+- [x] `drop_reason.h` **appends** `DR_SERVICE_MISS`, `DR_SERVICE_DISABLED` after `DR_MAP_ERROR` (indices
       0–4 unchanged); `DROP_REASON_CAP=32` unchanged.
-- [ ] `pkt_meta.h` adds `__u32 service_id`, `__u8 active_slot`, `__u8 verdict`, keeps all existing fields/names
+- [x] `pkt_meta.h` adds `__u32 service_id`, `__u8 active_slot`, `__u8 verdict`, keeps all existing fields/names
       and 4-byte alignment (per design struct); `= {}` still zero-inits.
-- [ ] `xdp_gateway.bpf.c` includes `service.h`; `Makefile` bpf/test-bpf objects list `service.h` as a prereq.
-- [ ] Gate check passes: `make bpf skel` compiles the object + regenerates the skeleton with no errors.
+- [x] `xdp_gateway.bpf.c` includes `service.h`; `Makefile` bpf/test-bpf objects list `service.h` as a prereq.
+- [x] Gate check passes: `make bpf skel` compiles the object + regenerates the skeleton with no errors.
 **Tests:** none · **Gate:** build
 
 **Verify:** `cd data-plane && make bpf skel && ls build/xdp_gateway.skel.h` → exit 0, skeleton present.
@@ -114,17 +114,17 @@ inner except `PROG_ARRAY`; LPM inner needs `BPF_F_NO_PREALLOC`)
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `xdp_gateway.bpf.c` declares `service_inner_0`/`service_inner_1` (`LPM_TRIE`, key `service_key`,
+- [x] `xdp_gateway.bpf.c` declares `service_inner_0`/`service_inner_1` (`LPM_TRIE`, key `service_key`,
       value `service_val`, `BPF_F_NO_PREALLOC`), `service_map` (`ARRAY_OF_MAPS`, `max_entries=SERVICE_SLOTS`,
       `.values={[0]=&service_inner_0,[1]=&service_inner_1}`), `active_config` (`ARRAY`, 1 entry,
       `active_config` value), `tx_devmap` (`DEVMAP`, 1 entry). Not behind `PKT_TEST_HOOKS`.
-- [ ] Program still returns at both seams (unchanged behavior) — maps declared, not yet used.
-- [ ] `test_env` resolves fds for `service_inner_0/1`, `active_config`, `tx_devmap` (and keeps counter/meta);
+- [x] Program still returns at both seams (unchanged behavior) — maps declared, not yet used.
+- [x] `test_env` resolves fds for `service_inner_0/1`, `active_config`, `tx_devmap` (and keeps counter/meta);
       one dp-unit test asserts all fds are valid ⇒ **the object loaded** (verifier accepted the maps).
-- [ ] **If load fails** (map-in-map/LPM unsupported): switch to the fallback (two named top-level LPM maps
+- [x] **If load fails** (map-in-map/LPM unsupported): switch to the fallback (two named top-level LPM maps
       `service_map_0/1` + `active_config` + `tx_devmap`), record the switch in `design.md` Tech Decisions,
       and re-run — the external contract (slot selected by `active_slot`) is unchanged.
-- [ ] Gate check passes: `make test`. Test count: **22** (21 baseline + 1 maps-load) — no existing test
+- [x] Gate check passes: `make test`. Test count: **22** (21 baseline + 1 maps-load) — no existing test
       changes behavior yet.
 **Tests:** dp-unit · **Gate:** quick
 
@@ -151,20 +151,20 @@ SLRD-12, SLRD-13, SLRD-14, SLRD-17 (test seed), SLRD-23
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] Hot path (after `parse_l4 == PARSE_OK`): read `active_config[0].active_slot` once → `meta.active_slot`;
+- [x] Hot path (after `parse_l4 == PARSE_OK`): read `active_config[0].active_slot` once → `meta.active_slot`;
       `bpf_map_lookup_elem(&service_map,&slot)` → inner (null → `record_drop(DR_MAP_ERROR)`); LPM lookup
       `{prefixlen=32, addr=meta.dst_ip}` → null → `DR_SERVICE_MISS`; `enabled==0` → `DR_SERVICE_DISABLED`;
       else set `service_id`/`verdict=REDIRECT`, `write_test_meta`, `return bpf_redirect_map(&tx_devmap,0,XDP_DROP)`.
-- [ ] Program mutates **no** packet bytes (TTL/checksum untouched — SLRD-08/09); no per-source-IP state.
-- [ ] `test_parse.c` seed helpers added; `reset_config` clears inners + `active_config` between tests.
-- [ ] New dp-unit tests: `service_miss` drop; `service_disabled` drop; enabled → `meta.verdict==REDIRECT` +
+- [x] Program mutates **no** packet bytes (TTL/checksum untouched — SLRD-08/09); no per-source-IP state.
+- [x] `test_parse.c` seed helpers added; `reset_config` clears inners + `active_config` between tests.
+- [x] New dp-unit tests: `service_miss` drop; `service_disabled` drop; enabled → `meta.verdict==REDIRECT` +
       `service_id` + `active_slot==0` + drop counters 0; `/24` CIDR matches a host inside it; **slot-pin flip**
       (slot0 enabled `active=0` → REDIRECT decision, then slot1 disabled `active=1` on same frame →
       `DR_SERVICE_DISABLED`); empty-config → `DR_SERVICE_MISS`.
-- [ ] **Migrated** clean-IPv4 tests (TCP/UDP/ICMP ports, GRE/ESP zero-ports, single-VLAN, QinQ): seed an
+- [x] **Migrated** clean-IPv4 tests (TCP/UDP/ICMP ports, GRE/ESP zero-ports, single-VLAN, QinQ): seed an
       enabled service for their `dst_ip`, assert `meta.verdict==REDIRECT` + the same parse-field values
       (no `retval==XDP_PASS`, no `retval==XDP_REDIRECT` — not observable under test-run per design).
-- [ ] Gate check passes: `make test`. Test count: **~28** (22 + 6 new service tests; migrated tests updated
+- [x] Gate check passes: `make test`. Test count: **~28** (22 + 6 new service tests; migrated tests updated
       in place) — finalize exact count at Execute; must be ≥ 22, no deletions.
 **Tests:** dp-unit · **Gate:** quick
 
@@ -188,12 +188,12 @@ test; extend `expect_all_drop_counters_zero` upper bound to `DR_SERVICE_DISABLED
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] ARP branch sets `meta.verdict=REDIRECT`, `write_test_meta`, `return bpf_redirect_map(&tx_devmap,0,XDP_DROP)`
+- [x] ARP branch sets `meta.verdict=REDIRECT`, `write_test_meta`, `return bpf_redirect_map(&tx_devmap,0,XDP_DROP)`
       (D-SLRD-3); the `/* SEAM: redirect ARP … */` comment is resolved.
-- [ ] `expect_all_drop_counters_zero` covers `DR_IPV6_UNSUPPORTED..DR_SERVICE_DISABLED`.
-- [ ] ARP test migrated: asserts `meta.verdict==REDIRECT` and **all** drop counters 0 (ARP never
+- [x] `expect_all_drop_counters_zero` covers `DR_IPV6_UNSUPPORTED..DR_SERVICE_DISABLED`.
+- [x] ARP test migrated: asserts `meta.verdict==REDIRECT` and **all** drop counters 0 (ARP never
       mis-counted/dropped, SLRD-21).
-- [ ] Gate check passes: `make test`. Test count: **~28** (ARP test migrated in place; ≥ T3 count).
+- [x] Gate check passes: `make test`. Test count: **~28** (ARP test migrated in place; ≥ T3 count).
 **Tests:** dp-unit · **Gate:** quick
 
 **Verify:** `cd data-plane && make test` → all pass; ARP frame asserts `test_meta_map[0].verdict==1` and
@@ -217,15 +217,15 @@ every drop counter `==0`.
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] Loader accepts `OUT` (`argv[2]` or `OUT_IFACE`), resolves its ifindex; usage string updated to
+- [x] Loader accepts `OUT` (`argv[2]` or `OUT_IFACE`), resolves its ifindex; usage string updated to
       `<IN> <OUT>`.
-- [ ] Populates `tx_devmap[0]=out_ifindex` before/after attach; on update failure (OUT lacks native XDP-TX /
+- [x] Populates `tx_devmap[0]=out_ifindex` before/after attach; on update failure (OUT lacks native XDP-TX /
       bad index) prints a clear error and `exit(1)` (**fail-loud**, SLRD-10/11) — no silent continue.
-- [ ] Seeds `active_config[0]={active_slot=0,version=1}` and, if `SERVICE_DEST` env is set, one
+- [x] Seeds `active_config[0]={active_slot=0,version=1}` and, if `SERVICE_DEST` env is set, one
       `service_val{enabled=1}` into `service_inner_0` (A-SLRD-5); absent `SERVICE_DEST`, maps stay empty
       (safe `service_miss` default).
-- [ ] Gate check passes: `make loader` builds `build/xdp_gateway_loader`.
-- [ ] Manual smoke recorded in README: `sudo ./build/xdp_gateway_loader <inveth> <outveth>` populates OUT or
+- [x] Gate check passes: `make loader` builds `build/xdp_gateway_loader`.
+- [x] Manual smoke recorded in README: `sudo ./build/xdp_gateway_loader <inveth> <outveth>` populates OUT or
       errors clearly (no automated loader test in v1 — matrix "none").
 **Tests:** none · **Gate:** build
 
@@ -248,13 +248,13 @@ attach mode + populated OUT, or a clean fail-loud error on a non-XDP-TX OUT.
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `make smoke` (privileged): creates two veth pairs / netns as `IN`/`OUT`, runs the loader, seeds one
+- [x] `make smoke` (privileged): creates two veth pairs / netns as `IN`/`OUT`, runs the loader, seeds one
       enabled service, injects a crafted IPv4 frame on `IN`, captures on `OUT`.
-- [ ] Asserts the received frame is delivered and its **TTL and IPv4 header checksum equal** the sent frame
+- [x] Asserts the received frame is delivered and its **TTL and IPv4 header checksum equal** the sent frame
       (header-preserving); exits non-zero on no-delivery or mismatch.
-- [ ] Cleans up veths/netns/attachment on exit (pass or fail).
-- [ ] Documented as requiring `CAP_NET_ADMIN`/root; **not** part of `make test` (not parallel-safe).
-- [ ] Gate check passes (on a BPF+veth-capable runner): `make test && make smoke` (full gate).
+- [x] Cleans up veths/netns/attachment on exit (pass or fail).
+- [x] Documented as requiring `CAP_NET_ADMIN`/root; **not** part of `make test` (not parallel-safe).
+- [x] Gate check passes (on a BPF+veth-capable runner): `make test && make smoke` (full gate).
 **Tests:** dp-integration · **Gate:** full
 
 **Verify:** `cd data-plane && sudo make smoke` → prints delivered + `TTL/csum unchanged`, exit 0; tamper the
@@ -276,10 +276,10 @@ redirect/TTL-csum convention and add `make smoke` to the gate table.
 **Tools:** MCP: NONE · Skill: NONE
 
 **Done when:**
-- [ ] `dp-integration` row documents: `make smoke`, two-veth `IN↔OUT`, real `XDP_REDIRECT` + TTL/checksum
+- [x] `dp-integration` row documents: `make smoke`, two-veth `IN↔OUT`, real `XDP_REDIRECT` + TTL/checksum
       assertion, `CAP_NET_ADMIN`/root, not parallel-safe.
-- [ ] Gate table `full` row updated to `make test` + `make smoke`; the loader-smoke note is preserved.
-- [ ] Existing dp-unit content + control-plane section unchanged.
+- [x] Gate table `full` row updated to `make test` + `make smoke`; the loader-smoke note is preserved.
+- [x] Existing dp-unit content + control-plane section unchanged.
 **Tests:** none · **Gate:** none
 
 **Verify:** `.specs/codebase/TESTING.md` shows a populated dp-integration row + `make smoke` in the full
