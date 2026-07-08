@@ -100,7 +100,7 @@ program building and every existing field/name intact.
 
 ### T2: Config maps + load de-risk (`service_map` map-in-map, `active_config`, `tx_devmap`)
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`make test` → 22 passed)
 **What:** Declare the slot-aware config maps and the devmap, and prove they **build, generate a skeleton,
 and load into the kernel** — the go/no-go for the map-in-map+LPM representation (fallback here if not).
 **Where:** `data-plane/src/xdp_gateway.bpf.c` (map declarations only — no hot-path logic yet),

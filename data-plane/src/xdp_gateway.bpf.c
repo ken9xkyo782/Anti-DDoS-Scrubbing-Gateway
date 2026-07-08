@@ -7,6 +7,43 @@
 #include "pkt_meta.h"
 #include "service.h"
 
+struct service_inner_map_def {
+	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
+	__uint(max_entries, 1024);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, struct service_key);
+	__type(value, struct service_val);
+};
+
+struct service_inner_map_def service_inner_0 SEC(".maps");
+struct service_inner_map_def service_inner_1 SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
+	__uint(max_entries, SERVICE_SLOTS);
+	__type(key, __u32);
+	__array(values, struct service_inner_map_def);
+} service_map SEC(".maps") = {
+	.values = {
+		[0] = &service_inner_0,
+		[1] = &service_inner_1,
+	},
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct active_config);
+} active_config SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_DEVMAP);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u32);
+} tx_devmap SEC(".maps");
+
 #ifdef PKT_TEST_HOOKS
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);

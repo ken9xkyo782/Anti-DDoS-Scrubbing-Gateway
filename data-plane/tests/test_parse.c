@@ -12,6 +12,7 @@
 #include "drop_reason.h"
 #include "pkt_build.h"
 #include "pkt_meta.h"
+#include "service.h"
 #include "xdp_gateway.test.skel.h"
 
 struct test_env {
@@ -19,6 +20,11 @@ struct test_env {
 	int prog_fd;
 	int counter_fd;
 	int meta_fd;
+	int service_inner0_fd;
+	int service_inner1_fd;
+	int service_map_fd;
+	int active_config_fd;
+	int tx_devmap_fd;
 	int possible_cpus;
 };
 
@@ -51,7 +57,15 @@ static int env_open(struct test_env *env)
 	env->prog_fd = bpf_program__fd(env->skel->progs.xdp_gateway);
 	env->counter_fd = bpf_map__fd(env->skel->maps.counter_map);
 	env->meta_fd = bpf_map__fd(env->skel->maps.test_meta_map);
-	if (env->prog_fd < 0 || env->counter_fd < 0 || env->meta_fd < 0) {
+	env->service_inner0_fd = bpf_map__fd(env->skel->maps.service_inner_0);
+	env->service_inner1_fd = bpf_map__fd(env->skel->maps.service_inner_1);
+	env->service_map_fd = bpf_map__fd(env->skel->maps.service_map);
+	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
+	env->tx_devmap_fd = bpf_map__fd(env->skel->maps.tx_devmap);
+	if (env->prog_fd < 0 || env->counter_fd < 0 || env->meta_fd < 0 ||
+	    env->service_inner0_fd < 0 || env->service_inner1_fd < 0 ||
+	    env->service_map_fd < 0 || env->active_config_fd < 0 ||
+	    env->tx_devmap_fd < 0) {
 		fprintf(stderr, "failed to resolve BPF fds\n");
 		xdp_gateway_test_bpf__destroy(env->skel);
 		return -1;
@@ -174,6 +188,15 @@ static int expect_u8(const char *label, __u8 got, __u8 want)
 	return -1;
 }
 
+static int expect_fd(const char *label, int fd)
+{
+	if (fd >= 0)
+		return 0;
+
+	fprintf(stderr, "%s: invalid fd %d\n", label, fd);
+	return -1;
+}
+
 static int expect_counter(struct test_env *env, enum drop_reason reason,
 			  __u64 want)
 {
@@ -232,6 +255,30 @@ static int test_valid_other_ipv4_passes_with_zero_ports(void)
 		err = expect_u16("sport", meta.sport, 0);
 	if (!err)
 		err = expect_u16("dport", meta.dport, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_config_maps_load(void)
+{
+	struct test_env env;
+	int err;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	if (!err)
+		err = expect_fd("service_inner_0", env.service_inner0_fd);
+	if (!err)
+		err = expect_fd("service_inner_1", env.service_inner1_fd);
+	if (!err)
+		err = expect_fd("service_map", env.service_map_fd);
+	if (!err)
+		err = expect_fd("active_config", env.active_config_fd);
+	if (!err)
+		err = expect_fd("tx_devmap", env.tx_devmap_fd);
 
 	env_close(&env);
 	return err;
@@ -822,6 +869,7 @@ struct test_case {
 int main(void)
 {
 	const struct test_case tests[] = {
+		{ "config maps load", test_config_maps_load },
 		{ "valid other IPv4 passes with zero ports",
 		  test_valid_other_ipv4_passes_with_zero_ports },
 		{ "ESP IPv4 passes with zero ports",
