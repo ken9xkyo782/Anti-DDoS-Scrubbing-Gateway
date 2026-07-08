@@ -11,12 +11,16 @@ TEST_DIR := tests
 BPF_SRC := $(SRC_DIR)/xdp_gateway.bpf.c
 BPF_OBJ := $(BUILD_DIR)/xdp_gateway.bpf.o
 SKEL := $(BUILD_DIR)/xdp_gateway.skel.h
+LOADER_SRC := $(LOADER_DIR)/loader.c
 LOADER := $(BUILD_DIR)/xdp_gateway_loader
 
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 UAPI_INCLUDE := /usr/include/$(shell uname -m)-linux-gnu
 
 BPF_CFLAGS := -g -O2 -Wall -Wextra -target bpf -D__TARGET_ARCH_$(ARCH) -I$(SRC_DIR) -I$(UAPI_INCLUDE)
+LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
+LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
+USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) $(LIBBPF_CFLAGS)
 
 .PHONY: all bpf skel loader test clean run
 
@@ -36,14 +40,17 @@ skel: $(SKEL)
 $(SKEL): $(BPF_OBJ)
 	$(BPFTOOL) gen skeleton $< > $@
 
-loader:
-	@echo "loader target is added in T2"
+loader: $(LOADER)
+
+$(LOADER): $(LOADER_SRC) $(SKEL) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 test:
 	@echo "test target is added in T3"
 
 run: loader
-	@echo "run target is added in T2"
+	@if [ -z "$(IFACE)" ]; then echo "usage: make run IFACE=<ifname>"; exit 2; fi
+	sudo $(LOADER) $(IFACE)
 
 clean:
 	rm -rf $(BUILD_DIR)

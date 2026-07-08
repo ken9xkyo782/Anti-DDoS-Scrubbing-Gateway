@@ -90,6 +90,7 @@ contract headers, and a trivial XDP program that compiles and returns `XDP_PASS`
 
 ### T2: Native-mode XDP loader [P]
 
+**Status:** Verified (2026-07-08)
 **What:** Userspace loader that loads the skeleton and attaches to `IN` in native/DRV mode, fails loud
 on non-native, reports the actual mode, and detaches cleanly on exit.
 **Where:** `data-plane/loader/loader.c` (+ Makefile `loader`/`run` targets)
@@ -101,14 +102,14 @@ on non-native, reports the actual mode, and detaches cleanly on exit.
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] Loads via `xdp_gateway_bpf__open_and_load()`; resolves ifindex via `if_nametoindex` (`argv[1]` or
+- [x] Loads via `xdp_gateway_bpf__open_and_load()`; resolves ifindex via `if_nametoindex` (`argv[1]` or
       `IN_IFACE`, A-PKT-6).
-- [ ] `bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_DRV_MODE, NULL)`; on `<0` prints a clear
+- [x] `bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_DRV_MODE, NULL)`; on `<0` prints a clear
       "native XDP unsupported" error and `exit(1)` — **no** SKB fallback (PKT-03).
-- [ ] Logs the actual mode from `bpf_xdp_query` (PKT-04); `SIGINT`/`SIGTERM` → `bpf_xdp_detach` + skeleton
+- [x] Logs the actual mode from `bpf_xdp_query` (PKT-04); `SIGINT`/`SIGTERM` → `bpf_xdp_detach` + skeleton
       destroy (PKT-05).
-- [ ] Gate check passes: `make loader` builds `build/xdp_gateway_loader`.
-- [ ] Manual smoke recorded in README: `sudo ./build/xdp_gateway_loader <veth>` attaches in DRV or errors
+- [x] Gate check passes: `make loader` builds `build/xdp_gateway_loader`.
+- [x] Manual smoke recorded in README: `sudo ./build/xdp_gateway_loader <veth>` attaches in DRV or errors
       clearly (no automated test — no privileged-NIC test type in v1).
 **Tests:** none · **Gate:** build
 
