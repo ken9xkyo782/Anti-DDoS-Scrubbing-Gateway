@@ -69,7 +69,7 @@ Every task's **Done when** cites the expected pass count (e.g. "N tests pass") t
 
 | Type | Definition | Needs | Parallel-Safe |
 | --- | --- | --- | --- |
-| **dp-unit** | Runs the verifier-approved XDP program through `BPF_PROG_TEST_RUN` with synthetic frames and asserts verdicts, drop counters, and test-only `pkt_meta` output | BPF-capable kernel and permission to load BPF programs | **Yes** as infrastructure; individual parse tasks serialize when they edit shared parser/test files |
+| **dp-unit** | Runs the verifier-approved XDP program through `BPF_PROG_TEST_RUN` with synthetic frames and asserts verdicts, drop counters, sampled drop events, sample stats, and test-only `pkt_meta` output | BPF-capable kernel and permission to load BPF programs | **Yes** as infrastructure; individual parse tasks serialize when they edit shared parser/test files |
 | **dp-integration** | Runs a privileged two-veth `IN` to `OUT` smoke through the native-XDP loader, seeds one enabled service, sends a crafted IPv4 frame, and asserts real `XDP_REDIRECT` delivery with TTL and IPv4 checksum unchanged | `CAP_NET_ADMIN`/root, veth with XDP redirect support, `clang`, `bpftool`, Python 3 | **No**; shared interfaces/kernel attach state |
 
 ### Data-plane Gate Check Commands
@@ -78,18 +78,52 @@ Run these from `data-plane/`.
 
 | Gate | Command | When |
 | --- | --- | --- |
-| **build** | `make bpf skel loader` | Scaffold, loader, and wiring tasks |
+| **build** | `make bpf skel loader dpstat` | Scaffold, loader, observability tooling, and wiring tasks |
 | **quick** | `make test` | Parser/verdict tasks with `dp-unit` coverage |
 | **full** | `make test && sudo make smoke` | Pre-merge checks on a BPF+veth-capable runner; `make smoke` is privileged and not parallel-safe |
 
 The native-mode loader is verified by the build gate plus a manual veth/NIC smoke:
 `SERVICE_DEST=<ipv4-or-cidr> sudo ./build/xdp_gateway_loader <in-ifname> <out-ifname>` should attach to
-IN in native/DRV mode, populate `tx_devmap[0]` with OUT, seed the demo service when provided, or fail
-clearly with no generic/SKB fallback. Ctrl-C should detach cleanly.
+IN in native/DRV mode, populate `tx_devmap[0]` with OUT, pin observability maps under
+`/sys/fs/bpf/xdp_gateway/`, seed the demo service when provided, or fail clearly with no generic/SKB
+fallback. Ctrl-C should detach cleanly and remove the pins.
+
+### Drop-reason ABI
+
+`data-plane/src/drop_reason.h` is authoritative for drop-reason names and indices. Indices `0..15` are
+frozen and append-only; future reasons use index `16+` within `DROP_REASON_CAP=32`.
+
+| Index | Name |
+| --- | --- |
+| 0 | `ipv6_unsupported` |
+| 1 | `unsupported_ethertype` |
+| 2 | `malformed_ipv4` |
+| 3 | `fragment_unsupported` |
+| 4 | `bogon_drop` |
+| 5 | `service_miss` |
+| 6 | `service_disabled` |
+| 7 | `udp_amplification_drop` |
+| 8 | `blacklist_drop` |
+| 9 | `not_allowed` |
+| 10 | `rate_limit_drop` |
+| 11 | `service_ceiling_drop` |
+| 12 | `congestion_drop` |
+| 13 | `ingress_cap_drop` |
+| 14 | `vip_ceiling_drop` |
+| 15 | `map_error` |
+
+### Sampling conventions
+
+Drop sampling uses `drop_ringbuf` with per-CPU token buckets. Tests set `sample_config` to
+`rate_per_sec=0, burst=B` to make the budget deterministic: exactly `B` drops can emit events before
+later drops increment `SAMPLE_SUPPRESSED`. The `BPF_PROG_TEST_RUN` suite consumes ringbuf events
+directly; the de-risk case passes in this environment. Exact `counter_map` totals must remain correct
+when samples are emitted, suppressed, or lost.
 
 ### Data-plane Corpus
 
 `dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
-malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, and
-too-deep VLAN stacks. Each verdict task states the expected passing test count to prevent silent
-deletions or skipped coverage.
+malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, too-deep
+VLAN stacks, service lookup verdicts, and sampling budget cases. The current quick suite has **34**
+tests. Each verdict task states the expected passing test count to prevent silent deletions or skipped
+coverage.

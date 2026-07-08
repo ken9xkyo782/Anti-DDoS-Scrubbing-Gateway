@@ -2,7 +2,7 @@
 
 **Spec:** `.specs/features/drop-reason-counters/spec.md` (DRC-01..17)
 **Context:** `.specs/features/drop-reason-counters/context.md` (D-DRC-1; sampling/rate-limit/CLI = agent discretion, resolved here)
-**Status:** Approved (2026-07-08)
+**Status:** Verified — Execute complete (2026-07-08)
 **Domain:** modifies the executed `data-plane/` (packet-parse VERIFIED); assumes service-lookup-redirect (SLRD) executes first (D-DRC-1d)
 
 ---

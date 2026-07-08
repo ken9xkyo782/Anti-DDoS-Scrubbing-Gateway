@@ -2,8 +2,8 @@
 
 **Feature:** M2 #3 — Drop-reason counters
 **Created:** 2026-07-08
-**Status:** Approved (2026-07-08); context captured (`context.md`, D-DRC-1)
-**Depends on:** Packet parse & fail-fast (VERIFIED); Service lookup & transparent redirect (tasks approved — see Dependencies)
+**Status:** Verified — Execute complete (2026-07-08)
+**Depends on:** Packet parse & fail-fast (VERIFIED); Service lookup & transparent redirect (VERIFIED)
 
 ## Problem Statement
 
@@ -11,10 +11,10 @@ The data-plane drops packets for many reasons, but today only 5 of the 16 standa
 
 ## Goals
 
-- [ ] Every §9.2 drop reason (16 total) defined in the shared `enum drop_reason` with a **frozen, documented index ABI** that M3–M5 build on without renumbering.
-- [ ] Every drop on the hot path counted **exactly** (per-CPU, lock-free) under its reason — counters trustworthy for diagnosis and, later, SLA/telemetry (AD-006 posture: exact for anything money/SLA touches).
-- [ ] A **rate-limited drop-event sampling channel** (ringbuf/perf) carrying per-drop context (reason + packet metadata) with a hard events/sec bound and zero hot-path blocking — the telemetry-event source M4/M5 will consume.
-- [ ] M3 features add a new drop path by calling one helper (`record_drop`-style) — no per-feature counter or sampling plumbing.
+- [x] Every §9.2 drop reason (16 total) defined in the shared `enum drop_reason` with a **frozen, documented index ABI** that M3–M5 build on without renumbering.
+- [x] Every drop on the hot path counted **exactly** (per-CPU, lock-free) under its reason — counters trustworthy for diagnosis and, later, SLA/telemetry (AD-006 posture: exact for anything money/SLA touches).
+- [x] A **rate-limited drop-event sampling channel** (ringbuf/perf) carrying per-drop context (reason + packet metadata) with a hard events/sec bound and zero hot-path blocking — the telemetry-event source M4/M5 will consume.
+- [x] M3 features add a new drop path by calling one helper (`record_drop`-style) — no per-feature counter or sampling plumbing.
 
 ## Out of Scope
 
@@ -119,23 +119,23 @@ The data-plane drops packets for many reasons, but today only 5 of the 16 standa
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| DRC-01 | P1: Contract — exactly the 16 §9.2 reasons defined | Tasks | In Tasks |
-| DRC-02 | P1: Contract — frozen index→name ABI documented, within CAP=32 | Tasks | In Tasks |
-| DRC-03 | P1: Contract — existing drop paths on finalized indices, suite migrated & green | Tasks | In Tasks |
-| DRC-04 | P1: Contract — unwired M3 reasons present, counters read 0 | Tasks | In Tasks |
-| DRC-05 | P1: Counters — exact per-CPU increment per drop (lock-free) | Tasks | In Tasks |
-| DRC-06 | P1: Counters — userspace per-reason aggregation across CPUs | Tasks | In Tasks |
-| DRC-07 | P1: Counters — out-of-range reason: fail-closed drop + `map_error` accounting | Tasks | In Tasks |
-| DRC-08 | P1: Counters — reset-on-reload semantics documented for consumers | Tasks | In Tasks |
-| DRC-09 | P2: Sampling — event carries reason + src/dst/proto/ports/service_id-when-known | Tasks | In Tasks |
-| DRC-10 | P2: Sampling — hard events/sec budget; excess suppressed, non-blocking | Tasks | In Tasks |
-| DRC-11 | P2: Sampling — safe with no reader; lost/suppressed samples observable | Tasks | In Tasks |
-| DRC-12 | P2: Sampling — counters exact independent of sampling state | Tasks | In Tasks |
-| DRC-13 | P3: Visibility — CLI counter dump (name, index, aggregated total) | Tasks | In Tasks |
-| DRC-14 | P3: Visibility — CLI sample tail, human-readable decode | Tasks | In Tasks |
-| DRC-15 | Cross-cutting — single-helper API: new drop path = one call, no plumbing | Tasks | In Tasks |
-| DRC-16 | Cross-cutting — tests per reason via `BPF_PROG_TEST_RUN`; sampling budget test | Tasks | In Tasks |
-| DRC-17 | Cross-cutting — TESTING.md/data-plane docs updated (ABI table + sampling conventions) | Tasks | In Tasks |
+| DRC-01 | P1: Contract — exactly the 16 §9.2 reasons defined | Execute | Verified |
+| DRC-02 | P1: Contract — frozen index→name ABI documented, within CAP=32 | Execute | Verified |
+| DRC-03 | P1: Contract — existing drop paths on finalized indices, suite migrated & green | Execute | Verified |
+| DRC-04 | P1: Contract — unwired M3 reasons present, counters read 0 | Execute | Verified |
+| DRC-05 | P1: Counters — exact per-CPU increment per drop (lock-free) | Execute | Verified |
+| DRC-06 | P1: Counters — userspace per-reason aggregation across CPUs | Execute | Verified |
+| DRC-07 | P1: Counters — out-of-range reason: fail-closed drop + `map_error` accounting | Execute | Verified |
+| DRC-08 | P1: Counters — reset-on-reload semantics documented for consumers | Execute | Verified |
+| DRC-09 | P2: Sampling — event carries reason + src/dst/proto/ports/service_id-when-known | Execute | Verified |
+| DRC-10 | P2: Sampling — hard events/sec budget; excess suppressed, non-blocking | Execute | Verified |
+| DRC-11 | P2: Sampling — safe with no reader; lost/suppressed samples observable | Execute | Verified |
+| DRC-12 | P2: Sampling — counters exact independent of sampling state | Execute | Verified |
+| DRC-13 | P3: Visibility — CLI counter dump (name, index, aggregated total) | Execute | Verified |
+| DRC-14 | P3: Visibility — CLI sample tail, human-readable decode | Execute | Verified |
+| DRC-15 | Cross-cutting — single-helper API: new drop path = one call, no plumbing | Execute | Verified |
+| DRC-16 | Cross-cutting — tests per reason via `BPF_PROG_TEST_RUN`; sampling budget test | Execute | Verified |
+| DRC-17 | Cross-cutting — TESTING.md/data-plane docs updated (ABI table + sampling conventions) | Execute | Verified |
 
 **ID format:** `DRC-[NUMBER]`
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
@@ -145,7 +145,7 @@ The data-plane drops packets for many reasons, but today only 5 of the 16 standa
 
 ## Success Criteria
 
-- [ ] All 16 §9.2 reasons enumerated, counted, and published as a frozen index ABI; `DROP_REASON_CAP` headroom ≥ 16 remaining for GA additions.
-- [ ] Existing data-plane test suite green after any index migration; every wired reason has an exact-count test (inject N ⇒ read N).
-- [ ] Under a synthetic drop flood with budget B, the sample stream never exceeds B events/sec, suppression is observable, and counters stay exact — verified by test, not inspection.
-- [ ] An M3 feature can add a drop path with a single helper call and zero changes to counter/sampling infrastructure.
+- [x] All 16 §9.2 reasons enumerated, counted, and published as a frozen index ABI; `DROP_REASON_CAP` headroom ≥ 16 remaining for GA additions.
+- [x] Existing data-plane test suite green after any index migration; every wired reason has an exact-count test (inject N ⇒ read N).
+- [x] Under a synthetic drop flood with budget B, the sample stream never exceeds B events/sec, suppression is observable, and counters stay exact — verified by test, not inspection.
+- [x] An M3 feature can add a drop path with a single helper call and zero changes to counter/sampling infrastructure.

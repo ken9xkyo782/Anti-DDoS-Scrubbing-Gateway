@@ -37,3 +37,9 @@ From `data-plane/`:
   capture peer had an XDP program attached. The smoke test attaches a temporary
   `XDP_PASS` program to the sink peer before sending the frame, then removes it
   during cleanup.
+
+## Ringbuf Sampling
+
+- `BPF_PROG_TEST_RUN` delivers `BPF_MAP_TYPE_RINGBUF` events to a libbpf
+  `ring_buffer__consume()` reader in this environment. The drop-counter suite
+  keeps a de-risk test for this path, so no stats-only fallback is needed here.

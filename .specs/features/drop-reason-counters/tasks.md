@@ -2,9 +2,11 @@
 
 **Design:** `.specs/features/drop-reason-counters/design.md` (AD-017)
 **Spec:** `.specs/features/drop-reason-counters/spec.md` (DRC-01..17)
-**Status:** Approved (2026-07-08) — Execute blocked on prerequisite: service-lookup-redirect Execute first (D-DRC-1d)
+**Status:** **VERIFIED / EXECUTED (2026-07-08)** — T1–T6 complete and committed; final quick gate passed
+(`make test` → 34 dp-unit tests). Build/tool gate passed (`make bpf skel loader dpstat`).
 **Execute tooling:** Skill `coding-guidelines` on T1–T5 (C/XDP + tests + tools), none for T6; no MCPs; execution mode = inline (per recorded preference)
-**Prerequisite:** service-lookup-redirect **executed** (D-DRC-1d) — baseline suite count **B** = the green `make test` count at T1 start (21 pre-SLRD, ~28+ post-SLRD); every task states its delta against B, no deletions.
+**Prerequisite:** service-lookup-redirect **executed** (D-DRC-1d). Baseline suite count **B=29** at T1
+start; final suite count **34** (B+5), no deletions.
 
 ---
 
@@ -35,6 +37,7 @@ T3, T4 → T5 → T6
 
 ### T1: Freeze the drop-reason ABI + event contract headers
 
+**Status:** Complete — verified 2026-07-08 (`make test` → 30 passed)
 **What**: Rewrite `drop_reason.h` with the final §9.2 enum (0..15, explicit values, `DROP_REASON_COUNT=16`, `_Static_assert(COUNT<=CAP)`, `/* FROZEN ABI — append only */` banner, userspace `drop_reason_name[]` under `#ifndef __BPF__`); create `drop_event.h` (`struct drop_event` 32 B, `struct sample_config`, `enum sample_stat`). Add the DRC-04 test case (after corpus: all 16 slots readable, unwired M3 reasons == 0).
 **Where**: `data-plane/src/drop_reason.h` (rewrite), `data-plane/src/drop_event.h` (new), `data-plane/tests/test_parse.c` (loop bound → `DROP_REASON_COUNT`; +1 case)
 **Depends on**: None
@@ -44,12 +47,12 @@ T3, T4 → T5 → T6
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Enum matches design table exactly (only `map_error` moves 4→15; `bogon_drop`=4; SLRD's 5/6 unchanged)
-- [ ] `drop_reason_name[DROP_REASON_COUNT]` index-aligned; static assert compiles
-- [ ] `drop_event.h` compiles standalone in both BPF and userspace TUs (`<linux/types.h>` only)
-- [ ] Migration proof: existing suite passes **unmodified in expectations** (symbols only, no hardcoded indices found/left)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **B + 1** pass (no silent deletions)
+- [x] Enum matches design table exactly (only `map_error` moves 4→15; `bogon_drop`=4; SLRD's 5/6 unchanged)
+- [x] `drop_reason_name[DROP_REASON_COUNT]` index-aligned; static assert compiles
+- [x] `drop_event.h` compiles standalone in both BPF and userspace TUs (`<linux/types.h>` only)
+- [x] Migration proof: existing suite passes **unmodified in expectations** (symbols only, no hardcoded indices found/left)
+- [x] Gate check passes: `make test`
+- [x] Test count: **B + 1** pass (no silent deletions)
 
 **Tests**: dp-unit
 **Gate**: quick
@@ -62,6 +65,7 @@ T3, T4 → T5 → T6
 
 ### T2: Sampling core — ringbuf, token bucket, fused `record_drop(meta, reason)`
 
+**Status:** Complete — verified 2026-07-08 (`make test` → 30 passed)
 **What**: New `sample.h` (maps `drop_ringbuf` 256 KiB / `sample_config` / `sample_bucket` / `sample_stats` + `sample_drop()` per design); change `record_drop` to `record_drop(const struct pkt_meta *meta, enum drop_reason r)` with out-of-range clamp → `DR_MAP_ERROR`, exact count, then `sample_drop`; mechanically update every call site.
 **Where**: `data-plane/src/sample.h` (new), `data-plane/src/drop_reason.h` (helper), `data-plane/src/xdp_gateway.bpf.c` (call sites)
 **Depends on**: T1
@@ -71,11 +75,11 @@ T3, T4 → T5 → T6
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Verifier accepts the program with all four new maps (proven by `make test` loading it)
-- [ ] With `sample_config` unset (zeroed → rate 0, burst 0) sampling is inert: existing suite green, counters exact — **no expectation changes**
-- [ ] `record_drop` is the only drop entry point (no direct `counter_map` writes at call sites)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **B + 1** pass (unchanged from T1; behavior assertions land in T3 with the consumer harness — merge-forward per TESTING.md, not deferral: unrunnable without T3's consumer)
+- [x] Verifier accepts the program with all four new maps (proven by `make test` loading it)
+- [x] With `sample_config` unset (zeroed → rate 0, burst 0) sampling is inert: existing suite green, counters exact — **no expectation changes**
+- [x] `record_drop` is the only drop entry point (no direct `counter_map` writes at call sites)
+- [x] Gate check passes: `make test`
+- [x] Test count: **B + 1** pass (unchanged from T1; behavior assertions land in T3 with the consumer harness — merge-forward per TESTING.md, not deferral: unrunnable without T3's consumer)
 
 **Tests**: dp-unit (regression; new sampling assertions merge forward into T3)
 **Gate**: quick
@@ -88,6 +92,7 @@ T3, T4 → T5 → T6
 
 ### T3: Ringbuf de-risk + sampling test cases
 
+**Status:** Complete — verified 2026-07-08 (`make test` → 34 passed; test_run→ringbuf delivery succeeded)
 **What**: Extend the test harness with a `ring_buffer__new`/`consume` consumer over the skeleton's `drop_ringbuf` fd. **First case = de-risk** (config `rate=0,burst=1`; 1 drop via test_run; consume must deliver exactly 1 event) — if it fails, switch suite to the documented stats-only fallback (assert `sample_stats` instead of consuming events; event content moves to `make smoke`) and record the finding in STATE Lessons. Then: budget-bound case (`burst=B_s`, fire `M>B_s` drops → exactly `B_s` emitted, `M−B_s` suppressed, `counter_map` exactly `M`); event-content case (fields match injected frame + reason; `service_id` when known); fail-closed case (out-of-range reason via a `-DPKT_TEST_HOOKS`-gated trigger → `map_error`++, packet dropped).
 **Where**: `data-plane/tests/test_parse.c` (+consumer, +4 cases), `data-plane/src/xdp_gateway.bpf.c` (test-hook trigger under `PKT_TEST_HOOKS` only)
 **Depends on**: T2
@@ -97,11 +102,11 @@ T3, T4 → T5 → T6
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] De-risk verdict recorded (events consumable after test_run: yes/no + fallback applied if no)
-- [ ] Budget, content, and fail-closed cases pass with exact counts (no timing dependence)
-- [ ] Suppressed/lost observable via `sample_stats` assertions
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **B + 5** pass (no silent deletions)
+- [x] De-risk verdict recorded (events consumable after test_run: yes/no + fallback applied if no)
+- [x] Budget, content, and fail-closed cases pass with exact counts (no timing dependence)
+- [x] Suppressed/lost observable via `sample_stats` assertions
+- [x] Gate check passes: `make test`
+- [x] Test count: **B + 5** pass (no silent deletions)
 
 **Tests**: dp-unit
 **Gate**: quick
@@ -114,6 +119,7 @@ T3, T4 → T5 → T6
 
 ### T4: Loader — pin observability maps + seed sampling defaults [P]
 
+**Status:** Complete — verified 2026-07-08 (`make bpf skel loader`)
 **What**: Extend the loader: `bpf_map__set_pin_path()` for `counter_map`, `drop_ringbuf`, `sample_config`, `sample_stats` under `/sys/fs/bpf/xdp_gateway/` before load (fail-loud if pin dir/entries already exist); after load, write default `sample_config` (rate 256/s, burst 64 per CPU); unpin all on signal detach.
 **Where**: `data-plane/loader/loader.c`
 **Depends on**: T2 (maps exist)
@@ -123,9 +129,9 @@ T3, T4 → T5 → T6
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Loader builds; pin paths + default seeding implemented exactly as design table (4 pinned, `sample_bucket` not pinned)
-- [ ] Stale-pin case errors with a clear message (no silent reuse)
-- [ ] Gate check passes: `make bpf skel loader`
+- [x] Loader builds; pin paths + default seeding implemented exactly as design table (4 pinned, `sample_bucket` not pinned)
+- [x] Stale-pin case errors with a clear message (no silent reuse)
+- [x] Gate check passes: `make bpf skel loader`
 
 **Tests**: none (loader layer — build gate + manual smoke per TESTING.md)
 **Gate**: build
@@ -138,6 +144,7 @@ T3, T4 → T5 → T6
 
 ### T5: `dpstat` operator CLI
 
+**Status:** Complete — verified 2026-07-08 (`make bpf skel loader dpstat`; no-gateway error path checked)
 **What**: New `tools/dpstat.c` + `make dpstat` target: `dpstat counters [-w <sec>]` (per-CPU-aggregated `index name total` rows from pinned `counter_map`, using `drop_reason_name[]`, + emitted/suppressed/lost footer), `dpstat tail` (ring_buffer poll on pinned `drop_ringbuf`, human-readable decode until SIGINT), `dpstat rate <per_cpu_rate> <burst>` (write pinned `sample_config`). Clear "gateway not loaded / maps not pinned" error when `bpf_obj_get` fails.
 **Where**: `data-plane/tools/dpstat.c` (new), `data-plane/Makefile` (target)
 **Depends on**: T1 (name table), T2 (map/event contracts), T4 (pin-path contract)
@@ -147,9 +154,9 @@ T3, T4 → T5 → T6
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] All three subcommands implemented per design; no duplicated name strings (header table only)
-- [ ] Builds clean via `make dpstat`; no-gateway error path prints the friendly message (testable unprivileged: run without pins)
-- [ ] Gate check passes: `make bpf skel loader dpstat`
+- [x] All three subcommands implemented per design; no duplicated name strings (header table only)
+- [x] Builds clean via `make dpstat`; no-gateway error path prints the friendly message (testable unprivileged: run without pins)
+- [x] Gate check passes: `make bpf skel loader dpstat`
 
 **Tests**: none (ops tool — no dp-unit layer; behavior over pinned maps exercised in privileged smoke/manual verify)
 **Gate**: build
@@ -162,6 +169,7 @@ T3, T4 → T5 → T6
 
 ### T6: Documentation — ABI table, semantics, conventions
 
+**Status:** Complete — verified 2026-07-08 (`make test` → 34 passed)
 **What**: `TESTING.md` data-plane section: frozen index→name ABI table (referencing `drop_reason.h` as authoritative), sampling determinism convention (`rate=0,burst=B_s`), updated corpus/count note, de-risk outcome (incl. fallback status if triggered). `data-plane/README.md`: pin paths, `dpstat` usage, reset-on-reload semantics (consumers compute deltas), per-CPU budget semantics (node bound = rate × CPUs), append-only growth rule.
 **Where**: `.specs/codebase/TESTING.md`, `data-plane/README.md`
 **Depends on**: T3, T4, T5 (documents outcomes, not intentions)
@@ -171,9 +179,9 @@ T3, T4 → T5 → T6
 **Tools**: MCP: NONE · Skill: NONE
 
 **Done when**:
-- [ ] ABI table index-identical to `drop_reason.h`; header cited as source of truth
-- [ ] Reset-on-reload + budget semantics documented where M4/M5 will look (README) and testing conventions in TESTING.md
-- [ ] Gate check passes: `make test` (docs-only; proves no accidental code drift)
+- [x] ABI table index-identical to `drop_reason.h`; header cited as source of truth
+- [x] Reset-on-reload + budget semantics documented where M4/M5 will look (README) and testing conventions in TESTING.md
+- [x] Gate check passes: `make test` (docs-only; proves no accidental code drift)
 
 **Tests**: none (docs)
 **Gate**: quick (regression re-run)
