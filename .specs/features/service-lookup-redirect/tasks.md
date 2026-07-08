@@ -203,7 +203,7 @@ every drop counter `==0`.
 
 ### T5: Loader — `OUT` arg + populate `tx_devmap` + seed [P]
 
-**Status:** Pending
+**Status:** Complete — verified 2026-07-08 (`make loader`)
 **What:** Extend the loader to take an `OUT` interface, populate `tx_devmap` (fail-loud), and seed
 `active_config` + one demo service so `make run` forwards.
 **Where:** `data-plane/loader/loader.c`, `data-plane/Makefile` (`run` gains `OUT`), `data-plane/README.md`

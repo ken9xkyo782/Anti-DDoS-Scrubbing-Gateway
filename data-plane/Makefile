@@ -24,7 +24,7 @@ UAPI_INCLUDE := /usr/include/$(shell uname -m)-linux-gnu
 BPF_CFLAGS := -g -O2 -Wall -Wextra -target bpf -D__TARGET_ARCH_$(ARCH) -I$(SRC_DIR) -I$(UAPI_INCLUDE)
 LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
-USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) $(LIBBPF_CFLAGS)
+USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
 .PHONY: all bpf skel loader test clean run
 
@@ -63,8 +63,8 @@ $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 run: loader
-	@if [ -z "$(IFACE)" ]; then echo "usage: make run IFACE=<ifname>"; exit 2; fi
-	sudo $(LOADER) $(IFACE)
+	@if [ -z "$(IFACE)" ] || [ -z "$(OUT)" ]; then echo "usage: make run IFACE=<in-ifname> OUT=<out-ifname> [SERVICE_DEST=<ipv4-or-cidr>]"; exit 2; fi
+	sudo SERVICE_DEST="$(SERVICE_DEST)" $(LOADER) $(IFACE) $(OUT)
 
 clean:
 	rm -rf $(BUILD_DIR)
