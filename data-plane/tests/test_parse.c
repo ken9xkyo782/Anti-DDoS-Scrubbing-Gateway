@@ -186,7 +186,7 @@ static int expect_all_drop_counters_zero(struct test_env *env)
 	return 0;
 }
 
-static int test_trivial_pass(void)
+static int test_valid_ipv4_passes(void)
 {
 	struct pkt_frame frame;
 	struct test_env env;
@@ -194,7 +194,8 @@ static int test_trivial_pass(void)
 	int err;
 
 	pkt_frame_init(&frame);
-	if (build_eth(&frame, ETH_P_IP) != 0)
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -204,6 +205,169 @@ static int test_trivial_pass(void)
 	err = run_frame(&env, &frame, &retval);
 	if (!err)
 		err = expect_u32("retval", retval, XDP_PASS);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ipv4_bad_version_drops_malformed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct iphdr *iph;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0)
+		return -1;
+
+	iph = (struct iphdr *)(frame.data + frame.ipv4_off);
+	iph->version = 5;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ipv4_bad_ihl_drops_malformed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 4) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ipv4_truncated_header_drops_malformed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 || !pkt_append(&frame, 10))
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ipv4_total_length_beyond_frame_drops_malformed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct iphdr *iph;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0)
+		return -1;
+
+	iph = (struct iphdr *)(frame.data + frame.ipv4_off);
+	iph->tot_len = htons(128);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ipv4_first_fragment_drops_fragment_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, IPV4_MF, 5) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_FRAGMENT_UNSUPPORTED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ipv4_later_fragment_drops_fragment_counter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 1, 5) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_FRAGMENT_UNSUPPORTED, 1);
 
 	env_close(&env);
 	return err;
@@ -317,7 +481,7 @@ struct test_case {
 int main(void)
 {
 	const struct test_case tests[] = {
-		{ "trivial pass", test_trivial_pass },
+		{ "valid IPv4 passes", test_valid_ipv4_passes },
 		{ "IPv6 drops with counter", test_ipv6_drops_with_counter },
 		{ "unsupported EtherType drops with counter",
 		  test_unsupported_ethertype_drops_with_counter },
@@ -325,6 +489,18 @@ int main(void)
 		  test_truncated_vlan_drops_with_unsupported_counter },
 		{ "ARP passes without drop counter",
 		  test_arp_passes_without_drop_counter },
+		{ "IPv4 bad version drops malformed",
+		  test_ipv4_bad_version_drops_malformed },
+		{ "IPv4 bad IHL drops malformed",
+		  test_ipv4_bad_ihl_drops_malformed },
+		{ "IPv4 truncated header drops malformed",
+		  test_ipv4_truncated_header_drops_malformed },
+		{ "IPv4 total length beyond frame drops malformed",
+		  test_ipv4_total_length_beyond_frame_drops_malformed },
+		{ "IPv4 first fragment drops fragment",
+		  test_ipv4_first_fragment_drops_fragment_counter },
+		{ "IPv4 later fragment drops fragment",
+		  test_ipv4_later_fragment_drops_fragment_counter },
 	};
 	size_t passed = 0;
 	size_t count = sizeof(tests) / sizeof(tests[0]);

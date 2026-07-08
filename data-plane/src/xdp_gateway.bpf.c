@@ -39,7 +39,13 @@ int xdp_gateway(struct xdp_md *ctx)
 		/* SEAM: redirect ARP in service lookup feature */
 		return XDP_PASS;
 	case ETH_P_IP:
-		/* SEAM: IPv4 parse (T5) */
+		res = parse_ipv4(&cur, data_end, &meta);
+		if (res == PARSE_FRAGMENT)
+			return record_drop(DR_FRAGMENT_UNSUPPORTED);
+		if (res != PARSE_OK)
+			return record_drop(DR_MALFORMED_IPV4);
+
+		/* SEAM: L4 parse (T6) */
 		return XDP_PASS;
 	default:
 		return record_drop(DR_UNSUPPORTED_ETHERTYPE);

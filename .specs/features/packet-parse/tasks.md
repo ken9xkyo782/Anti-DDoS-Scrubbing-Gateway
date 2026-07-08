@@ -181,6 +181,7 @@ each drop recorded, all reads bounds-checked; the IPv4 case passes through (pars
 
 ### T5: IPv4 parse + malformed + fragment drops
 
+**Status:** Verified (2026-07-08)
 **What:** Parse the IPv4 header once into `pkt_meta`, dropping malformed headers and all fragments; valid
 IPv4 continues to the L4 seam (filled in T6).
 **Where:** `data-plane/src/parse.h` (add `parse_ipv4`), `data-plane/src/xdp_gateway.bpf.c` (IPv4 branch),
@@ -192,15 +193,15 @@ IPv4 continues to the L4 seam (filled in T6).
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `parse_ipv4` checks `version==4`, `ihl>=5`, header/`tot_len`/option bounds vs `data_end`; sets
+- [x] `parse_ipv4` checks `version==4`, `ihl>=5`, header/`tot_len`/option bounds vs `data_end`; sets
       `src_ip/dst_ip/ip_proto/l3_off/l4_off`. Bad → `malformed_ipv4` (PKT-09); truncation → `malformed_ipv4`
       (PKT-11).
-- [ ] Fragment (`MF` set or `frag_off!=0`, A-PKT-7) → `record_drop(DR_FRAGMENT_UNSUPPORTED)`, sets
+- [x] Fragment (`MF` set or `frag_off!=0`, A-PKT-7) → `record_drop(DR_FRAGMENT_UNSUPPORTED)`, sets
       `is_fragment` (PKT-10).
-- [ ] Valid IPv4 → `XDP_PASS` placeholder `/* SEAM: L4 parse (T6) */` with IPv4 fields populated (PKT-14).
-- [ ] Tests added: `version!=4`, `ihl<5`, truncated header, `tot_len`>frame → `malformed_ipv4`; first
+- [x] Valid IPv4 → `XDP_PASS` placeholder `/* SEAM: L4 parse (T6) */` with IPv4 fields populated (PKT-14).
+- [x] Tests added: `version!=4`, `ihl<5`, truncated header, `tot_len`>frame → `malformed_ipv4`; first
       (`off=0,MF=1`) and later fragment → `fragment_unsupported`; well-formed IPv4 → `XDP_PASS`.
-- [ ] Gate check passes: `make test`. Test count: **≥11** dp-unit tests pass (≥6 new).
+- [x] Gate check passes: `make test`. Test count: **11** dp-unit tests pass (6 new plus valid IPv4 update).
 **Tests:** dp-unit · **Gate:** quick
 
 **Verify:** `make test` → all pass; both fragment variants assert `fragment_unsupported` counter increments.
