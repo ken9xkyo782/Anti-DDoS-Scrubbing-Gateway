@@ -7,13 +7,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 
+#include "drop_event.h"
 #include "service.h"
 #include "xdp_gateway.skel.h"
+
+#define PIN_DIR "/sys/fs/bpf/xdp_gateway"
+#define COUNTER_PIN_PATH PIN_DIR "/counter_map"
+#define RINGBUF_PIN_PATH PIN_DIR "/drop_ringbuf"
+#define SAMPLE_CONFIG_PIN_PATH PIN_DIR "/sample_config"
+#define SAMPLE_STATS_PIN_PATH PIN_DIR "/sample_stats"
+#define DEFAULT_SAMPLE_RATE_PER_SEC 256
+#define DEFAULT_SAMPLE_BURST 64
 
 static volatile sig_atomic_t exiting;
 
@@ -61,6 +71,96 @@ static void print_usage(const char *prog)
 	fprintf(stderr, "usage: %s <IN> <OUT>\n", prog);
 	fprintf(stderr, "       or set IN_IFACE=<IN> OUT_IFACE=<OUT>\n");
 	fprintf(stderr, "       optional: SERVICE_DEST=<ipv4-or-cidr>\n");
+}
+
+static int create_pin_dir(void)
+{
+	if (mkdir(PIN_DIR, 0700) == 0)
+		return 0;
+
+	if (errno == EEXIST)
+		fprintf(stderr, "pin directory %s already exists; remove stale pins before loading\n",
+			PIN_DIR);
+	else
+		fprintf(stderr, "failed to create pin directory %s: %s\n", PIN_DIR,
+			strerror(errno));
+	return -1;
+}
+
+static void remove_pin_dir(void)
+{
+	if (rmdir(PIN_DIR) != 0 && errno != ENOENT)
+		fprintf(stderr, "warning: failed to remove pin directory %s: %s\n",
+			PIN_DIR, strerror(errno));
+}
+
+static int set_pin_path(struct bpf_map *map, const char *path)
+{
+	int err = bpf_map__set_pin_path(map, path);
+
+	if (err) {
+		fprintf(stderr, "failed to set pin path %s: %s\n", path,
+			strerror(-err));
+		return -1;
+	}
+	return 0;
+}
+
+static int set_observability_pin_paths(struct xdp_gateway_bpf *skel)
+{
+	if (set_pin_path(skel->maps.counter_map, COUNTER_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.drop_ringbuf, RINGBUF_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.sample_config, SAMPLE_CONFIG_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.sample_stats, SAMPLE_STATS_PIN_PATH) != 0)
+		return -1;
+
+	return 0;
+}
+
+static int pin_map(struct bpf_map *map, const char *name)
+{
+	int err = bpf_map__pin(map, NULL);
+
+	if (err) {
+		fprintf(stderr, "failed to pin %s: %s\n", name, strerror(-err));
+		return -1;
+	}
+	return 0;
+}
+
+static void unpin_map(struct bpf_map *map, const char *name)
+{
+	int err = bpf_map__unpin(map, NULL);
+
+	if (err)
+		fprintf(stderr, "warning: failed to unpin %s: %s\n", name,
+			strerror(-err));
+}
+
+static void unpin_observability_maps(struct xdp_gateway_bpf *skel)
+{
+	unpin_map(skel->maps.counter_map, "counter_map");
+	unpin_map(skel->maps.drop_ringbuf, "drop_ringbuf");
+	unpin_map(skel->maps.sample_config, "sample_config");
+	unpin_map(skel->maps.sample_stats, "sample_stats");
+}
+
+static int pin_observability_maps(struct xdp_gateway_bpf *skel)
+{
+	if (pin_map(skel->maps.counter_map, "counter_map") != 0)
+		return -1;
+	if (pin_map(skel->maps.drop_ringbuf, "drop_ringbuf") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.sample_config, "sample_config") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.sample_stats, "sample_stats") != 0)
+		goto rollback;
+
+	return 0;
+
+rollback:
+	unpin_observability_maps(skel);
+	return -1;
 }
 
 static void report_attach_mode(int ifindex)
@@ -166,6 +266,26 @@ static int seed_active_config(struct xdp_gateway_bpf *skel)
 	return 0;
 }
 
+static int seed_sample_config(struct xdp_gateway_bpf *skel)
+{
+	struct sample_config config = {
+		.rate_per_sec = DEFAULT_SAMPLE_RATE_PER_SEC,
+		.burst = DEFAULT_SAMPLE_BURST,
+	};
+	__u32 key = 0;
+	int fd = bpf_map__fd(skel->maps.sample_config);
+
+	if (fd < 0 || bpf_map_update_elem(fd, &key, &config, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed sample_config[0]: %s\n",
+			strerror(errno));
+		return -1;
+	}
+
+	printf("seeded sample_config[0] rate=%u/s burst=%u per CPU\n",
+	       DEFAULT_SAMPLE_RATE_PER_SEC, DEFAULT_SAMPLE_BURST);
+	return 0;
+}
+
 static int seed_service_from_env(struct xdp_gateway_bpf *skel)
 {
 	const char *service_dest = getenv("SERVICE_DEST");
@@ -209,6 +329,8 @@ int main(int argc, char **argv)
 	int out_ifindex;
 	int prog_fd;
 	int err;
+	int pin_dir_created = 0;
+	int pins_created = 0;
 
 	if (argc > 3 || !ifname || !out_ifname) {
 		print_usage(argv[0]);
@@ -229,12 +351,34 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	skel = xdp_gateway_bpf__open_and_load();
-	if (!skel) {
-		fprintf(stderr, "failed to open/load BPF skeleton: %s\n",
-			strerror(errno));
+	if (create_pin_dir() != 0)
 		return 1;
+	pin_dir_created = 1;
+
+	skel = xdp_gateway_bpf__open();
+	if (!skel) {
+		fprintf(stderr, "failed to open BPF skeleton: %s\n", strerror(errno));
+		err = 1;
+		goto cleanup;
 	}
+
+	if (set_observability_pin_paths(skel) != 0) {
+		err = 1;
+		goto cleanup;
+	}
+
+	err = xdp_gateway_bpf__load(skel);
+	if (err) {
+		fprintf(stderr, "failed to load BPF skeleton: %s\n", strerror(-err));
+		err = 1;
+		goto cleanup;
+	}
+
+	if (pin_observability_maps(skel) != 0) {
+		err = 1;
+		goto cleanup;
+	}
+	pins_created = 1;
 
 	prog_fd = bpf_program__fd(skel->progs.xdp_gateway);
 	if (prog_fd < 0) {
@@ -245,6 +389,7 @@ int main(int argc, char **argv)
 
 	if (populate_tx_devmap(skel, out_ifindex, out_ifname) != 0 ||
 	    seed_active_config(skel) != 0 ||
+	    seed_sample_config(skel) != 0 ||
 	    seed_service_from_env(skel) != 0) {
 		err = 1;
 		goto cleanup;
@@ -281,6 +426,11 @@ int main(int argc, char **argv)
 	}
 
 cleanup:
-	xdp_gateway_bpf__destroy(skel);
+	if (pins_created)
+		unpin_observability_maps(skel);
+	if (pin_dir_created)
+		remove_pin_dir();
+	if (skel)
+		xdp_gateway_bpf__destroy(skel);
 	return err;
 }
