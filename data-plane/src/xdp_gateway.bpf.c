@@ -82,23 +82,23 @@ static __always_inline int service_lookup_redirect(struct pkt_meta *meta)
 
 	config = bpf_map_lookup_elem(&active_config, &config_key);
 	if (!config)
-		return record_drop(DR_MAP_ERROR);
+		return record_drop(meta, DR_MAP_ERROR);
 
 	slot = config->active_slot;
 	meta->active_slot = (__u8)slot;
 
 	inner = bpf_map_lookup_elem(&service_map, &slot);
 	if (!inner)
-		return record_drop(DR_MAP_ERROR);
+		return record_drop(meta, DR_MAP_ERROR);
 
 	key.prefixlen = 32;
 	key.addr = meta->dst_ip;
 	service = bpf_map_lookup_elem(inner, &key);
 	if (!service)
-		return record_drop(DR_SERVICE_MISS);
+		return record_drop(meta, DR_SERVICE_MISS);
 
 	if (!service->enabled)
-		return record_drop(DR_SERVICE_DISABLED);
+		return record_drop(meta, DR_SERVICE_DISABLED);
 
 	meta->service_id = service->service_id;
 	return redirect_out(meta);
@@ -119,27 +119,27 @@ int xdp_gateway(struct xdp_md *ctx)
 
 	res = parse_eth(&cur, data_end, &meta);
 	if (res != PARSE_OK)
-		return record_drop(DR_UNSUPPORTED_ETHERTYPE);
+		return record_drop(&meta, DR_UNSUPPORTED_ETHERTYPE);
 
 	switch (meta.eth_proto) {
 	case ETH_P_IPV6:
-		return record_drop(DR_IPV6_UNSUPPORTED);
+		return record_drop(&meta, DR_IPV6_UNSUPPORTED);
 	case ETH_P_ARP:
 		return redirect_out(&meta);
 	case ETH_P_IP:
 		res = parse_ipv4(&cur, data_end, &meta);
 		if (res == PARSE_FRAGMENT)
-			return record_drop(DR_FRAGMENT_UNSUPPORTED);
+			return record_drop(&meta, DR_FRAGMENT_UNSUPPORTED);
 		if (res != PARSE_OK)
-			return record_drop(DR_MALFORMED_IPV4);
+			return record_drop(&meta, DR_MALFORMED_IPV4);
 
 		res = parse_l4(&cur, data_end, &meta);
 		if (res != PARSE_OK)
-			return record_drop(DR_MALFORMED_IPV4);
+			return record_drop(&meta, DR_MALFORMED_IPV4);
 
 		return service_lookup_redirect(&meta);
 	default:
-		return record_drop(DR_UNSUPPORTED_ETHERTYPE);
+		return record_drop(&meta, DR_UNSUPPORTED_ETHERTYPE);
 	}
 
 	return XDP_PASS;

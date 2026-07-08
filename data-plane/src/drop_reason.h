@@ -53,6 +53,9 @@ static const char *const drop_reason_name[DROP_REASON_COUNT] = {
 #include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 
+#include "pkt_meta.h"
+#include "sample.h"
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, DROP_REASON_CAP);
@@ -60,13 +63,21 @@ struct {
 	__type(value, __u64);
 } counter_map SEC(".maps");
 
-static __always_inline int record_drop(enum drop_reason reason)
+static __always_inline int record_drop(const struct pkt_meta *meta,
+				       enum drop_reason reason)
 {
 	__u32 key = (__u32)reason;
 	__u64 *count = bpf_map_lookup_elem(&counter_map, &key);
 
+	if ((__u32)reason >= DROP_REASON_COUNT) {
+		reason = DR_MAP_ERROR;
+		key = (__u32)reason;
+		count = bpf_map_lookup_elem(&counter_map, &key);
+	}
+
 	if (count)
 		__sync_fetch_and_add(count, 1);
+	sample_drop(meta, key);
 
 	return XDP_DROP;
 }
