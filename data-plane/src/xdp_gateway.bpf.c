@@ -15,6 +15,17 @@ struct {
 } test_meta_map SEC(".maps");
 #endif
 
+static __always_inline void write_test_meta(const struct pkt_meta *meta)
+{
+#ifdef PKT_TEST_HOOKS
+	__u32 key = 0;
+
+	bpf_map_update_elem(&test_meta_map, &key, meta, BPF_ANY);
+#else
+	(void)meta;
+#endif
+}
+
 SEC("xdp")
 int xdp_gateway(struct xdp_md *ctx)
 {
@@ -45,7 +56,13 @@ int xdp_gateway(struct xdp_md *ctx)
 		if (res != PARSE_OK)
 			return record_drop(DR_MALFORMED_IPV4);
 
-		/* SEAM: L4 parse (T6) */
+		res = parse_l4(&cur, data_end, &meta);
+		if (res != PARSE_OK)
+			return record_drop(DR_MALFORMED_IPV4);
+
+		write_test_meta(&meta);
+
+		/* SEAM: service lookup (next feature) */
 		return XDP_PASS;
 	default:
 		return record_drop(DR_UNSUPPORTED_ETHERTYPE);

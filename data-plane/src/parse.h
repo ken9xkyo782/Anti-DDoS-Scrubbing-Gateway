@@ -2,8 +2,12 @@
 #define XDP_GATEWAY_PARSE_H
 
 #include <linux/if_ether.h>
+#include <linux/icmp.h>
+#include <linux/in.h>
 #include <linux/ip.h>
+#include <linux/tcp.h>
 #include <linux/types.h>
+#include <linux/udp.h>
 
 #include <bpf/bpf_endian.h>
 
@@ -65,11 +69,11 @@ static __always_inline enum parse_result parse_ipv4(struct hdr_cursor *cur,
 	enum parse_result res;
 	__u16 l3_off = cur->off;
 	__u8 version_ihl;
-	__u8 ihl;
 	__u16 ihl_len;
 	__u16 total_len;
 	__u16 frag_off;
 	__u64 available_len;
+	void *l4;
 
 	res = cursor_advance(cur, data_end, sizeof(*iph), (void **)&iph);
 	if (res != PARSE_OK)
@@ -79,21 +83,16 @@ static __always_inline enum parse_result parse_ipv4(struct hdr_cursor *cur,
 	if ((version_ihl >> 4) != 4)
 		return PARSE_MALFORMED;
 
-	ihl = version_ihl & 0x0f;
-	if (ihl < 5)
+	ihl_len = (__u16)(version_ihl & 0x0f) << 2;
+	if (ihl_len < sizeof(*iph) || ihl_len > 60)
 		return PARSE_MALFORMED;
 
-	ihl_len = (__u16)ihl * 4;
-	if (ihl_len > sizeof(*iph)) {
-		__u16 options_len = ihl_len - sizeof(*iph);
-		void *options_end = cur->pos + options_len;
+	l4 = (void *)iph + ihl_len;
+	if (l4 > data_end)
+		return PARSE_MALFORMED;
 
-		if (options_end > data_end)
-			return PARSE_MALFORMED;
-
-		cur->pos = options_end;
-		cur->off += options_len;
-	}
+	cur->pos = l4;
+	cur->off = l3_off + ihl_len;
 
 	total_len = bpf_ntohs(iph->tot_len);
 	available_len = data_end - (void *)iph;
@@ -113,6 +112,54 @@ static __always_inline enum parse_result parse_ipv4(struct hdr_cursor *cur,
 	}
 
 	return PARSE_OK;
+}
+
+static __always_inline enum parse_result parse_l4(struct hdr_cursor *cur,
+						  void *data_end,
+						  struct pkt_meta *meta)
+{
+	enum parse_result res;
+
+	switch (meta->ip_proto) {
+	case IPPROTO_TCP: {
+		struct tcphdr *tcp;
+
+		res = cursor_advance(cur, data_end, sizeof(*tcp),
+				     (void **)&tcp);
+		if (res != PARSE_OK)
+			return PARSE_MALFORMED;
+
+		meta->sport = tcp->source;
+		meta->dport = tcp->dest;
+		return PARSE_OK;
+	}
+	case IPPROTO_UDP: {
+		struct udphdr *udp;
+
+		res = cursor_advance(cur, data_end, sizeof(*udp),
+				     (void **)&udp);
+		if (res != PARSE_OK)
+			return PARSE_MALFORMED;
+
+		meta->sport = udp->source;
+		meta->dport = udp->dest;
+		return PARSE_OK;
+	}
+	case IPPROTO_ICMP: {
+		struct icmphdr *icmp;
+
+		res = cursor_advance(cur, data_end, sizeof(*icmp),
+				     (void **)&icmp);
+		if (res != PARSE_OK)
+			return PARSE_MALFORMED;
+
+		meta->icmp_type = icmp->type;
+		meta->icmp_code = icmp->code;
+		return PARSE_OK;
+	}
+	default:
+		return PARSE_OK;
+	}
 }
 
 #endif

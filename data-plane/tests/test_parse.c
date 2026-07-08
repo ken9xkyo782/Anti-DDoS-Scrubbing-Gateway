@@ -156,6 +156,24 @@ static int expect_u32(const char *label, __u32 got, __u32 want)
 	return -1;
 }
 
+static int expect_u16(const char *label, __u16 got, __u16 want)
+{
+	if (got == want)
+		return 0;
+
+	fprintf(stderr, "%s: got %u, want %u\n", label, got, want);
+	return -1;
+}
+
+static int expect_u8(const char *label, __u8 got, __u8 want)
+{
+	if (got == want)
+		return 0;
+
+	fprintf(stderr, "%s: got %u, want %u\n", label, got, want);
+	return -1;
+}
+
 static int expect_counter(struct test_env *env, enum drop_reason reason,
 			  __u64 want)
 {
@@ -186,16 +204,17 @@ static int expect_all_drop_counters_zero(struct test_env *env)
 	return 0;
 }
 
-static int test_valid_ipv4_passes(void)
+static int test_valid_other_ipv4_passes_with_zero_ports(void)
 {
 	struct pkt_frame frame;
 	struct test_env env;
+	struct pkt_meta meta;
 	__u32 retval = 0;
 	int err;
 
 	pkt_frame_init(&frame);
 	if (build_eth(&frame, ETH_P_IP) != 0 ||
-	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0)
+	    build_ipv4(&frame, IPPROTO_GRE, 0, 5) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -205,6 +224,47 @@ static int test_valid_ipv4_passes(void)
 	err = run_frame(&env, &frame, &retval);
 	if (!err)
 		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("ip_proto", meta.ip_proto, IPPROTO_GRE);
+	if (!err)
+		err = expect_u16("sport", meta.sport, 0);
+	if (!err)
+		err = expect_u16("dport", meta.dport, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_esp_ipv4_passes_with_zero_ports(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_ESP, 0, 5) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("ip_proto", meta.ip_proto, IPPROTO_ESP);
+	if (!err)
+		err = expect_u16("sport", meta.sport, 0);
+	if (!err)
+		err = expect_u16("dport", meta.dport, 0);
 
 	env_close(&env);
 	return err;
@@ -373,6 +433,165 @@ static int test_ipv4_later_fragment_drops_fragment_counter(void)
 	return err;
 }
 
+static int test_tcp_ports_written_to_meta(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_TCP, 0, 5) != 0 ||
+	    build_tcp(&frame, 12345, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u16("sport", meta.sport, htons(12345));
+	if (!err)
+		err = expect_u16("dport", meta.dport, htons(443));
+	if (!err)
+		err = expect_u32("src_ip", meta.src_ip, htonl(0x0a000001));
+	if (!err)
+		err = expect_u16("l3_off", meta.l3_off, sizeof(struct ethhdr));
+	if (!err)
+		err = expect_u16("l4_off", meta.l4_off,
+				 sizeof(struct ethhdr) + sizeof(struct iphdr));
+
+	env_close(&env);
+	return err;
+}
+
+static int test_udp_ports_written_to_meta(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0 ||
+	    build_udp(&frame, 1234, 53) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u16("sport", meta.sport, htons(1234));
+	if (!err)
+		err = expect_u16("dport", meta.dport, htons(53));
+	if (!err)
+		err = expect_u32("dst_ip", meta.dst_ip, htonl(0x0a000002));
+
+	env_close(&env);
+	return err;
+}
+
+static int test_icmp_type_code_written_to_meta(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_ICMP, 0, 5) != 0 ||
+	    build_icmp(&frame, 8, 0) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err && read_meta(&env, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("icmp_type", meta.icmp_type, 8);
+	if (!err)
+		err = expect_u8("icmp_code", meta.icmp_code, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_truncated_udp_drops_malformed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_UDP, 0, 5) != 0 ||
+	    !pkt_append(&frame, 4) || pkt_fix_ipv4_tot_len(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_truncated_tcp_drops_malformed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_TCP, 0, 5) != 0 ||
+	    !pkt_append(&frame, 10) || pkt_fix_ipv4_tot_len(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+
+	env_close(&env);
+	return err;
+}
+
 static int test_ipv6_drops_with_counter(void)
 {
 	struct pkt_frame frame;
@@ -481,7 +700,10 @@ struct test_case {
 int main(void)
 {
 	const struct test_case tests[] = {
-		{ "valid IPv4 passes", test_valid_ipv4_passes },
+		{ "valid other IPv4 passes with zero ports",
+		  test_valid_other_ipv4_passes_with_zero_ports },
+		{ "ESP IPv4 passes with zero ports",
+		  test_esp_ipv4_passes_with_zero_ports },
 		{ "IPv6 drops with counter", test_ipv6_drops_with_counter },
 		{ "unsupported EtherType drops with counter",
 		  test_unsupported_ethertype_drops_with_counter },
@@ -501,6 +723,14 @@ int main(void)
 		  test_ipv4_first_fragment_drops_fragment_counter },
 		{ "IPv4 later fragment drops fragment",
 		  test_ipv4_later_fragment_drops_fragment_counter },
+		{ "TCP ports written to meta", test_tcp_ports_written_to_meta },
+		{ "UDP ports written to meta", test_udp_ports_written_to_meta },
+		{ "ICMP type/code written to meta",
+		  test_icmp_type_code_written_to_meta },
+		{ "truncated UDP drops malformed",
+		  test_truncated_udp_drops_malformed },
+		{ "truncated TCP drops malformed",
+		  test_truncated_tcp_drops_malformed },
 	};
 	size_t passed = 0;
 	size_t count = sizeof(tests) / sizeof(tests[0]);

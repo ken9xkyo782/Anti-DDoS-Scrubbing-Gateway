@@ -211,6 +211,7 @@ IPv4 continues to the L4 seam (filled in T6).
 
 ### T6: L4 parse + pkt_meta population + service-lookup seam
 
+**Status:** Verified (2026-07-08)
 **What:** Parse L4 (TCP/UDP ports, ICMP type/code, other = ports 0), finalize `pkt_meta`, and return
 `XDP_PASS` at the marked service-lookup seam; truncated L4 → malformed.
 **Where:** `data-plane/src/parse.h` (add `parse_l4`), `data-plane/src/xdp_gateway.bpf.c` (fill `pkt_meta`,
@@ -222,14 +223,14 @@ IPv4 continues to the L4 seam (filled in T6).
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `parse_l4`: TCP/UDP → `sport/dport`; ICMP → `icmp_type/code`; other IPv4 proto → ports 0, returns OK
+- [x] `parse_l4`: TCP/UDP → `sport/dport`; ICMP → `icmp_type/code`; other IPv4 proto → ports 0, returns OK
       and **continues** (A-PKT-5); truncated L4 header → `malformed_ipv4` (A-PKT-4, PKT-11).
-- [ ] `pkt_meta` fully populated by a **single** parse (PKT-17); zero-init + padding respected (PKT-18);
+- [x] `pkt_meta` fully populated by a **single** parse (PKT-17); zero-init + padding respected (PKT-18);
       `#ifdef PKT_TEST_HOOKS` writes `test_meta_map[0]=meta` before the seam.
-- [ ] Valid IPv4 returns `XDP_PASS` at the single `/* SEAM: service lookup (next feature) */` (PKT-16).
-- [ ] Tests added: TCP/UDP assert `sport/dport` in `test_meta_map`; ICMP asserts `type/code`; GRE/ESP →
+- [x] Valid IPv4 returns `XDP_PASS` at the single `/* SEAM: service lookup (next feature) */` (PKT-16).
+- [x] Tests added: TCP/UDP assert `sport/dport` in `test_meta_map`; ICMP asserts `type/code`; GRE/ESP →
       `XDP_PASS` with ports 0; truncated UDP/TCP header → `malformed_ipv4`.
-- [ ] Gate check passes: `make test`. Test count: **≥16** dp-unit tests pass (≥5 new).
+- [x] Gate check passes: `make test`. Test count: **17** dp-unit tests pass (6 new).
 **Tests:** dp-unit · **Gate:** quick
 
 **Verify:** `make test` → all pass; a UDP frame asserts `test_meta_map[0].src_ip/dport` equal the built
