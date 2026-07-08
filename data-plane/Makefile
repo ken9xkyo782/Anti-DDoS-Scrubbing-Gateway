@@ -62,7 +62,7 @@ test: $(TEST_BIN)
 smoke: loader
 	$(TEST_DIR)/smoke_redirect.sh
 
-$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(TEST_SKEL) | $(BUILD_DIR)
+$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 run: loader

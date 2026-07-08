@@ -10,6 +10,7 @@
 #include <bpf/libbpf.h>
 
 #include "drop_reason.h"
+#include "drop_event.h"
 #include "pkt_build.h"
 #include "pkt_meta.h"
 #include "service.h"
@@ -335,12 +336,54 @@ static int expect_counter(struct test_env *env, enum drop_reason reason,
 static int expect_all_drop_counters_zero(struct test_env *env)
 {
 	for (enum drop_reason reason = DR_IPV6_UNSUPPORTED;
-	     reason <= DR_SERVICE_DISABLED; reason++) {
+	     reason < DROP_REASON_COUNT; reason++) {
 		if (expect_counter(env, reason, 0) != 0)
 			return -1;
 	}
 
 	return 0;
+}
+
+static int expect_reason_zero(struct test_env *env, enum drop_reason reason)
+{
+	return expect_counter(env, reason, 0);
+}
+
+static int test_drop_reason_abi_exposes_16_slots(void)
+{
+	struct test_env env;
+	int err;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	for (enum drop_reason reason = DR_IPV6_UNSUPPORTED;
+	     !err && reason < DROP_REASON_COUNT; reason++)
+		err = expect_counter(&env, reason, 0);
+
+	if (!err)
+		err = expect_reason_zero(&env, DR_BOGON_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_UDP_AMPLIFICATION_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_BLACKLIST_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_NOT_ALLOWED);
+	if (!err)
+		err = expect_reason_zero(&env, DR_RATE_LIMIT_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_SERVICE_CEILING_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_CONGESTION_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_INGRESS_CAP_DROP);
+	if (!err)
+		err = expect_reason_zero(&env, DR_VIP_CEILING_DROP);
+
+	env_close(&env);
+	return err;
 }
 
 static int test_valid_other_ipv4_passes_with_zero_ports(void)
@@ -1188,6 +1231,8 @@ int main(void)
 {
 	const struct test_case tests[] = {
 		{ "config maps load", test_config_maps_load },
+		{ "drop reason ABI exposes 16 slots",
+		  test_drop_reason_abi_exposes_16_slots },
 		{ "service miss drops", test_service_miss_drops },
 		{ "service disabled drops", test_service_disabled_drops },
 		{ "enabled service sets redirect meta",
