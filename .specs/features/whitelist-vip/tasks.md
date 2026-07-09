@@ -157,20 +157,23 @@ index 14, terminal); lazy version-reset vs `vip_config.version`; bucket-insert f
 
 **Done when**:
 
-- [ ] Deterministic ceiling: `test_no_refill=1`, `pps=3` → exactly 3 redirects then drops; counter
+- [x] Deterministic ceiling: `test_no_refill=1`, `pps=3` → exactly 3 redirects then drops; counter
       index 14 exact; seeded match-all rule receives **none** of the overflow (terminal, WLV-11);
       `dpstat` decode needs zero changes (WLV-20)
-- [ ] One-dim + zero: `pps` set / `bps` NULL → bps unlimited; `pps=0`+`PPS_SET` → every whitelisted
+- [x] One-dim + zero: `pps` set / `bps` NULL → bps unlimited; `pps=0`+`PPS_SET` → every whitelisted
       packet drops index 14 (WLV-13)
-- [ ] Dim independence: pps-exhausted drop leaves `bps_tokens` untouched (WLV-14)
-- [ ] Aggregate sharing: two distinct whitelisted sources drain one budget (burst 5 → 5 total
+- [x] Dim independence: pps-exhausted drop leaves `bps_tokens` untouched (WLV-14)
+- [x] Aggregate sharing: two distinct whitelisted sources drain one budget (burst 5 → 5 total
       admits across both, order-independent) (WLV-12)
-- [ ] Reset-on-swap: exhaust → rewrite `vip_config` with `version+1` → next packet admits (WLV-15)
-- [ ] Normal mode: first packet on a fresh bucket admits (init path); VIP admit still calls
+- [x] Reset-on-swap: exhaust → rewrite `vip_config` with `version+1` → next packet admits (WLV-15)
+- [x] Normal mode: first packet on a fresh bucket admits (init path); VIP admit still calls
       `redirect_out()` directly, never `admit_clean()` (WLV-18, code-level assert via review +
       overflow-isolation case above)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **≥ 66** pass (T2's N + ≥ 6 new; record exact N on completion)
+- [x] Gate check passes: `make test`
+- [x] Test count: **68** pass (T2's 62 + 6 new; exact N recorded on completion)
+
+**Completion (2026-07-09)**: `cd data-plane && make test` → **68 passed**; production build
+`cd data-plane && make bpf skel loader dpstat` also passed.
 
 **Tests**: dp-unit
 **Gate**: quick

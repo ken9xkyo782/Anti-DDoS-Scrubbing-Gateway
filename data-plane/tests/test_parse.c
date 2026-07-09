@@ -255,12 +255,26 @@ static int clear_rate_limit_state(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int clear_vip_ceiling_state(int fd)
+{
+	__u32 key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
 static int reset_rate_limit(struct test_env *env)
 {
 	struct rl_config config = {};
 	__u32 key = 0;
 
 	if (clear_rate_limit_state(env->rate_limit_state_fd) != 0)
+		return -1;
+	if (clear_vip_ceiling_state(env->vip_ceiling_state_fd) != 0)
 		return -1;
 	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
 }
@@ -652,6 +666,25 @@ static int read_bucket_cpu0(struct test_env *env, __u32 service_id,
 		return -1;
 
 	err = bpf_map_lookup_elem(env->rate_limit_state_fd, &key, values);
+	if (err == 0)
+		*bucket = values[0];
+
+	free(values);
+	return err;
+}
+
+static int read_vip_bucket_cpu0(struct test_env *env, __u32 service_id,
+				struct rl_bucket *bucket)
+{
+	struct rl_bucket *values;
+	__u32 key = service_id;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->vip_ceiling_state_fd, &key, values);
 	if (err == 0)
 		*bucket = values[0];
 
@@ -1788,6 +1821,303 @@ static int test_whitelist_gre_hit_redirects_protocol_blind(void)
 		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_ADMIT);
 	if (!err)
 		err = expect_u8("rule_idx", meta.rule_idx, RULE_IDX_NONE);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vip_ceiling_pps_deterministic_terminal_drop(void)
+{
+	struct vip_config config = vip_pps_config(3);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_match_all_rule_block(&env, 0, DEFAULT_SERVICE_ID);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	for (int i = 0; !err && i < 5; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i < 3)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID,
+						   0);
+		if (!err && i < 3)
+			err = expect_u8("wl_state", meta.wl_state,
+					WL_STATE_HIT_ADMIT);
+		if (!err && i < 3)
+			err = expect_u8("rule_idx", meta.rule_idx, RULE_IDX_NONE);
+		if (!err && i >= 3)
+			err = expect_u32("retval", retval, XDP_DROP);
+		if (!err && i >= 3)
+			err = read_meta(&env, &meta);
+		if (!err && i >= 3)
+			err = expect_u8("drop wl_state", meta.wl_state,
+					WL_STATE_HIT_DROP);
+		if (!err && i >= 3)
+			err = expect_u8("drop rule_idx", meta.rule_idx,
+					RULE_IDX_NONE);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_VIP_CEILING_DROP, 2);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 0);
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vip_ceiling_pps_zero_blocks(void)
+{
+	struct vip_config config = vip_pps_config(0);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_VIP_CEILING_DROP, 1);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_DROP);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vip_ceiling_pps_drop_preserves_bps_tokens(void)
+{
+	struct vip_config config = {
+		.version = 1,
+		.flags = VIP_F_PPS_SET | VIP_F_BPS_SET,
+		.pps = 1,
+	};
+	struct rl_bucket bucket;
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u64 bps_budget;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+	bps_budget = frame.len * 10;
+	config.bps = bps_budget;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("second retval", retval, XDP_DROP);
+	if (!err)
+		err = read_vip_bucket_cpu0(&env, DEFAULT_SERVICE_ID, &bucket);
+	if (!err)
+		err = expect_u32("bps_tokens preserved",
+				 (__u32)bucket.bps_tokens,
+				 (__u32)(bps_budget - frame.len));
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vip_ceiling_aggregate_budget_across_sources(void)
+{
+	struct vip_config config = vip_pps_config(5);
+	struct pkt_frame frame_a;
+	struct pkt_frame frame_b;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame_a) != 0 ||
+	    set_ipv4_addrs(&frame_a, 0xc6336407, 0x0a000002) != 0 ||
+	    build_default_udp_frame(&frame_b) != 0 ||
+	    set_ipv4_addrs(&frame_b, 0xc6336408, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	for (int i = 0; !err && i < 6; i++) {
+		const struct pkt_frame *frame = i % 2 ? &frame_b : &frame_a;
+
+		err = run_frame_current_maps(&env, frame, &retval);
+		if (!err && i < 5)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID,
+						   0);
+		if (!err && i < 5)
+			err = expect_u8("wl_state", meta.wl_state,
+					WL_STATE_HIT_ADMIT);
+		if (!err && i >= 5)
+			err = expect_u32("retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_VIP_CEILING_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vip_ceiling_reset_on_config_version(void)
+{
+	struct vip_config config = vip_pps_config(1);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("exhausted retval", retval, XDP_DROP);
+	if (!err) {
+		config.version = 2;
+		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_counter(&env, DR_VIP_CEILING_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_vip_ceiling_normal_mode_fresh_bucket_admits(void)
+{
+	struct vip_config config = vip_pps_config(1);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_ADMIT);
+	if (!err)
+		err = expect_counter(&env, DR_VIP_CEILING_DROP, 0);
 
 	env_close(&env);
 	return err;
@@ -3275,6 +3605,18 @@ int main(void)
 			  test_whitelist_disabled_service_precedes_stage },
 			{ "whitelist GRE hit redirects protocol blind",
 			  test_whitelist_gre_hit_redirects_protocol_blind },
+			{ "VIP ceiling PPS deterministic terminal drop",
+			  test_vip_ceiling_pps_deterministic_terminal_drop },
+			{ "VIP ceiling PPS zero blocks",
+			  test_vip_ceiling_pps_zero_blocks },
+			{ "VIP ceiling PPS drop preserves BPS tokens",
+			  test_vip_ceiling_pps_drop_preserves_bps_tokens },
+			{ "VIP ceiling aggregate budget across sources",
+			  test_vip_ceiling_aggregate_budget_across_sources },
+			{ "VIP ceiling reset on config version",
+			  test_vip_ceiling_reset_on_config_version },
+			{ "VIP ceiling normal mode fresh bucket admits",
+			  test_vip_ceiling_normal_mode_fresh_bucket_admits },
 			{ "CIDR service matches host", test_cidr_service_matches_host },
 		{ "slot pin flip changes service view",
 		  test_slot_pin_flip_changes_service_view },

@@ -241,6 +241,110 @@ static __always_inline struct vip_config *vip_config_lookup(__u32 slot,
 	return bpf_map_lookup_elem(inner, &service_id);
 }
 
+static __always_inline void vip_bucket_reset(struct rl_bucket *bucket,
+					     const struct vip_config *config,
+					     __u64 now, __u32 ncpus,
+					     int test_no_refill)
+{
+	bucket->cfg_version = config->version;
+	bucket->_pad = 0;
+	bucket->last_ns = now;
+	bucket->pps_tokens = rl_burst(config->pps, ncpus, test_no_refill);
+	bucket->bps_tokens = rl_burst(config->bps, ncpus, test_no_refill);
+}
+
+static __always_inline void vip_bucket_refill(struct rl_bucket *bucket,
+					      const struct vip_config *config,
+					      __u64 now, __u32 ncpus)
+{
+	__u64 pps_burst;
+	__u64 bps_burst;
+	__u64 elapsed;
+	__u64 advance = 0;
+	__u64 dim_advance;
+
+	if (now <= bucket->last_ns)
+		return;
+
+	elapsed = now - bucket->last_ns;
+	if (elapsed > NSEC_PER_SEC)
+		elapsed = NSEC_PER_SEC;
+
+	if (config->flags & VIP_F_PPS_SET) {
+		pps_burst = rl_burst(config->pps, ncpus, 0);
+		dim_advance = rl_refill_dim(&bucket->pps_tokens, config->pps,
+					    pps_burst, elapsed, ncpus);
+		if (dim_advance > advance)
+			advance = dim_advance;
+	}
+
+	if (config->flags & VIP_F_BPS_SET) {
+		bps_burst = rl_burst(config->bps, ncpus, 0);
+		dim_advance = rl_refill_dim(&bucket->bps_tokens, config->bps,
+					    bps_burst, elapsed, ncpus);
+		if (dim_advance > advance)
+			advance = dim_advance;
+	}
+
+	if (advance > 0)
+		bucket->last_ns += advance;
+}
+
+static __always_inline int vip_bucket_consume(struct rl_bucket *bucket,
+					      const struct vip_config *config,
+					      __u64 pkt_len)
+{
+	int pps_set = config->flags & VIP_F_PPS_SET;
+	int bps_set = config->flags & VIP_F_BPS_SET;
+	int pps_ok = !pps_set || bucket->pps_tokens >= 1;
+	int bps_ok = !bps_set || bucket->bps_tokens >= pkt_len;
+
+	if (!pps_ok || !bps_ok)
+		return 0;
+
+	if (pps_set)
+		bucket->pps_tokens--;
+	if (bps_set)
+		bucket->bps_tokens -= pkt_len;
+	return 1;
+}
+
+static __always_inline int vip_bucket_admit(const struct vip_config *config,
+					    const struct pkt_meta *meta,
+					    __u64 pkt_len)
+{
+	__u32 key = meta->service_id;
+	struct rl_bucket fresh = {};
+	struct rl_bucket *bucket;
+	__u32 ncpus;
+	__u64 now;
+	int test_no_refill;
+	int admitted;
+
+	if (!(config->flags & (VIP_F_PPS_SET | VIP_F_BPS_SET)))
+		return 1;
+
+	ncpus = rl_cpu_count();
+	test_no_refill = rl_test_no_refill();
+	now = bpf_ktime_get_ns();
+	bucket = bpf_map_lookup_elem(&vip_ceiling_state, &key);
+	if (!bucket) {
+		vip_bucket_reset(&fresh, config, now, ncpus, test_no_refill);
+		admitted = vip_bucket_consume(&fresh, config, pkt_len);
+		if (bpf_map_update_elem(&vip_ceiling_state, &key, &fresh,
+					BPF_ANY) != 0)
+			return -1;
+		return admitted;
+	}
+
+	if (bucket->cfg_version != config->version)
+		vip_bucket_reset(bucket, config, now, ncpus, test_no_refill);
+	else if (!test_no_refill)
+		vip_bucket_refill(bucket, config, now, ncpus);
+
+	return vip_bucket_consume(bucket, config, pkt_len);
+}
+
 static __always_inline int whitelist_miss(struct xdp_md *ctx,
 					  struct pkt_meta *meta, __u32 slot,
 					  int record_state)
@@ -257,7 +361,11 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 					   struct pkt_meta *meta, __u32 slot,
 					   __u8 wl_flags)
 {
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
 	struct vip_config *config;
+	__u64 pkt_len = data_end - data;
+	int admitted;
 	int maybe = 1;
 	int hit = 0;
 
@@ -282,6 +390,16 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 		return record_drop(meta, DR_MAP_ERROR);
 	if (!(config->flags & (VIP_F_PPS_SET | VIP_F_BPS_SET)))
 		return whitelist_miss(ctx, meta, slot, 1);
+
+	admitted = vip_bucket_admit(config, meta, pkt_len);
+	if (admitted < 0)
+		return record_drop(meta, DR_MAP_ERROR);
+	if (!admitted) {
+		meta->wl_state = WL_STATE_HIT_DROP;
+		meta->rule_idx = RULE_IDX_NONE;
+		write_test_meta(meta);
+		return record_drop(meta, DR_VIP_CEILING_DROP);
+	}
 
 	meta->wl_state = WL_STATE_HIT_ADMIT;
 	meta->rule_idx = RULE_IDX_NONE;
