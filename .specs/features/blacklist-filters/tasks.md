@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Approved (2026-07-09) → Execute
+**Status**: Executing (2026-07-09) — T1 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -69,15 +69,20 @@ WLV T1), `service_map` LPM-inner precedent, `sample.h` `sample_stats`/`bump_samp
 
 **Done when**:
 
-- [ ] `blacklist.h` matches design Data Models field-for-field, incl. the M4 contract comment
+- [x] `blacklist.h` matches design Data Models field-for-field, incl. the M4 contract comment
       (one-snapshot swap, bloom ⊇ LPM, 16..23 expansion band, </16 + over-fill ⇒ `GBL_F_HAS_BROAD`,
       replace-only blooms, omit disabled/expired rows)
-- [ ] `sizeof(service_val)==8`, `sizeof(pkt_meta)==32` still static-asserted; new key structs
+- [x] `sizeof(service_val)==8`, `sizeof(pkt_meta)==32` still static-asserted; new key structs
       size-asserted (`sbl_bloom_key`==8)
-- [ ] Program **loads** with all six new maps present (1M LPM inners + ARRAY inners accepted, or
+- [x] Program **loads** with all six new maps present (1M LPM inners + ARRAY inners accepted, or
       fallback rung documented here + STATE)
-- [ ] Gate check passes: `make bpf skel loader dpstat && make test`
-- [ ] Test count: **68** pass (baseline unchanged — include-only)
+- [x] Gate check passes: `make bpf skel loader dpstat && make test`
+- [x] Test count: **68** pass (baseline unchanged — include-only)
+
+**Completion (2026-07-09)**: Primary map-in-map design loaded successfully; generated skeletons
+expose the new global/service blacklist bloom+LPM maps, bitmap maps, `gbl_meta`, and
+`bloom_stats`. Gate `cd data-plane && make bpf skel loader dpstat && make test` → **68 passed**.
+No fallback rung was needed.
 
 **Tests**: dp-unit (load proof; no new cases)
 **Gate**: build + quick

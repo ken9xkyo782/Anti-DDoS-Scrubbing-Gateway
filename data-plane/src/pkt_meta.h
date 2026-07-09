@@ -21,7 +21,7 @@ struct pkt_meta {
 	__u8 verdict;
 	__u8 rule_idx;
 	__u8 wl_state;
-	__u8 _pad;
+	__u8 bl_state;
 };
 
 _Static_assert(sizeof(struct pkt_meta) == 32,

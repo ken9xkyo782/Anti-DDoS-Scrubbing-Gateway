@@ -11,6 +11,7 @@ static __always_inline int redirect_out(struct pkt_meta *meta);
 static __always_inline void write_test_meta(const struct pkt_meta *meta);
 
 #include "rules.h"
+#include "blacklist.h"
 #include "whitelist.h"
 
 struct service_inner_map_def {

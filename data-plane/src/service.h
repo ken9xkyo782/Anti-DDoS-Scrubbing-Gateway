@@ -14,7 +14,8 @@ struct service_val {
 	__u32 service_id;
 	__u8 enabled;
 	__u8 wl_flags;
-	__u8 _pad[2];
+	__u8 bl_flags;
+	__u8 _pad;
 };
 
 _Static_assert(sizeof(struct service_val) == 8,
