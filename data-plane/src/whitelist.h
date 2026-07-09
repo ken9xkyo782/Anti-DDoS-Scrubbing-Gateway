@@ -22,6 +22,7 @@
 #define WL_TEST_BLOOM_SERVICE_ID 0x01020304U
 #define WL_TEST_BLOOM_PRESENT_SRC24 0xc6336400U
 #define WL_TEST_BLOOM_ABSENT_SRC24 0xcb007100U
+#define WL_SRC24_MASK 0xffffff00U
 
 enum wl_service_flags {
 	WL_F_ACTIVE = 1 << 0,
@@ -176,6 +177,115 @@ static __always_inline int whitelist_test_bloom_probe(__u32 slot,
 	if (expect_present)
 		return ret == 0 ? 0 : -1;
 	return ret == -ENOENT ? 0 : -1;
+}
+
+static __always_inline struct wl_bloom_key wl_bloom_key(__u32 service_id,
+							__be32 src)
+{
+	struct wl_bloom_key key = {
+		.service_id = bpf_htonl(service_id),
+		.src24 = src & bpf_htonl(WL_SRC24_MASK),
+	};
+
+	return key;
+}
+
+static __always_inline int wl_bloom_maybe(__u32 slot, __u32 service_id,
+					  __be32 src, int *maybe)
+{
+	struct wl_bloom_key key = wl_bloom_key(service_id, src);
+	void *inner = bpf_map_lookup_elem(&whitelist_bloom, &slot);
+	long ret;
+
+	if (!inner)
+		return -1;
+
+	ret = bpf_map_peek_elem(inner, &key);
+	if (ret == 0) {
+		*maybe = 1;
+		return 0;
+	}
+	if (ret == -ENOENT) {
+		*maybe = 0;
+		return 0;
+	}
+	return -1;
+}
+
+static __always_inline int wl_lpm_hit(__u32 slot, __u32 service_id, __be32 src,
+				      int *hit)
+{
+	struct wl_lpm_key key = {
+		.prefixlen = 64,
+		.service_id = bpf_htonl(service_id),
+		.src = src,
+	};
+	void *inner = bpf_map_lookup_elem(&whitelist_lpm, &slot);
+	__u8 *present;
+
+	if (!inner)
+		return -1;
+
+	present = bpf_map_lookup_elem(inner, &key);
+	*hit = present != 0;
+	return 0;
+}
+
+static __always_inline struct vip_config *vip_config_lookup(__u32 slot,
+							    __u32 service_id)
+{
+	void *inner = bpf_map_lookup_elem(&vip_config_map, &slot);
+
+	if (!inner)
+		return 0;
+	return bpf_map_lookup_elem(inner, &service_id);
+}
+
+static __always_inline int whitelist_miss(struct xdp_md *ctx,
+					  struct pkt_meta *meta, __u32 slot,
+					  int record_state)
+{
+	if (record_state) {
+		meta->wl_state = WL_STATE_MISS;
+		write_test_meta(meta);
+	}
+	/* WLV-24 seam B: M3#3 amplification/bogon/blacklist inserts here. */
+	return allow_rule_stage(ctx, meta, slot);
+}
+
+static __always_inline int whitelist_stage(struct xdp_md *ctx,
+					   struct pkt_meta *meta, __u32 slot,
+					   __u8 wl_flags)
+{
+	struct vip_config *config;
+	int maybe = 1;
+	int hit = 0;
+
+	if (!(wl_flags & WL_F_ACTIVE))
+		return whitelist_miss(ctx, meta, slot, 0);
+
+	if (!(wl_flags & WL_F_HAS_BROAD)) {
+		if (wl_bloom_maybe(slot, meta->service_id, meta->src_ip,
+				   &maybe) != 0)
+			return record_drop(meta, DR_MAP_ERROR);
+		if (!maybe)
+			return whitelist_miss(ctx, meta, slot, 1);
+	}
+
+	if (wl_lpm_hit(slot, meta->service_id, meta->src_ip, &hit) != 0)
+		return record_drop(meta, DR_MAP_ERROR);
+	if (!hit)
+		return whitelist_miss(ctx, meta, slot, 1);
+
+	config = vip_config_lookup(slot, meta->service_id);
+	if (!config)
+		return record_drop(meta, DR_MAP_ERROR);
+	if (!(config->flags & (VIP_F_PPS_SET | VIP_F_BPS_SET)))
+		return whitelist_miss(ctx, meta, slot, 1);
+
+	meta->wl_state = WL_STATE_HIT_ADMIT;
+	meta->rule_idx = RULE_IDX_NONE;
+	return redirect_out(meta);
 }
 #endif
 

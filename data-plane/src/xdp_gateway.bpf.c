@@ -8,6 +8,7 @@
 #include "service.h"
 
 static __always_inline int redirect_out(struct pkt_meta *meta);
+static __always_inline void write_test_meta(const struct pkt_meta *meta);
 
 #include "rules.h"
 #include "whitelist.h"
@@ -144,7 +145,8 @@ static __always_inline int service_lookup_redirect(struct xdp_md *ctx,
 		return record_drop(meta, DR_SERVICE_DISABLED);
 
 	meta->service_id = service->service_id;
-	return allow_rule_stage(ctx, meta, slot);
+	/* WLV-24 seam A: M3#4 ingress-cost cap inserts here. */
+	return whitelist_stage(ctx, meta, slot, service->wl_flags);
 }
 
 SEC("xdp")

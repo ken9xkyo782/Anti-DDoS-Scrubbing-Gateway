@@ -219,6 +219,30 @@ static int clear_rule_block_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int clear_whitelist_lpm_map(int fd)
+{
+	struct wl_lpm_key key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int clear_vip_config_map(int fd)
+{
+	__u32 key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
 static int clear_rate_limit_state(int fd)
 {
 	struct rl_key key;
@@ -249,7 +273,11 @@ static int reset_config(struct test_env *env)
 	if (clear_service_map(env->service_inner0_fd) != 0 ||
 	    clear_service_map(env->service_inner1_fd) != 0 ||
 	    clear_rule_block_map(env->rule_block0_fd) != 0 ||
-	    clear_rule_block_map(env->rule_block1_fd) != 0)
+	    clear_rule_block_map(env->rule_block1_fd) != 0 ||
+	    clear_whitelist_lpm_map(env->whitelist_lpm0_fd) != 0 ||
+	    clear_whitelist_lpm_map(env->whitelist_lpm1_fd) != 0 ||
+	    clear_vip_config_map(env->vip_config0_fd) != 0 ||
+	    clear_vip_config_map(env->vip_config1_fd) != 0)
 		return -1;
 
 	if (bpf_map_update_elem(env->active_config_fd, &key, &config, 0) != 0)
@@ -295,8 +323,49 @@ static int rule_block_fd_for_slot(struct test_env *env, __u32 slot)
 	return -1;
 }
 
-static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
-			__u32 prefixlen, __u32 service_id, __u8 enabled)
+static int whitelist_bloom_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->whitelist_bloom0_fd;
+	if (slot == 1)
+		return env->whitelist_bloom1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int whitelist_lpm_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->whitelist_lpm0_fd;
+	if (slot == 1)
+		return env->whitelist_lpm1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int vip_config_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->vip_config0_fd;
+	if (slot == 1)
+		return env->vip_config1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static __u32 ipv4_prefix_mask(__u32 prefixlen)
+{
+	if (prefixlen == 0)
+		return 0;
+	return UINT32_MAX << (32 - prefixlen);
+}
+
+static int seed_service_flags(struct test_env *env, __u32 slot, __be32 addr,
+			      __u32 prefixlen, __u32 service_id, __u8 enabled,
+			      __u8 wl_flags)
 {
 	struct service_key key = {
 		.prefixlen = prefixlen,
@@ -305,6 +374,7 @@ static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
 	struct service_val val = {
 		.service_id = service_id,
 		.enabled = enabled,
+		.wl_flags = wl_flags,
 	};
 	int fd = service_fd_for_slot(env, slot);
 
@@ -312,6 +382,116 @@ static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
 		return -1;
 
 	return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+}
+
+static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
+			__u32 prefixlen, __u32 service_id, __u8 enabled)
+{
+	return seed_service_flags(env, slot, addr, prefixlen, service_id,
+				  enabled, 0);
+}
+
+static int set_service_wl_flags(struct test_env *env, __u32 slot,
+				__u32 service_id, __u8 wl_flags)
+{
+	struct service_key key;
+	struct service_key next_key;
+	struct service_key *prev = NULL;
+	struct service_val val;
+	int fd = service_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	while (bpf_map_get_next_key(fd, prev, &next_key) == 0) {
+		key = next_key;
+		prev = &key;
+		if (bpf_map_lookup_elem(fd, &key, &val) != 0)
+			return -1;
+		if (val.service_id != service_id)
+			continue;
+
+		val.wl_flags = wl_flags;
+		return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+	}
+
+	errno = ENOENT;
+	return -1;
+}
+
+static int seed_whitelist_bloom_key(struct test_env *env, __u32 slot,
+				    __u32 service_id, __u32 src_host)
+{
+	struct wl_bloom_key key = {
+		.service_id = htonl(service_id),
+		.src24 = htonl(src_host & WL_SRC24_MASK),
+	};
+	int fd = whitelist_bloom_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, NULL, &key, BPF_ANY);
+}
+
+static int seed_whitelist_lpm_entry(struct test_env *env, __u32 slot,
+				    __u32 service_id, __u32 cidr_host,
+				    __u32 prefixlen)
+{
+	__u8 present = 1;
+	struct wl_lpm_key key = {
+		.prefixlen = 32 + prefixlen,
+		.service_id = htonl(service_id),
+		.src = htonl(cidr_host & ipv4_prefix_mask(prefixlen)),
+	};
+	int fd = whitelist_lpm_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &key, &present, BPF_ANY);
+}
+
+static int seed_vip_config(struct test_env *env, __u32 slot, __u32 service_id,
+			   const struct vip_config *config)
+{
+	int fd = vip_config_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &service_id, config, BPF_ANY);
+}
+
+static struct vip_config vip_pps_config(__u64 pps)
+{
+	struct vip_config config = {
+		.version = 1,
+		.flags = VIP_F_PPS_SET,
+		.pps = pps,
+	};
+
+	return config;
+}
+
+static int seed_whitelist(struct test_env *env, __u32 slot, __u32 service_id,
+			  __u32 cidr_host, __u32 prefixlen,
+			  const struct vip_config *config)
+{
+	__u8 flags = WL_F_ACTIVE;
+
+	if (prefixlen >= WL_BLOOM_PREFIX &&
+	    seed_whitelist_bloom_key(env, slot, service_id, cidr_host) != 0)
+		return -1;
+	if (prefixlen < WL_BLOOM_PREFIX)
+		flags |= WL_F_HAS_BROAD;
+	if (seed_whitelist_lpm_entry(env, slot, service_id, cidr_host,
+				     prefixlen) != 0)
+		return -1;
+	if (config && seed_vip_config(env, slot, service_id, config) != 0)
+		return -1;
+
+	return set_service_wl_flags(env, slot, service_id, flags);
 }
 
 static struct rule_entry allow_rule(__u8 proto, __u16 src_lo, __u16 src_hi,
@@ -1056,6 +1236,20 @@ static int build_tcp_frame_ports(struct pkt_frame *frame, __u16 sport,
 	       build_tcp(frame, sport, dport);
 }
 
+static int set_ipv4_addrs(struct pkt_frame *frame, __u32 src_host,
+			  __u32 dst_host)
+{
+	struct iphdr *iph;
+
+	if (!frame->has_ipv4)
+		return -1;
+
+	iph = (struct iphdr *)(frame->data + frame->ipv4_off);
+	iph->saddr = htonl(src_host);
+	iph->daddr = htonl(dst_host);
+	return 0;
+}
+
 static int test_service_miss_drops(void)
 {
 	struct pkt_frame frame;
@@ -1131,7 +1325,469 @@ static int test_enabled_service_sets_redirect_meta(void)
 	if (!err)
 		err = expect_u8("rule_idx", meta.rule_idx, 0);
 	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_NONE);
+	if (!err)
 		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_hit_bypasses_rules(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_ADMIT);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, RULE_IDX_NONE);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_scope_does_not_cross_service(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	__u32 service_b_dst = htonl(0x0a000003);
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000003) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = seed_service_flags(&env, 0, service_b_dst, 32, 77, 1,
+					 WL_F_ACTIVE);
+	if (!err)
+		err = seed_vip_config(&env, 0, 77, &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u32("service_id", meta.service_id, 77);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_MISS);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_out_of_range_takes_rule_path(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xcb007109, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_match_all_rule_block(&env, 0, DEFAULT_SERVICE_ID);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_MISS);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_bloom_false_positive_clean_miss(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service_flags(&env, 0, DEFAULT_DST, 32,
+					 DEFAULT_SERVICE_ID, 1, WL_F_ACTIVE);
+	if (!err)
+		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
+					       0xc6336400);
+	if (!err)
+		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_MISS);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_broad_entry_skips_bloom_and_hits(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6330000, 16,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_ADMIT);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, RULE_IDX_NONE);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_inactive_flag_treats_entries_as_clean_miss(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
+					       0xc6336400);
+	if (!err)
+		err = seed_whitelist_lpm_entry(&env, 0, DEFAULT_SERVICE_ID,
+					       0xc6336400, 24);
+	if (!err)
+		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_NONE);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_vip_config_without_set_flags_misses(void)
+{
+	struct vip_config config = {
+		.version = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_MISS);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_missing_vip_config_fails_closed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
+					       0xc6336400);
+	if (!err)
+		err = seed_whitelist_lpm_entry(&env, 0, DEFAULT_SERVICE_ID,
+					       0xc6336400, 24);
+	if (!err)
+		err = set_service_wl_flags(&env, 0, DEFAULT_SERVICE_ID,
+					   WL_F_ACTIVE);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_missing_lpm_inner_fails_closed(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 slot = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service_flags(&env, 0, DEFAULT_DST, 32,
+					 DEFAULT_SERVICE_ID, 1, WL_F_ACTIVE);
+	if (!err)
+		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
+					       0xc6336400);
+	if (!err)
+		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
+	if (!err && bpf_map_delete_elem(env.whitelist_lpm_fd, &slot) != 0) {
+		fprintf(stderr, "failed to delete whitelist_lpm outer slot: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_disabled_service_precedes_stage(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_DISABLED, 1);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_NONE);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_gre_hit_redirects_protocol_blind(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_GRE, 0, 5) != 0 ||
+	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_ADMIT);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, RULE_IDX_NONE);
 
 	env_close(&env);
 	return err;
@@ -2595,9 +3251,31 @@ int main(void)
 		  test_bad_reason_clamps_to_map_error },
 		{ "service miss drops", test_service_miss_drops },
 		{ "service disabled drops", test_service_disabled_drops },
-		{ "enabled service sets redirect meta",
-		  test_enabled_service_sets_redirect_meta },
-		{ "CIDR service matches host", test_cidr_service_matches_host },
+			{ "enabled service sets redirect meta",
+			  test_enabled_service_sets_redirect_meta },
+			{ "whitelist hit bypasses rules",
+			  test_whitelist_hit_bypasses_rules },
+			{ "whitelist scope does not cross service",
+			  test_whitelist_scope_does_not_cross_service },
+			{ "whitelist out of range takes rule path",
+			  test_whitelist_out_of_range_takes_rule_path },
+			{ "whitelist bloom false positive clean miss",
+			  test_whitelist_bloom_false_positive_clean_miss },
+			{ "whitelist broad entry skips bloom and hits",
+			  test_whitelist_broad_entry_skips_bloom_and_hits },
+			{ "whitelist inactive flag treats entries as clean miss",
+			  test_whitelist_inactive_flag_treats_entries_as_clean_miss },
+			{ "whitelist vip config without set flags misses",
+			  test_whitelist_vip_config_without_set_flags_misses },
+			{ "whitelist missing vip config fails closed",
+			  test_whitelist_missing_vip_config_fails_closed },
+			{ "whitelist missing LPM inner fails closed",
+			  test_whitelist_missing_lpm_inner_fails_closed },
+			{ "whitelist disabled service precedes stage",
+			  test_whitelist_disabled_service_precedes_stage },
+			{ "whitelist GRE hit redirects protocol blind",
+			  test_whitelist_gre_hit_redirects_protocol_blind },
+			{ "CIDR service matches host", test_cidr_service_matches_host },
 		{ "slot pin flip changes service view",
 		  test_slot_pin_flip_changes_service_view },
 		{ "empty config drops service miss",

@@ -110,23 +110,26 @@ half: peek from XDP), WLV-24
 
 **Done when**:
 
-- [ ] Baseline 50 cases pass **unmodified** (no whitelist seeded → miss path; spot-check
+- [x] Baseline 50 cases pass **unmodified** (no whitelist seeded → miss path; spot-check
       `wl_state == 0` on one enabled-service case) — WLV-22
-- [ ] Scope isolation: whitelist `198.51.100.0/24` on svc A only → in-range src to A redirects with
+- [x] Scope isolation: whitelist `198.51.100.0/24` on svc A only → in-range src to A redirects with
       **no rule block seeded** (`wl_state=2`, `rule_idx=0xFF`); same src to svc B → `not_allowed`
       (`wl_state=1`); out-of-range src to A → rule path (WLV-02/03/05/06)
-- [ ] Bloom guard: forced FP (bloom key without LPM entry) → clean miss, verdict identical;
+- [x] Bloom guard: forced FP (bloom key without LPM entry) → clean miss, verdict identical;
       `/16` entry + `WL_F_HAS_BROAD` → hit without bloomed keys (WLV-04, A-WLV-1)
-- [ ] D-WLV-1: entries seeded but `WL_F_ACTIVE` unset → clean miss; `vip_config` with neither SET
+- [x] D-WLV-1: entries seeded but `WL_F_ACTIVE` unset → clean miss; `vip_config` with neither SET
       flag → clean miss (WLV-13 gate half)
-- [ ] Fail-closed: `WL_F_ACTIVE` set + whitelist LPM inner removed from outer → `map_error`;
+- [x] Fail-closed: `WL_F_ACTIVE` set + whitelist LPM inner removed from outer → `map_error`;
       LPM hit + `vip_config` entry deleted → `map_error` (WLV-07)
-- [ ] Pipeline neighbors: disabled svc + whitelist → `service_disabled`; ARP still redirects;
+- [x] Pipeline neighbors: disabled svc + whitelist → `service_disabled`; ARP still redirects;
       GRE from whitelisted src redirects (bypass is protocol-blind)
-- [ ] Program still loads native (bounded stage + `bpf_map_peek_elem` on bloom pass the verifier —
+- [x] Program still loads native (bounded stage + `bpf_map_peek_elem` on bloom pass the verifier —
       WLV-23 verifier half)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **≥ 60** pass (51 + ≥ 9 new; record exact N in this file on completion)
+- [x] Gate check passes: `make test`
+- [x] Test count: **62** pass (51 + 11 new; exact N recorded on completion)
+
+**Completion (2026-07-09)**: `cd data-plane && make test` → **62 passed**; production build
+`cd data-plane && make bpf skel loader dpstat` also passed.
 
 **Tests**: dp-unit
 **Gate**: quick
