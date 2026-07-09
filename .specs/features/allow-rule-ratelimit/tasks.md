@@ -104,14 +104,14 @@ Test Plan #3, #8–#10.
 
 **Done when**:
 
-- [ ] `test_no_refill=1`, `pps=3` → exactly 3 admits then `rate_limit_drop` (counter 10 exact)
-- [ ] No fall-through: overflow of a quota'd rule never reaches a later match-all rule
-- [ ] No-quota rule always admits; `pps=0`+flag always drops; `bps` exhausts by bytes; a
+- [x] `test_no_refill=1`, `pps=3` → exactly 3 admits then `rate_limit_drop` (counter 10 exact)
+- [x] No fall-through: overflow of a quota'd rule never reaches a later match-all rule
+- [x] No-quota rule always admits; `pps=0`+flag always drops; `bps` exhausts by bytes; a
       pps-exhausted drop leaves `bps_tokens` untouched
-- [ ] Reset-on-swap: exhaust quota, rewrite block `version+1` → next packet admits
-- [ ] Normal mode (`test_no_refill=0`): first packet on a fresh bucket admits (init path)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: ≥ 49 pass (T2's N + ≥ 7 new; record exact N on completion)
+- [x] Reset-on-swap: exhaust quota, rewrite block `version+1` → next packet admits
+- [x] Normal mode (`test_no_refill=0`): first packet on a fresh bucket admits (init path)
+- [x] Gate check passes: `make test`
+- [x] Test count: 50 pass (T2's N + 8 new; record exact N on completion)
 
 **Tests**: dp-unit
 **Gate**: quick

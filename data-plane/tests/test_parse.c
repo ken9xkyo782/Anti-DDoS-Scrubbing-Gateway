@@ -1,6 +1,9 @@
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,10 +67,18 @@ static int env_open(struct test_env *env)
 		return -1;
 	}
 
-	env->skel = xdp_gateway_test_bpf__open_and_load();
+	env->skel = xdp_gateway_test_bpf__open();
 	if (!env->skel) {
-		fprintf(stderr, "failed to open/load test BPF skeleton: %s\n",
+		fprintf(stderr, "failed to open test BPF skeleton: %s\n",
 			strerror(errno));
+		return -1;
+	}
+
+	env->skel->rodata->rl_ncpus = (__u32)env->possible_cpus;
+	if (xdp_gateway_test_bpf__load(env->skel) != 0) {
+		fprintf(stderr, "failed to load test BPF skeleton: %s\n",
+			strerror(errno));
+		xdp_gateway_test_bpf__destroy(env->skel);
 		return -1;
 	}
 
@@ -182,6 +193,28 @@ static int clear_rule_block_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int clear_rate_limit_state(int fd)
+{
+	struct rl_key key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int reset_rate_limit(struct test_env *env)
+{
+	struct rl_config config = {};
+	__u32 key = 0;
+
+	if (clear_rate_limit_state(env->rate_limit_state_fd) != 0)
+		return -1;
+	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
+}
+
 static int reset_config(struct test_env *env)
 {
 	struct active_config config = {};
@@ -206,6 +239,9 @@ static int reset_config(struct test_env *env)
 static int reset_maps(struct test_env *env)
 {
 	if (reset_observability(env) != 0)
+		return -1;
+
+	if (reset_rate_limit(env) != 0)
 		return -1;
 
 	return reset_config(env);
@@ -273,6 +309,12 @@ static struct rule_entry match_all_rule(void)
 			  RULE_F_ENABLED);
 }
 
+static struct rule_entry default_udp_rule(void)
+{
+	return allow_rule(IPPROTO_UDP, 0, UINT16_MAX, 53, 53,
+			  RULE_F_ENABLED);
+}
+
 static int seed_rule_block(struct test_env *env, __u32 slot, __u32 service_id,
 			   const struct rule_block *block)
 {
@@ -317,6 +359,16 @@ static int set_sample_config(struct test_env *env, __u64 rate_per_sec,
 	__u32 key = 0;
 
 	return bpf_map_update_elem(env->sample_config_fd, &key, &config, 0);
+}
+
+static int set_rl_config(struct test_env *env, __u32 test_no_refill)
+{
+	struct rl_config config = {
+		.test_no_refill = test_no_refill,
+	};
+	__u32 key = 0;
+
+	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
 }
 
 static int set_bad_reason_trigger(struct test_env *env, __u32 enabled)
@@ -364,6 +416,28 @@ static int read_sample_stat(struct test_env *env, enum sample_stat stat,
 		for (int i = 0; i < env->possible_cpus; i++)
 			*sum += values[i];
 	}
+
+	free(values);
+	return err;
+}
+
+static int read_bucket_cpu0(struct test_env *env, __u32 service_id,
+			    __u32 rule_idx, struct rl_bucket *bucket)
+{
+	struct rl_bucket *values;
+	struct rl_key key = {
+		.service_id = service_id,
+		.rule_idx = rule_idx,
+	};
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->rate_limit_state_fd, &key, values);
+	if (err == 0)
+		*bucket = values[0];
 
 	free(values);
 	return err;
@@ -1419,6 +1493,390 @@ static int test_rule_count_clamps_to_sixteen(void)
 	return err;
 }
 
+static int test_deterministic_pps_quota_drops_after_budget(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].pps = 3;
+	block.rules[0].flags |= RULE_F_PPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	for (int i = 0; !err && i < 5; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i < 3)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID,
+						   0);
+		if (!err && i < 3)
+			err = expect_u8("rule_idx", meta.rule_idx, 0);
+		if (!err && i >= 3)
+			err = expect_u32("retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 2);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_quota_overflow_does_not_fall_through(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 2,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].pps = 1;
+	block.rules[0].flags |= RULE_F_PPS_SET;
+	block.rules[1] = match_all_rule();
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_no_quota_rule_always_admits(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	for (int i = 0; !err && i < 5; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID,
+						   0);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_pps_zero_blocks(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].flags |= RULE_F_PPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_bps_exhausts_by_bytes(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].bps = frame.len * 2;
+	block.rules[0].flags |= RULE_F_BPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	for (int i = 0; !err && i < 3; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i < 2)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID,
+						   0);
+		if (!err && i >= 2)
+			err = expect_u32("retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_pps_drop_leaves_bps_tokens_untouched(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct rl_bucket bucket;
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u64 bps_budget;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	bps_budget = frame.len * 10;
+	block.rules[0] = default_udp_rule();
+	block.rules[0].pps = 1;
+	block.rules[0].bps = bps_budget;
+	block.rules[0].flags |= RULE_F_PPS_SET | RULE_F_BPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("second retval", retval, XDP_DROP);
+	if (!err)
+		err = read_bucket_cpu0(&env, DEFAULT_SERVICE_ID, 0, &bucket);
+	if (!err)
+		err = expect_u32("bps_tokens preserved",
+				 (__u32)bucket.bps_tokens,
+				 (__u32)(bps_budget - frame.len));
+
+	env_close(&env);
+	return err;
+}
+
+static int test_reset_on_swap_admits_after_version_change(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].pps = 1;
+	block.rules[0].flags |= RULE_F_PPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("exhausted retval", retval, XDP_DROP);
+	if (!err) {
+		block.version = 2;
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_normal_mode_fresh_bucket_admits(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].pps = 1;
+	block.rules[0].flags |= RULE_F_PPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
 static int test_esp_ipv4_drops_not_allowed(void)
 {
 	struct pkt_frame frame;
@@ -1987,6 +2445,21 @@ struct test_case {
 	int (*run)(void);
 };
 
+static int pin_to_cpu0(void)
+{
+	cpu_set_t set;
+
+	CPU_ZERO(&set);
+	CPU_SET(0, &set);
+	if (sched_setaffinity(0, sizeof(set), &set) != 0) {
+		fprintf(stderr, "failed to pin test runner to CPU 0: %s\n",
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
 int main(void)
 {
 	const struct test_case tests[] = {
@@ -2029,6 +2502,20 @@ int main(void)
 		  test_src_range_and_dst_wildcard },
 		{ "rule_count clamps to 16",
 		  test_rule_count_clamps_to_sixteen },
+		{ "deterministic PPS quota drops after budget",
+		  test_deterministic_pps_quota_drops_after_budget },
+		{ "quota overflow does not fall through",
+		  test_quota_overflow_does_not_fall_through },
+		{ "no quota rule always admits",
+		  test_no_quota_rule_always_admits },
+		{ "PPS zero blocks", test_pps_zero_blocks },
+		{ "BPS exhausts by bytes", test_bps_exhausts_by_bytes },
+		{ "PPS drop leaves BPS tokens untouched",
+		  test_pps_drop_leaves_bps_tokens_untouched },
+		{ "reset on swap admits after version change",
+		  test_reset_on_swap_admits_after_version_change },
+		{ "normal mode fresh bucket admits",
+		  test_normal_mode_fresh_bucket_admits },
 		{ "ESP IPv4 drops not_allowed",
 		  test_esp_ipv4_drops_not_allowed },
 		{ "IPv6 drops with counter", test_ipv6_drops_with_counter },
@@ -2068,6 +2555,9 @@ int main(void)
 	};
 	size_t passed = 0;
 	size_t count = sizeof(tests) / sizeof(tests[0]);
+
+	if (pin_to_cpu0() != 0)
+		return 1;
 
 	for (size_t i = 0; i < count; i++) {
 		if (tests[i].run() != 0) {
