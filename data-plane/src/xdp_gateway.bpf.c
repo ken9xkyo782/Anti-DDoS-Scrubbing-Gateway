@@ -5,8 +5,11 @@
 #include "drop_reason.h"
 #include "parse.h"
 #include "pkt_meta.h"
-#include "rules.h"
 #include "service.h"
+
+static __always_inline int redirect_out(struct pkt_meta *meta);
+
+#include "rules.h"
 
 struct service_inner_map_def {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
@@ -91,7 +94,8 @@ static __always_inline int redirect_out(struct pkt_meta *meta)
 	return bpf_redirect_map(&tx_devmap, 0, XDP_DROP);
 }
 
-static __always_inline int service_lookup_redirect(struct pkt_meta *meta)
+static __always_inline int service_lookup_redirect(struct xdp_md *ctx,
+						   struct pkt_meta *meta)
 {
 	__u32 config_key = 0;
 	struct active_config *config;
@@ -121,8 +125,7 @@ static __always_inline int service_lookup_redirect(struct pkt_meta *meta)
 		return record_drop(meta, DR_SERVICE_DISABLED);
 
 	meta->service_id = service->service_id;
-	meta->rule_idx = rule_stage_verifier_de_risk(meta, slot) ? 0 : RULE_IDX_NONE;
-	return redirect_out(meta);
+	return allow_rule_stage(ctx, meta, slot);
 }
 
 SEC("xdp")
@@ -161,7 +164,7 @@ int xdp_gateway(struct xdp_md *ctx)
 		if (res != PARSE_OK)
 			return record_drop(&meta, DR_MALFORMED_IPV4);
 
-		return service_lookup_redirect(&meta);
+		return service_lookup_redirect(ctx, &meta);
 	default:
 		return record_drop(&meta, DR_UNSUPPORTED_ETHERTYPE);
 	}

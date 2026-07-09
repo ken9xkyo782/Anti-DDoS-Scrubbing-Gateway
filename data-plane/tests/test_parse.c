@@ -13,6 +13,7 @@
 #include "drop_event.h"
 #include "pkt_build.h"
 #include "pkt_meta.h"
+#include "rules.h"
 #include "service.h"
 #include "xdp_gateway.test.skel.h"
 
@@ -27,6 +28,11 @@ struct test_env {
 	int service_inner0_fd;
 	int service_inner1_fd;
 	int service_map_fd;
+	int rule_block0_fd;
+	int rule_block1_fd;
+	int rule_block_map_fd;
+	int rate_limit_state_fd;
+	int rl_config_fd;
 	int active_config_fd;
 	int tx_devmap_fd;
 	int trigger_fd;
@@ -71,6 +77,11 @@ static int env_open(struct test_env *env)
 	env->service_inner0_fd = bpf_map__fd(env->skel->maps.service_inner_0);
 	env->service_inner1_fd = bpf_map__fd(env->skel->maps.service_inner_1);
 	env->service_map_fd = bpf_map__fd(env->skel->maps.service_map);
+	env->rule_block0_fd = bpf_map__fd(env->skel->maps.rule_block_0);
+	env->rule_block1_fd = bpf_map__fd(env->skel->maps.rule_block_1);
+	env->rule_block_map_fd = bpf_map__fd(env->skel->maps.rule_block_map);
+	env->rate_limit_state_fd = bpf_map__fd(env->skel->maps.rate_limit_state);
+	env->rl_config_fd = bpf_map__fd(env->skel->maps.rl_config);
 	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
 	env->tx_devmap_fd = bpf_map__fd(env->skel->maps.tx_devmap);
 	env->trigger_fd = bpf_map__fd(env->skel->maps.test_trigger_map);
@@ -80,8 +91,11 @@ static int env_open(struct test_env *env)
 	env->sample_stats_fd = bpf_map__fd(env->skel->maps.sample_stats);
 	if (env->prog_fd < 0 || env->counter_fd < 0 || env->meta_fd < 0 ||
 	    env->service_inner0_fd < 0 || env->service_inner1_fd < 0 ||
-	    env->service_map_fd < 0 || env->active_config_fd < 0 ||
-	    env->tx_devmap_fd < 0 || env->trigger_fd < 0 ||
+	    env->service_map_fd < 0 || env->rule_block0_fd < 0 ||
+	    env->rule_block1_fd < 0 || env->rule_block_map_fd < 0 ||
+	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
+	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
+	    env->trigger_fd < 0 ||
 	    env->ringbuf_fd < 0 || env->sample_config_fd < 0 ||
 	    env->sample_bucket_fd < 0 || env->sample_stats_fd < 0) {
 		fprintf(stderr, "failed to resolve BPF fds\n");
@@ -156,13 +170,27 @@ static int clear_service_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int clear_rule_block_map(int fd)
+{
+	__u32 key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
 static int reset_config(struct test_env *env)
 {
 	struct active_config config = {};
 	__u32 key = 0;
 
 	if (clear_service_map(env->service_inner0_fd) != 0 ||
-	    clear_service_map(env->service_inner1_fd) != 0)
+	    clear_service_map(env->service_inner1_fd) != 0 ||
+	    clear_rule_block_map(env->rule_block0_fd) != 0 ||
+	    clear_rule_block_map(env->rule_block1_fd) != 0)
 		return -1;
 
 	if (bpf_map_update_elem(env->active_config_fd, &key, &config, 0) != 0)
@@ -194,6 +222,17 @@ static int service_fd_for_slot(struct test_env *env, __u32 slot)
 	return -1;
 }
 
+static int rule_block_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->rule_block0_fd;
+	if (slot == 1)
+		return env->rule_block1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
 static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
 			__u32 prefixlen, __u32 service_id, __u8 enabled)
 {
@@ -211,6 +250,50 @@ static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
 		return -1;
 
 	return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+}
+
+static struct rule_entry allow_rule(__u8 proto, __u16 src_lo, __u16 src_hi,
+				    __u16 dst_lo, __u16 dst_hi, __u8 flags)
+{
+	struct rule_entry rule = {
+		.src_lo = src_lo,
+		.src_hi = src_hi,
+		.dst_lo = dst_lo,
+		.dst_hi = dst_hi,
+		.proto = proto,
+		.flags = flags,
+	};
+
+	return rule;
+}
+
+static struct rule_entry match_all_rule(void)
+{
+	return allow_rule(RULE_PROTO_ANY, 0, UINT16_MAX, 0, UINT16_MAX,
+			  RULE_F_ENABLED);
+}
+
+static int seed_rule_block(struct test_env *env, __u32 slot, __u32 service_id,
+			   const struct rule_block *block)
+{
+	int fd = rule_block_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &service_id, block, BPF_ANY);
+}
+
+static int seed_match_all_rule_block(struct test_env *env, __u32 slot,
+				     __u32 service_id)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+
+	block.rules[0] = match_all_rule();
+	return seed_rule_block(env, slot, service_id, &block);
 }
 
 static int set_active(struct test_env *env, __u32 slot, __u32 version)
@@ -375,6 +458,7 @@ static int run_enabled_service_frame(struct test_env *env,
 {
 	if (reset_maps(env) != 0 ||
 	    seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0 ||
+	    seed_match_all_rule_block(env, 0, DEFAULT_SERVICE_ID) != 0 ||
 	    set_active(env, 0, 1) != 0)
 		return -1;
 
@@ -685,11 +769,10 @@ static int test_bad_reason_clamps_to_map_error(void)
 	return err;
 }
 
-static int test_valid_other_ipv4_passes_with_zero_ports(void)
+static int test_valid_other_ipv4_drops_not_allowed(void)
 {
 	struct pkt_frame frame;
 	struct test_env env;
-	struct pkt_meta meta;
 	__u32 retval = 0;
 	int err;
 
@@ -704,13 +787,9 @@ static int test_valid_other_ipv4_passes_with_zero_ports(void)
 
 	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		err = expect_u32("retval", retval, XDP_DROP);
 	if (!err)
-		err = expect_u8("ip_proto", meta.ip_proto, IPPROTO_GRE);
-	if (!err)
-		err = expect_u16("sport", meta.sport, 0);
-	if (!err)
-		err = expect_u16("dport", meta.dport, 0);
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
 
 	env_close(&env);
 	return err;
@@ -731,6 +810,16 @@ static int test_config_maps_load(void)
 		err = expect_fd("service_inner_1", env.service_inner1_fd);
 	if (!err)
 		err = expect_fd("service_map", env.service_map_fd);
+	if (!err)
+		err = expect_fd("rule_block_0", env.rule_block0_fd);
+	if (!err)
+		err = expect_fd("rule_block_1", env.rule_block1_fd);
+	if (!err)
+		err = expect_fd("rule_block_map", env.rule_block_map_fd);
+	if (!err)
+		err = expect_fd("rate_limit_state", env.rate_limit_state_fd);
+	if (!err)
+		err = expect_fd("rl_config", env.rl_config_fd);
 	if (!err)
 		err = expect_fd("active_config", env.active_config_fd);
 	if (!err)
@@ -756,6 +845,24 @@ static int build_default_udp_frame(struct pkt_frame *frame)
 	return build_eth(frame, ETH_P_IP) ||
 	       build_ipv4(frame, IPPROTO_UDP, 0, 5) ||
 	       build_udp(frame, 1234, 53);
+}
+
+static int build_udp_frame_ports(struct pkt_frame *frame, __u16 sport,
+				 __u16 dport)
+{
+	pkt_frame_init(frame);
+	return build_eth(frame, ETH_P_IP) ||
+	       build_ipv4(frame, IPPROTO_UDP, 0, 5) ||
+	       build_udp(frame, sport, dport);
+}
+
+static int build_tcp_frame_ports(struct pkt_frame *frame, __u16 sport,
+				 __u16 dport)
+{
+	pkt_frame_init(frame);
+	return build_eth(frame, ETH_P_IP) ||
+	       build_ipv4(frame, IPPROTO_TCP, 0, 5) ||
+	       build_tcp(frame, sport, dport);
 }
 
 static int test_service_miss_drops(void)
@@ -831,6 +938,8 @@ static int test_enabled_service_sets_redirect_meta(void)
 	if (!err)
 		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
+	if (!err)
 		err = expect_all_drop_counters_zero(&env);
 
 	env_close(&env);
@@ -856,11 +965,15 @@ static int test_cidr_service_matches_host(void)
 	if (!err)
 		err = seed_service(&env, 0, htonl(0x0a000000), 24, 99, 1);
 	if (!err)
+		err = seed_match_all_rule_block(&env, 0, 99);
+	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
 		err = run_frame_current_maps(&env, &frame, &retval);
 	if (!err)
 		err = expect_redirect_meta(&env, &meta, 99, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
 	if (!err)
 		err = expect_all_drop_counters_zero(&env);
 
@@ -887,6 +1000,8 @@ static int test_slot_pin_flip_changes_service_view(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, 11, 1);
 	if (!err)
+		err = seed_match_all_rule_block(&env, 0, 11);
+	if (!err)
 		err = seed_service(&env, 1, DEFAULT_DST, 32, 11, 0);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -894,6 +1009,8 @@ static int test_slot_pin_flip_changes_service_view(void)
 		err = run_frame_current_maps(&env, &frame, &retval);
 	if (!err)
 		err = expect_redirect_meta(&env, &meta, 11, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
 	if (!err)
 		err = expect_all_drop_counters_zero(&env);
 	if (!err)
@@ -963,11 +1080,349 @@ static int test_invalid_active_slot_drops_map_error(void)
 	return err;
 }
 
-static int test_esp_ipv4_passes_with_zero_ports(void)
+static int test_first_match_sets_rule_idx(void)
 {
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 2,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 1234, 53) != 0)
+		return -1;
+
+	block.rules[0] = allow_rule(IPPROTO_TCP, 0, UINT16_MAX, 80, 80,
+				    RULE_F_ENABLED);
+	block.rules[1] = allow_rule(IPPROTO_UDP, 0, UINT16_MAX, 53, 53,
+				    RULE_F_ENABLED);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 1);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_zero_rule_block_default_denies(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 0,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_absent_rule_block_default_denies(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_disabled_rule_skips_to_later_match(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 2,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = allow_rule(IPPROTO_UDP, 0, UINT16_MAX, 53, 53, 0);
+	block.rules[1] = allow_rule(IPPROTO_UDP, 0, UINT16_MAX, 53, 53,
+				    RULE_F_ENABLED);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_strict_any_rejects_gre(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_GRE, 0, 5) != 0)
+		return -1;
+
+	block.rules[0] = match_all_rule();
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_port_boundaries_match_inclusive_range(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	block.rules[0] = allow_rule(IPPROTO_TCP, 0, UINT16_MAX, 80, 80,
+				    RULE_F_ENABLED);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	if (!err)
+		err = build_tcp_frame_ports(&frame, 1234, 79);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval 79", retval, XDP_DROP);
+
+	if (!err)
+		err = build_tcp_frame_ports(&frame, 1234, 80);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
+
+	if (!err)
+		err = build_tcp_frame_ports(&frame, 1234, 81);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval 81", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 2);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_src_range_and_dst_wildcard(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	block.rules[0] = allow_rule(IPPROTO_UDP, 1000, 2000, 0, UINT16_MAX,
+				    RULE_F_ENABLED);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+
+	if (!err)
+		err = build_udp_frame_ports(&frame, 1500, 9999);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 0);
+
+	if (!err)
+		err = build_udp_frame_ports(&frame, 999, 9999);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval low sport", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_rule_count_clamps_to_sixteen(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 99,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	for (int i = 0; i < RULE_MAX; i++)
+		block.rules[i] = allow_rule(IPPROTO_TCP, 0, UINT16_MAX, 80, 80,
+					    RULE_F_ENABLED);
+	block.rules[15] = allow_rule(IPPROTO_UDP, 0, UINT16_MAX, 53, 53,
+				     RULE_F_ENABLED);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("rule_idx", meta.rule_idx, 15);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_esp_ipv4_drops_not_allowed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
 	__u32 retval = 0;
 	int err;
 
@@ -982,13 +1437,9 @@ static int test_esp_ipv4_passes_with_zero_ports(void)
 
 	err = run_enabled_service_frame(&env, &frame, &retval);
 	if (!err)
-		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		err = expect_u32("retval", retval, XDP_DROP);
 	if (!err)
-		err = expect_u8("ip_proto", meta.ip_proto, IPPROTO_ESP);
-	if (!err)
-		err = expect_u16("sport", meta.sport, 0);
-	if (!err)
-		err = expect_u16("dport", meta.dport, 0);
+		err = expect_counter(&env, DR_NOT_ALLOWED, 1);
 
 	env_close(&env);
 	return err;
@@ -1561,10 +2012,25 @@ int main(void)
 		  test_empty_config_drops_service_miss },
 		{ "invalid active slot drops map error",
 		  test_invalid_active_slot_drops_map_error },
-		{ "valid other IPv4 passes with zero ports",
-		  test_valid_other_ipv4_passes_with_zero_ports },
-		{ "ESP IPv4 passes with zero ports",
-		  test_esp_ipv4_passes_with_zero_ports },
+		{ "valid other IPv4 drops not_allowed",
+		  test_valid_other_ipv4_drops_not_allowed },
+		{ "first match sets rule_idx",
+		  test_first_match_sets_rule_idx },
+		{ "zero rule block default denies",
+		  test_zero_rule_block_default_denies },
+		{ "absent rule block default denies",
+		  test_absent_rule_block_default_denies },
+		{ "disabled rule skips to later match",
+		  test_disabled_rule_skips_to_later_match },
+		{ "strict any rejects GRE", test_strict_any_rejects_gre },
+		{ "port boundaries match inclusive range",
+		  test_port_boundaries_match_inclusive_range },
+		{ "src range and dst wildcard",
+		  test_src_range_and_dst_wildcard },
+		{ "rule_count clamps to 16",
+		  test_rule_count_clamps_to_sixteen },
+		{ "ESP IPv4 drops not_allowed",
+		  test_esp_ipv4_drops_not_allowed },
 		{ "IPv6 drops with counter", test_ipv6_drops_with_counter },
 		{ "unsupported EtherType drops with counter",
 		  test_unsupported_ethertype_drops_with_counter },

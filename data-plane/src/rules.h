@@ -65,7 +65,11 @@ _Static_assert(sizeof(struct rl_bucket) == 32,
 
 #ifdef __BPF__
 #include <linux/bpf.h>
+#include <linux/in.h>
+#include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
+
+#include "drop_reason.h"
 
 const volatile __u32 rl_ncpus = 1;
 
@@ -105,34 +109,88 @@ struct {
 	__type(value, struct rl_config);
 } rl_config SEC(".maps");
 
-static __always_inline __u32 rule_stage_verifier_de_risk(struct pkt_meta *meta,
-							 __u32 slot)
+static __always_inline int rule_proto_matches(const struct rule_entry *rule,
+					      const struct pkt_meta *meta)
+{
+	if (rule->proto == RULE_PROTO_ANY)
+		return meta->ip_proto == IPPROTO_TCP ||
+		       meta->ip_proto == IPPROTO_UDP ||
+		       meta->ip_proto == IPPROTO_ICMP;
+
+	return meta->ip_proto == rule->proto;
+}
+
+static __always_inline int port_in_range(__u16 port, __u16 lo, __u16 hi)
+{
+	return port >= lo && port <= hi;
+}
+
+static __always_inline int rule_ports_match(const struct rule_entry *rule,
+					    const struct pkt_meta *meta)
+{
+	__u16 sport;
+	__u16 dport;
+
+	if (rule->proto != IPPROTO_TCP && rule->proto != IPPROTO_UDP)
+		return 1;
+
+	sport = bpf_ntohs(meta->sport);
+	dport = bpf_ntohs(meta->dport);
+	return port_in_range(sport, rule->src_lo, rule->src_hi) &&
+	       port_in_range(dport, rule->dst_lo, rule->dst_hi);
+}
+
+static __always_inline int rule_matches(const struct rule_entry *rule,
+					const struct pkt_meta *meta)
+{
+	if (!(rule->flags & RULE_F_ENABLED))
+		return 0;
+	if (!rule_proto_matches(rule, meta))
+		return 0;
+	return rule_ports_match(rule, meta);
+}
+
+static __always_inline int admit_clean(struct pkt_meta *meta)
+{
+	/* ARL-24: M3 fairness ladder inserts here before redirect_out(). */
+	return redirect_out(meta);
+}
+
+static __always_inline int allow_rule_stage(struct xdp_md *ctx,
+					    struct pkt_meta *meta, __u32 slot)
 {
 	struct rule_block *block;
 	__u32 service_id = meta->service_id;
-	void *inner;
 	__u32 count;
-	__u32 seen = 0;
+	void *inner;
+
+	(void)ctx;
+	meta->rule_idx = RULE_IDX_NONE;
 
 	inner = bpf_map_lookup_elem(&rule_block_map, &slot);
 	if (!inner)
-		return 0;
+		return record_drop(meta, DR_MAP_ERROR);
 
 	block = bpf_map_lookup_elem(inner, &service_id);
 	if (!block)
-		return 0;
+		return record_drop(meta, DR_NOT_ALLOWED);
 
 	count = block->rule_count;
 	if (count > RULE_MAX)
 		count = RULE_MAX;
 
+#pragma clang loop unroll(disable)
 	for (__u32 i = 0; i < RULE_MAX; i++) {
 		if (i >= count)
 			break;
-		seen |= block->rules[i].flags;
+		if (!rule_matches(&block->rules[i], meta))
+			continue;
+
+		meta->rule_idx = (__u8)i;
+		return admit_clean(meta);
 	}
 
-	return seen;
+	return record_drop(meta, DR_NOT_ALLOWED);
 }
 #endif
 

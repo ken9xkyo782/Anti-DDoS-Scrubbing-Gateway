@@ -74,13 +74,13 @@ plus new match-semantics cases (design Test Plan #2, #4–#7, #11, #12).
 
 **Done when**:
 
-- [ ] All 34 baseline cases pass migrated (enabled-service cases seed a match-all block)
-- [ ] New cases: first-match order + `rule_idx` observed; zero-rule and absent-block default-deny
+- [x] All 34 baseline cases pass migrated (enabled-service cases seed a match-all block)
+- [x] New cases: first-match order + `rule_idx` observed; zero-rule and absent-block default-deny
       (counter 9 exact); disabled-skip; GRE vs `any` block → `not_allowed`; port boundaries
       79/80/81 on range 80–80 + src-only-range + wildcard; `rule_count=99` clamps to 16
-- [ ] ARP cases still redirect (stage untouched by non-service path)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: ≥ 42 pass (34 migrated + ≥ 8 new; record exact N in this file on completion)
+- [x] ARP cases still redirect (stage untouched by non-service path)
+- [x] Gate check passes: `make test`
+- [x] Test count: 42 pass (34 migrated + 8 new; record exact N in this file on completion)
 
 **Tests**: dp-unit
 **Gate**: quick
