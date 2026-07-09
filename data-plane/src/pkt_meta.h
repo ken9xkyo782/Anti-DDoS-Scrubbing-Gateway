@@ -19,7 +19,11 @@ struct pkt_meta {
 	__u8 is_fragment;
 	__u8 active_slot;
 	__u8 verdict;
-	__u8 _pad[3];
+	__u8 rule_idx;
+	__u8 _pad[2];
 };
+
+_Static_assert(sizeof(struct pkt_meta) == 32,
+	       "pkt_meta size is part of the test hook ABI");
 
 #endif

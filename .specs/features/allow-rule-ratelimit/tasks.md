@@ -41,14 +41,14 @@ HASH inner + 520-byte value + the loop shape before anything depends on it (desi
 
 **Done when**:
 
-- [ ] `rules.h` matches the design Data Models section field-for-field (incl. the bytes/sec `bps`
+- [x] `rules.h` matches the design Data Models section field-for-field (incl. the bytes/sec `bps`
       unit note + pre-sorted-position contract comment for M4)
-- [ ] `pkt_meta` size unchanged (`_Static_assert(sizeof == 32)` or equivalent guard)
-- [ ] Program with maps + unwired loop **loads** under the test harness (verifier pass = de-risk
+- [x] `pkt_meta` size unchanged (`_Static_assert(sizeof == 32)` or equivalent guard)
+- [x] Program with maps + unwired loop **loads** under the test harness (verifier pass = de-risk
       proven); if the verifier rejects map-in-map HASH inner, STOP and record the fallback
       (two named top-level HASH maps + slot branch, AD-015 precedent) before proceeding
-- [ ] Gate check passes: `make bpf skel loader dpstat` && `make test`
-- [ ] Test count: 34 pass (behavior unchanged — no silent deletions)
+- [x] Gate check passes: `make bpf skel loader dpstat` && `make test`
+- [x] Test count: 34 pass (behavior unchanged — no silent deletions)
 
 **Tests**: none new (dp-unit suite as regression harness)
 **Gate**: build + quick

@@ -5,6 +5,7 @@
 #include "drop_reason.h"
 #include "parse.h"
 #include "pkt_meta.h"
+#include "rules.h"
 #include "service.h"
 
 struct service_inner_map_def {
@@ -120,6 +121,7 @@ static __always_inline int service_lookup_redirect(struct pkt_meta *meta)
 		return record_drop(meta, DR_SERVICE_DISABLED);
 
 	meta->service_id = service->service_id;
+	meta->rule_idx = rule_stage_verifier_de_risk(meta, slot) ? 0 : RULE_IDX_NONE;
 	return redirect_out(meta);
 }
 
