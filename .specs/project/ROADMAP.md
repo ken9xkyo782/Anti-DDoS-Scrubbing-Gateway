@@ -93,18 +93,24 @@
 
 ### Features
 
-**Allow-rule matching & rate-limit** - IN PROGRESS (spec APPROVED + context)
+**Allow-rule matching & rate-limit** - VERIFIED (executed)
 - First-match by ascending `priority`, terminal verdict, early-exit on `rule_count`; no match (incl. zero rules) = `not_allowed` — enabled services become **default-deny**
 - Per-CPU aggregate token buckets (`rate_limit_state`, unslotted); `rate_limit_drop`, no fall-through; NULL quota = unlimited, 0 = block
 - Slotted `rule_block_map` (≤16/service, pinned-slot read, fail-closed `map_error`); wires frozen ABI indices 9/10; seed-helper interim writer (D-SLRD-1 posture); migrates the 34-case suite; marked admit→redirect seam for M3 #4
 - Spec `spec.md` (ARL-01..25; A-ARL-1..8); context `context.md` (**D-ARL-1** strict `any` = {tcp,udp,icmp} — other IPv4 protos always `not_allowed`, no tunnel/IPsec in v1; **D-ARL-2** buckets reset on config swap; AD-018); `design.md` + rendered diagrams (rule-stage flow + map layout)
 - Design (AD-019): `src/rules.h` = stage + M4 build contract; blocks **pre-sorted asc priority** (position = match order, no `priority` in kernel); lazy version-reset `PERCPU_HASH` buckets (zero worker plumbing); **rate÷nCPU** split via rodata `rl_ncpus` (node admit never exceeds configured rate); `bps` map unit = bytes/sec; `rl_config.test_no_refill` + CPU-pinned runner = deterministic dp-unit buckets. Kernel semantics web-verified (per-CPU-hash current-CPU access + zero-fill on create)
 - Tasks `tasks.md` (T1–T5; all 25 reqs mapped): **T1** contracts+maps+verifier de-risk (map-in-map HASH inner + bounded loop proven at load, fallback documented) · **T2** match engine + wire-in + 34-case migration · **T3** per-CPU buckets + lazy version reset + deterministic mode · **T4** loader match-all seed + `rl_ncpus` + live smoke (full gate) · **T5** TESTING.md/README `[P]`. Baseline **B=34**; T2 ≥42; T3 ≥49
-- Requires SLRD + drop-reason counters executed (both VERIFIED); rule shape mirrors SRL `allow_rule` (contractual, no DB read); design + tasks APPROVED → next: **Execute**
+- Requires SLRD + drop-reason counters executed (both VERIFIED); rule shape mirrors SRL `allow_rule` (contractual, no DB read)
+- Executed T1–T5 (all 25 reqs verified); final gates: `make test` → **50 passed**; `make test && sudo make smoke` green; enabled services now default-deny; TESTING.md rule-stage conventions + README tunnel note landed
 
-**Whitelist/VIP (scoped) & VIP ceiling** - PLANNED
-- Bloom → LPM keyed by `service_id`+source CIDR (no cross-service bypass)
-- VIP ceiling aggregate bucket; `vip_ceiling_drop`
+**Whitelist/VIP (scoped) & VIP ceiling** - IN PROGRESS (spec APPROVED + context + design drafted)
+- Bloom → LPM keyed by `service_id`+source CIDR (no cross-service bypass, BL-01/02); bloom = guard only (FP cost-only, no false negatives); hit bypasses rule stage + future M3#3 filters, miss continues unchanged
+- VIP ceiling aggregate per-service bucket (`vip_pps`/`vip_bps`, per-CPU, unslotted `vip_ceiling_state`); over-ceiling = terminal `vip_ceiling_drop` wiring frozen ABI index 14; VIP branch skips the 8.4 admit ladder
+- Slotted whitelist config maps = M4 build contract; seed-helper interim writer (D-SLRD-1); marked seams for M3#3 (miss path) + M3#4 (ingress cap before whitelist)
+- Spec `spec.md` (WLV-01..25); context `context.md` (**D-WLV-1**: NULL `vip_pps`+`vip_bps` = whitelist **inactive** — fail-safe BL-08 reading; one set dimension governs alone; `0` = explicit block; A-WLV-1..8)
+- Design (AD-021): composite scoped LPM key `{svc_be32, src_be32}` prefixlen ≥32 (BL-02 by key construction); bloom = /24 buckets + per-service `WL_F_HAS_BROAD` always-LPM escape; `service_val.wl_flags` pad byte = zero-cost D-WLV-1 gate; slotted `vip_config_map` + VIP bucket reusing `rl_bucket`/helpers verbatim (`rules.h` untouched); VIP admit → `redirect_out()` directly (not `admit_clean`, §8.4.6); bloom inners replace-only (M4 contract). Bloom-as-static-inner de-risk ladder: BTF static → loader-created → LPM-only. 3 kernel semantics web-verified (bloom push/peek + inner-map opt-in, LPM 64-bit composite key)
+- Tasks `tasks.md` drafted (T1–T5; all 25 reqs mapped, baseline **B=50**): **T1** contracts+maps+bloom-composition de-risk (51) · **T2** scoped match stage+wire-in+seams (≥60) · **T3** VIP ceiling bucket, terminal idx 14 (≥66) · **T4** loader env-driven seed+live smoke (full gate) · **T5** docs `[P]`. Only T5 parallel (T1–T3 share files; T4 smoke not parallel-safe)
+- ARL executed → **A-WLV-8 execute gate satisfied**; reuses AD-019 bucket/determinism patterns; design + tasks APPROVED → next: **Execute**
 
 **Blacklist (bloom + LPM)** - PLANNED
 - Global + service blacklist via bloom → LPM; `blacklist_drop`; `bloom_hit_lpm_miss` counter

@@ -1,0 +1,21 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart TD
+    hit(["Enabled service hit<br/>(service_lookup_redirect)"]) --> seamA["seam A: M3#4 ingress cap inserts here"]
+    seamA --> act{"service_val.wl_flags<br/>WL_F_ACTIVE?"}
+    act -- "no — D-WLV-1 inactive/empty" --> miss["wl_state = MISS"]
+    act -- yes --> broad{"WL_F_HAS_BROAD?"}
+    broad -- no --> bloom{"whitelist_bloom[pinned slot]<br/>peek {svc, src &amp; /24}"}
+    bloom -- "map missing" --> me["DROP map_error<br/>fail-closed (WLV-07)"]
+    bloom -- "-ENOENT — definitive (WLV-04)" --> miss
+    bloom -- maybe --> lpm{"whitelist_lpm[slot] lookup<br/>{prefixlen 64, svc_be, src}"}
+    broad -- "yes — skip bloom" --> lpm
+    lpm -- "map missing" --> me
+    lpm -- "NULL — bloom FP / broad miss" --> miss
+    lpm -- "HIT (scoped by key, BL-02)" --> cfg{"vip_config[slot]<br/>lookup svc"}
+    cfg -- "missing — inconsistent build" --> me
+    cfg -- entry --> bkt["vip_ceiling_state[svc] per-CPU bucket<br/>version mismatch = reinit (D-ARL-2)"]
+    bkt --> tok{"every configured dim has tokens?<br/>NULL dim = unlimited (D-WLV-1)"}
+    tok -- "yes — consume both" --> admit["wl_state = HIT_ADMIT<br/>redirect_out() — skips rule stage<br/>and 8.4 ladder (WLV-18)"]
+    tok -- "no — consume neither (WLV-14)" --> vcd["wl_state = HIT_DROP<br/>DROP vip_ceiling_drop idx 14<br/>terminal, no fall-through (WLV-11)"]
+    miss --> seamB["seam B: M3#3 amp/bogon/blacklist insert here"]
+    seamB --> rules["allow_rule_stage()<br/>(existing ARL, unchanged)"]

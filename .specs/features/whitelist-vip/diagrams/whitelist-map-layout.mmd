@@ -1,0 +1,27 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    subgraph hotpath ["Hot path — xdp_gateway.bpf.c + whitelist.h"]
+        direction TB
+        svc["service_lookup_redirect<br/>service_val gains wl_flags (pad byte)"] -->|"enabled hit — seam A"| stage["whitelist_stage (NEW)<br/>flag test → bloom → LPM → ceiling"]
+        stage -->|"VIP admit"| rdo["redirect_out<br/>(bypasses rules + 8.4 ladder)"]
+        stage -->|"miss — seam B"| arl["allow_rule_stage<br/>(existing ARL)"]
+    end
+
+    subgraph cfg ["Config maps — slotted (AD-005), layout = M4 contract"]
+        direction TB
+        wb["whitelist_bloom ARRAY_OF_MAPS[2]<br/>BLOOM inners, value {svc_be, src &amp; /24}<br/>replace-only: fresh build per swap"]
+        wl["whitelist_lpm ARRAY_OF_MAPS[2]<br/>LPM inners, key {prefixlen, svc_be, src_be}<br/>entries prefixlen ≥ 32 → scoped (BL-02)"]
+        vc["vip_config_map ARRAY_OF_MAPS[2]<br/>HASH svc → {version, flags, pps, bps}<br/>absent when inactive (D-WLV-1)"]
+    end
+
+    subgraph rt ["Runtime maps — unslotted (§8.3)"]
+        direction TB
+        vs["vip_ceiling_state PERCPU_HASH<br/>svc → struct rl_bucket (reused from rules.h)<br/>lazy reset vs vip_config.version"]
+        cm["counter_map / ringbuf<br/>record_drop → vip_ceiling_drop idx 14"]
+    end
+
+    stage -. "peek / lookup via pinned slot" .-> wb
+    stage -. lookup .-> wl
+    stage -. "on LPM hit only" .-> vc
+    stage -. "consume / reinit" .-> vs
+    stage -. "over ceiling" .-> cm
