@@ -12,12 +12,14 @@
 
 #include "drop_event.h"
 #include "drop_reason.h"
+#include "blacklist.h"
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
 #define COUNTER_PIN_PATH PIN_DIR "/counter_map"
 #define RINGBUF_PIN_PATH PIN_DIR "/drop_ringbuf"
 #define SAMPLE_CONFIG_PIN_PATH PIN_DIR "/sample_config"
 #define SAMPLE_STATS_PIN_PATH PIN_DIR "/sample_stats"
+#define BLOOM_STATS_PIN_PATH PIN_DIR "/bloom_stats"
 
 static volatile sig_atomic_t exiting;
 
@@ -78,9 +80,11 @@ static int read_percpu_u64(int fd, __u32 key, int possible_cpus, __u64 *sum)
 	return err;
 }
 
-static int print_counters_once(int counter_fd, int stats_fd, int possible_cpus)
+static int print_counters_once(int counter_fd, int stats_fd, int bloom_fd,
+			       int possible_cpus)
 {
 	__u64 total;
+	__u64 bloom_total = 0;
 
 	printf("idx  reason                       total\n");
 	for (__u32 key = 0; key < DROP_REASON_COUNT; key++) {
@@ -109,6 +113,26 @@ static int print_counters_once(int counter_fd, int stats_fd, int possible_cpus)
 		printf("%-28s %llu\n", stat_name[key], (unsigned long long)total);
 	}
 
+	printf("\n");
+	printf("bloom_hit_lpm_miss\n");
+	for (__u32 key = 0; key < BLOOM_STAT_MAX; key++) {
+		static const char *const bloom_name[BLOOM_STAT_MAX] = {
+			[BLOOM_FP_WHITELIST] = "whitelist",
+			[BLOOM_FP_GLOBAL] = "global_blacklist",
+			[BLOOM_FP_SERVICE] = "service_blacklist",
+		};
+
+		if (read_percpu_u64(bloom_fd, key, possible_cpus, &total) != 0) {
+			fprintf(stderr, "failed to read bloom_stats[%u]: %s\n",
+				key, strerror(errno));
+			return -1;
+		}
+		bloom_total += total;
+		printf("%-28s %llu\n", bloom_name[key],
+		       (unsigned long long)total);
+	}
+	printf("%-28s %llu\n", "total", (unsigned long long)bloom_total);
+
 	return 0;
 }
 
@@ -116,6 +140,7 @@ static int cmd_counters(int argc, char **argv)
 {
 	int counter_fd = -1;
 	int stats_fd = -1;
+	int bloom_fd = -1;
 	int possible_cpus;
 	long watch_sec = 0;
 	int err = 1;
@@ -145,6 +170,9 @@ static int cmd_counters(int argc, char **argv)
 	stats_fd = open_pinned_map(SAMPLE_STATS_PIN_PATH);
 	if (stats_fd < 0)
 		goto out;
+	bloom_fd = open_pinned_map(BLOOM_STATS_PIN_PATH);
+	if (bloom_fd < 0)
+		goto out;
 
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
@@ -152,7 +180,8 @@ static int cmd_counters(int argc, char **argv)
 	do {
 		if (watch_sec > 0)
 			printf("\033[H\033[J");
-		if (print_counters_once(counter_fd, stats_fd, possible_cpus) != 0)
+		if (print_counters_once(counter_fd, stats_fd, bloom_fd,
+					possible_cpus) != 0)
 			goto out;
 		fflush(stdout);
 		if (watch_sec > 0 && !exiting)
@@ -166,6 +195,8 @@ out:
 		close(counter_fd);
 	if (stats_fd >= 0)
 		close(stats_fd);
+	if (bloom_fd >= 0)
+		close(bloom_fd);
 	return err;
 }
 
