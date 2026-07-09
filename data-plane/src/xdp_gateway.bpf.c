@@ -147,7 +147,7 @@ static __always_inline int service_lookup_redirect(struct xdp_md *ctx,
 
 	meta->service_id = service->service_id;
 	/* WLV-24 seam A: M3#4 ingress-cost cap inserts here. */
-	return whitelist_stage(ctx, meta, slot, service->wl_flags);
+	return whitelist_stage(ctx, meta, slot, service);
 }
 
 SEC("xdp")

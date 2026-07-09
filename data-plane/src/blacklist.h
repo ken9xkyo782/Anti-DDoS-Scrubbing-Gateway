@@ -93,8 +93,12 @@ _Static_assert(sizeof(struct gbl_meta) == 4,
 
 #ifdef __BPF__
 #include <linux/bpf.h>
+#include <linux/in.h>
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
+
+#include "drop_reason.h"
+#include "rules.h"
 
 struct gbl_bloom_inner_map_def {
 	__uint(type, BPF_MAP_TYPE_BLOOM_FILTER);
@@ -285,6 +289,54 @@ static __always_inline int bogon_src(__be32 saddr_be)
 	if ((src & 0xf0000000U) == 0xf0000000U)
 		return 1;
 	return 0;
+}
+
+static __always_inline int bl_record_drop(struct pkt_meta *meta, __u8 state,
+					  enum drop_reason reason)
+{
+	meta->bl_state = state;
+	write_test_meta(meta);
+	return record_drop(meta, reason);
+}
+
+static __always_inline int deny_filter_stage(struct xdp_md *ctx,
+					     struct pkt_meta *meta, __u32 slot,
+					     __u8 bl_flags)
+{
+	__u16 sport = bpf_ntohs(meta->sport);
+
+	(void)bl_flags;
+
+	if (meta->ip_proto == IPPROTO_UDP && amp_port_hardcoded(sport))
+		return bl_record_drop(meta, BL_STATE_AMP_HARDCODED,
+				      DR_UDP_AMPLIFICATION_DROP);
+
+	if (bogon_src(meta->src_ip))
+		return bl_record_drop(meta, BL_STATE_BOGON, DR_BOGON_DROP);
+
+	if (meta->ip_proto == IPPROTO_UDP) {
+		__u32 word_idx = (__u32)sport >> 6;
+		__u32 bit_idx = (__u32)sport & 63;
+		void *inner = bpf_map_lookup_elem(&udp_blocked_port_bitmap,
+						  &slot);
+		__u64 *word;
+
+		if (!inner)
+			return bl_record_drop(meta, BL_STATE_NONE,
+					      DR_MAP_ERROR);
+
+		word = bpf_map_lookup_elem(inner, &word_idx);
+		if (!word)
+			return bl_record_drop(meta, BL_STATE_NONE,
+					      DR_MAP_ERROR);
+		if ((*word & (1ULL << bit_idx)) != 0)
+			return bl_record_drop(meta, BL_STATE_AMP_BITMAP,
+					      DR_UDP_AMPLIFICATION_DROP);
+	}
+
+	meta->bl_state = BL_STATE_CLEAN;
+	write_test_meta(meta);
+	return allow_rule_stage(ctx, meta, slot);
 }
 
 #endif /* __BPF__ */

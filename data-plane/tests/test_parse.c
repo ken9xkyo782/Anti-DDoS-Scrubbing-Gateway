@@ -18,6 +18,7 @@
 #include "pkt_meta.h"
 #include "rules.h"
 #include "service.h"
+#include "blacklist.h"
 #include "whitelist.h"
 #include "xdp_gateway.test.skel.h"
 
@@ -42,6 +43,9 @@ struct test_env {
 	int whitelist_lpm0_fd;
 	int whitelist_lpm1_fd;
 	int whitelist_lpm_fd;
+	int blocked_port_bitmap0_fd;
+	int blocked_port_bitmap1_fd;
+	int blocked_port_bitmap_fd;
 	int vip_config0_fd;
 	int vip_config1_fd;
 	int vip_config_map_fd;
@@ -109,6 +113,12 @@ static int env_open(struct test_env *env)
 	env->whitelist_lpm0_fd = bpf_map__fd(env->skel->maps.whitelist_lpm_0);
 	env->whitelist_lpm1_fd = bpf_map__fd(env->skel->maps.whitelist_lpm_1);
 	env->whitelist_lpm_fd = bpf_map__fd(env->skel->maps.whitelist_lpm);
+	env->blocked_port_bitmap0_fd =
+		bpf_map__fd(env->skel->maps.udp_blocked_port_bitmap_0);
+	env->blocked_port_bitmap1_fd =
+		bpf_map__fd(env->skel->maps.udp_blocked_port_bitmap_1);
+	env->blocked_port_bitmap_fd =
+		bpf_map__fd(env->skel->maps.udp_blocked_port_bitmap);
 	env->vip_config0_fd = bpf_map__fd(env->skel->maps.vip_config_0);
 	env->vip_config1_fd = bpf_map__fd(env->skel->maps.vip_config_1);
 	env->vip_config_map_fd = bpf_map__fd(env->skel->maps.vip_config_map);
@@ -129,6 +139,9 @@ static int env_open(struct test_env *env)
 	    env->whitelist_bloom0_fd < 0 || env->whitelist_bloom1_fd < 0 ||
 	    env->whitelist_bloom_fd < 0 || env->whitelist_lpm0_fd < 0 ||
 	    env->whitelist_lpm1_fd < 0 || env->whitelist_lpm_fd < 0 ||
+	    env->blocked_port_bitmap0_fd < 0 ||
+	    env->blocked_port_bitmap1_fd < 0 ||
+	    env->blocked_port_bitmap_fd < 0 ||
 	    env->vip_config0_fd < 0 || env->vip_config1_fd < 0 ||
 	    env->vip_config_map_fd < 0 || env->vip_ceiling_state_fd < 0 ||
 	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
@@ -232,6 +245,18 @@ static int clear_whitelist_lpm_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int reset_blocked_port_bitmap_map(int fd)
+{
+	__u64 zero = 0;
+
+	for (__u32 key = 0; key < BLOCKED_PORT_WORDS; key++) {
+		if (bpf_map_update_elem(fd, &key, &zero, 0) != 0)
+			return -1;
+	}
+
+	return 0;
+}
+
 static int clear_vip_config_map(int fd)
 {
 	__u32 key;
@@ -291,6 +316,8 @@ static int reset_config(struct test_env *env)
 	    clear_rule_block_map(env->rule_block1_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm0_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm1_fd) != 0 ||
+	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap0_fd) != 0 ||
+	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap1_fd) != 0 ||
 	    clear_vip_config_map(env->vip_config0_fd) != 0 ||
 	    clear_vip_config_map(env->vip_config1_fd) != 0)
 		return -1;
@@ -355,6 +382,17 @@ static int whitelist_lpm_fd_for_slot(struct test_env *env, __u32 slot)
 		return env->whitelist_lpm0_fd;
 	if (slot == 1)
 		return env->whitelist_lpm1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int blocked_port_bitmap_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->blocked_port_bitmap0_fd;
+	if (slot == 1)
+		return env->blocked_port_bitmap1_fd;
 
 	errno = EINVAL;
 	return -1;
@@ -507,6 +545,22 @@ static int seed_whitelist(struct test_env *env, __u32 slot, __u32 service_id,
 		return -1;
 
 	return set_service_wl_flags(env, slot, service_id, flags);
+}
+
+static int seed_blocked_port(struct test_env *env, __u32 slot, __u16 port)
+{
+	__u32 key = (__u32)port >> 6;
+	__u64 bit = 1ULL << ((__u32)port & 63);
+	__u64 word = 0;
+	int fd = blocked_port_bitmap_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+	if (bpf_map_lookup_elem(fd, &key, &word) != 0)
+		return -1;
+
+	word |= bit;
+	return bpf_map_update_elem(fd, &key, &word, 0);
 }
 
 static struct rule_entry allow_rule(__u8 proto, __u16 src_lo, __u16 src_hi,
@@ -776,14 +830,20 @@ static int run_frame(struct test_env *env, const struct pkt_frame *frame,
 	return run_frame_current_maps(env, frame, retval);
 }
 
+static int seed_default_enabled_service(struct test_env *env)
+{
+	if (seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0)
+		return -1;
+	if (seed_match_all_rule_block(env, 0, DEFAULT_SERVICE_ID) != 0)
+		return -1;
+	return set_active(env, 0, 1);
+}
+
 static int run_enabled_service_frame(struct test_env *env,
 				     const struct pkt_frame *frame,
 				     __u32 *retval)
 {
-	if (reset_maps(env) != 0 ||
-	    seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0 ||
-	    seed_match_all_rule_block(env, 0, DEFAULT_SERVICE_ID) != 0 ||
-	    set_active(env, 0, 1) != 0)
+	if (reset_maps(env) != 0 || seed_default_enabled_service(env) != 0)
 		return -1;
 
 	return run_frame_current_maps(env, frame, retval);
@@ -814,6 +874,15 @@ static int expect_u8(const char *label, __u8 got, __u8 want)
 
 	fprintf(stderr, "%s: got %u, want %u\n", label, got, want);
 	return -1;
+}
+
+static int expect_bl_state(struct test_env *env, __u8 want)
+{
+	struct pkt_meta meta;
+
+	if (read_meta(env, &meta) != 0)
+		return -1;
+	return expect_u8("bl_state", meta.bl_state, want);
 }
 
 static int expect_fd(const char *label, int fd)
@@ -1822,6 +1891,367 @@ static int test_whitelist_gre_hit_redirects_protocol_blind(void)
 		err = expect_u8("wl_state", meta.wl_state, WL_STATE_HIT_ADMIT);
 	if (!err)
 		err = expect_u8("rule_idx", meta.rule_idx, RULE_IDX_NONE);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_amp_port_53_drops(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 53, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_BOGON_DROP, 0);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_AMP_HARDCODED);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_amp_port_11211_drops(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 11211, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 1);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_AMP_HARDCODED);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_tcp_source_53_passes_port_filter(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_tcp_frame_ports(&frame, 53, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 0);
+	if (!err)
+		err = expect_u8("bl_state", meta.bl_state, BL_STATE_CLEAN);
+
+	env_close(&env);
+	return err;
+}
+
+static int expect_bogon_drop_for_src(__u32 src_host)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, src_host, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BOGON_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 0);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_BOGON);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_bogon_rfc1918_drops(void)
+{
+	return expect_bogon_drop_for_src(0x0a010203);
+}
+
+static int test_blacklist_bogon_loopback_drops(void)
+{
+	return expect_bogon_drop_for_src(0x7f000001);
+}
+
+static int test_blacklist_bogon_multicast_drops(void)
+{
+	return expect_bogon_drop_for_src(0xe0000001);
+}
+
+static int test_blacklist_bogon_test_net_drops(void)
+{
+	return expect_bogon_drop_for_src(0xc0000209);
+}
+
+static int test_blacklist_bitmap_hit_adjacent_and_empty_pass(void)
+{
+	struct pkt_frame hit;
+	struct pkt_frame adjacent;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&hit, 9999, 443) != 0 ||
+	    build_udp_frame_ports(&adjacent, 9998, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_blocked_port(&env, 0, 9999);
+	if (!err)
+		err = run_frame_current_maps(&env, &hit, &retval);
+	if (!err)
+		err = expect_u32("hit retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 1);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_AMP_BITMAP);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_blocked_port(&env, 0, 9999);
+	if (!err)
+		err = run_frame_current_maps(&env, &adjacent, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("adjacent bl_state", meta.bl_state, BL_STATE_CLEAN);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = run_frame_current_maps(&env, &hit, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("empty bl_state", meta.bl_state, BL_STATE_CLEAN);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_amp_precedes_bogon(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 53, 443) != 0 ||
+	    set_ipv4_addrs(&frame, 0x0a010203, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_BOGON_DROP, 0);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_AMP_HARDCODED);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_bogon_precedes_bitmap(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 9999, 443) != 0 ||
+	    set_ipv4_addrs(&frame, 0x0a010203, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_blocked_port(&env, 0, 9999);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BOGON_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 0);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_BOGON);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_whitelist_bypasses_amp_and_bogon(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 53, 443) != 0 ||
+	    set_ipv4_addrs(&frame, 0x0a010203, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0x0a010200, 24,
+				     &config);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("bl_state", meta.bl_state, BL_STATE_NONE);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_icmp_skips_port_filters(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&frame);
+	if (build_eth(&frame, ETH_P_IP) != 0 ||
+	    build_ipv4(&frame, IPPROTO_ICMP, 0, 5) != 0 ||
+	    build_icmp(&frame, ICMP_ECHO, 0) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_blocked_port(&env, 0, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_counter(&env, DR_UDP_AMPLIFICATION_DROP, 0);
+	if (!err)
+		err = expect_u8("bl_state", meta.bl_state, BL_STATE_CLEAN);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_missing_bitmap_inner_fails_closed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 slot = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_udp_frame_ports(&frame, 9999, 443) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err && bpf_map_delete_elem(env.blocked_port_bitmap_fd, &slot) != 0) {
+		fprintf(stderr, "failed to delete bitmap outer slot: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
 
 	env_close(&env);
 	return err;
@@ -3606,6 +4036,32 @@ int main(void)
 			  test_whitelist_disabled_service_precedes_stage },
 			{ "whitelist GRE hit redirects protocol blind",
 			  test_whitelist_gre_hit_redirects_protocol_blind },
+			{ "blacklist amp port 53 drops",
+			  test_blacklist_amp_port_53_drops },
+			{ "blacklist amp port 11211 drops",
+			  test_blacklist_amp_port_11211_drops },
+			{ "blacklist TCP source 53 passes port filter",
+			  test_blacklist_tcp_source_53_passes_port_filter },
+			{ "blacklist bogon RFC1918 drops",
+			  test_blacklist_bogon_rfc1918_drops },
+			{ "blacklist bogon loopback drops",
+			  test_blacklist_bogon_loopback_drops },
+			{ "blacklist bogon multicast drops",
+			  test_blacklist_bogon_multicast_drops },
+			{ "blacklist bogon TEST-NET drops",
+			  test_blacklist_bogon_test_net_drops },
+			{ "blacklist bitmap hit adjacent and empty pass",
+			  test_blacklist_bitmap_hit_adjacent_and_empty_pass },
+			{ "blacklist amp precedes bogon",
+			  test_blacklist_amp_precedes_bogon },
+			{ "blacklist bogon precedes bitmap",
+			  test_blacklist_bogon_precedes_bitmap },
+			{ "blacklist whitelist bypasses amp and bogon",
+			  test_blacklist_whitelist_bypasses_amp_and_bogon },
+			{ "blacklist ICMP skips port filters",
+			  test_blacklist_icmp_skips_port_filters },
+			{ "blacklist missing bitmap inner fails closed",
+			  test_blacklist_missing_bitmap_inner_fails_closed },
 			{ "VIP ceiling PPS deterministic terminal drop",
 			  test_vip_ceiling_pps_deterministic_terminal_drop },
 			{ "VIP ceiling PPS zero blocks",

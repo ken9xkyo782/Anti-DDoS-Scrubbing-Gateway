@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Executing (2026-07-09) — T1, T2 complete
+**Status**: Executing (2026-07-09) — T1, T2, T3 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -152,15 +152,20 @@ BLK-07 (bitmap fail-closed half), BLK-24 (bogon-cases half)
 
 **Done when**:
 
-- [ ] Baseline 68 + T2 migration pass **unmodified** (deny maps empty ⇒ verdicts identical;
+- [x] Baseline 68 + T2 migration pass **unmodified** (deny maps empty ⇒ verdicts identical;
       spot-check `bl_state==CLEAN` on one enabled-service rule-path case)
-- [ ] §8.2 in-band order proven: packet that is both amp-port and bogon drops index 7 (amp first);
+- [x] §8.2 in-band order proven: packet that is both amp-port and bogon drops index 7 (amp first);
       bogon + bitmap-port drops index 4 (bogon before bitmap)
-- [ ] Whitelist hit from amp port/bogon source redirects — the stage never runs on the hit path
-- [ ] Fail-closed: bitmap inner removed from outer → `map_error`
-- [ ] Program still loads native (branch-only checks pass the verifier)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **≥ 78** pass (68 + ~10 new; exact N recorded on completion)
+- [x] Whitelist hit from amp port/bogon source redirects — the stage never runs on the hit path
+- [x] Fail-closed: bitmap inner removed from outer → `map_error`
+- [x] Program still loads native (branch-only checks pass the verifier)
+- [x] Gate check passes: `make test`
+- [x] Test count: **81** pass (68 + 13 new; exact N recorded on completion)
+
+**Completion (2026-07-09)**: Added seam-B `deny_filter_stage()` for hardcoded amp ports, bogons,
+and the slotted UDP blocked-port bitmap; global/service bands remain inactive until T4. RED check
+failed on the first new amp-port assertion before wire-in, then gate `cd data-plane && make test`
+→ **81 passed**; `make bpf` also rebuilt the normal object successfully.
 
 **Tests**: dp-unit
 **Gate**: quick
