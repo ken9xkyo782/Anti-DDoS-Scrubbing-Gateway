@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Executing (2026-07-09) — T1 complete
+**Status**: Executing (2026-07-09) — T1, T2 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -109,11 +109,16 @@ the cleanest possible review: all 68 expectations identical before and after.
 
 **Done when**:
 
-- [ ] Zero remaining bogon-range packet sources in the suite outside deliberately-bogon future
+- [x] Zero remaining bogon-range packet sources in the suite outside deliberately-bogon future
       cases (`grep` sweep for the A-BLK-1 ranges recorded in the commit message)
-- [ ] Whitelist-seeded cases moved as CIDR+source pairs (scoped matching intent intact)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **68** pass, expectations unmodified (verdict-neutral proof)
+- [x] Whitelist-seeded cases moved as CIDR+source pairs (scoped matching intent intact)
+- [x] Gate check passes: `make test`
+- [x] Test count: **68** pass, expectations unmodified (verdict-neutral proof)
+
+**Completion (2026-07-09)**: Default packet source and existing whitelist source/CIDR pairs moved
+to named public-source constants. Sweep
+`rg "0x0a000001|0xc6336407|0xc6336408|0xcb007109|0xc6336400|0xc6330000|192\\.0\\.2|198\\.51\\.100|203\\.0\\.113" data-plane/tests/test_parse.c data-plane/tests/pkt_build.h`
+returned no matches. Gate `cd data-plane && make test` → **68 passed**.
 
 **Tests**: dp-unit (migration of existing cases)
 **Gate**: quick

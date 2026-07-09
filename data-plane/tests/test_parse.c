@@ -22,6 +22,7 @@
 #include "xdp_gateway.test.skel.h"
 
 #define DEFAULT_SERVICE_ID 42
+#define DEFAULT_SRC htonl(TEST_SRC_PUB_A)
 #define DEFAULT_DST htonl(0x0a000002)
 
 struct test_env {
@@ -931,7 +932,7 @@ static int expect_default_udp_miss_event(const struct drop_event *event)
 {
 	if (expect_u8("event.reason", event->reason, DR_SERVICE_MISS) != 0)
 		return -1;
-	if (expect_u32("event.src_ip", event->src_ip, htonl(0x0a000001)) != 0)
+	if (expect_u32("event.src_ip", event->src_ip, DEFAULT_SRC) != 0)
 		return -1;
 	if (expect_u32("event.dst_ip", event->dst_ip, DEFAULT_DST) != 0)
 		return -1;
@@ -1376,7 +1377,7 @@ static int test_whitelist_hit_bypasses_rules(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1387,7 +1388,7 @@ static int test_whitelist_hit_bypasses_rules(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1417,7 +1418,7 @@ static int test_whitelist_scope_does_not_cross_service(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000003) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000003) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1428,7 +1429,7 @@ static int test_whitelist_scope_does_not_cross_service(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = seed_service_flags(&env, 0, service_b_dst, 32, 77, 1,
@@ -1464,7 +1465,7 @@ static int test_whitelist_out_of_range_takes_rule_path(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xcb007109, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_C, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1477,7 +1478,7 @@ static int test_whitelist_out_of_range_takes_rule_path(void)
 	if (!err)
 		err = seed_match_all_rule_block(&env, 0, DEFAULT_SERVICE_ID);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1504,7 +1505,7 @@ static int test_whitelist_bloom_false_positive_clean_miss(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1517,7 +1518,7 @@ static int test_whitelist_bloom_false_positive_clean_miss(void)
 					 DEFAULT_SERVICE_ID, 1, WL_F_ACTIVE);
 	if (!err)
 		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
-					       0xc6336400);
+					       TEST_SRC_PUB_A_NET24);
 	if (!err)
 		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
@@ -1547,7 +1548,7 @@ static int test_whitelist_broad_entry_skips_bloom_and_hits(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1558,7 +1559,7 @@ static int test_whitelist_broad_entry_skips_bloom_and_hits(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6330000, 16,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET16, 16,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1585,7 +1586,7 @@ static int test_whitelist_inactive_flag_treats_entries_as_clean_miss(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1597,10 +1598,10 @@ static int test_whitelist_inactive_flag_treats_entries_as_clean_miss(void)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
-					       0xc6336400);
+					       TEST_SRC_PUB_A_NET24);
 	if (!err)
 		err = seed_whitelist_lpm_entry(&env, 0, DEFAULT_SERVICE_ID,
-					       0xc6336400, 24);
+					       TEST_SRC_PUB_A_NET24, 24);
 	if (!err)
 		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
@@ -1632,7 +1633,7 @@ static int test_whitelist_vip_config_without_set_flags_misses(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1643,7 +1644,7 @@ static int test_whitelist_vip_config_without_set_flags_misses(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1670,7 +1671,7 @@ static int test_whitelist_missing_vip_config_fails_closed(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1682,10 +1683,10 @@ static int test_whitelist_missing_vip_config_fails_closed(void)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
-					       0xc6336400);
+					       TEST_SRC_PUB_A_NET24);
 	if (!err)
 		err = seed_whitelist_lpm_entry(&env, 0, DEFAULT_SERVICE_ID,
-					       0xc6336400, 24);
+					       TEST_SRC_PUB_A_NET24, 24);
 	if (!err)
 		err = set_service_wl_flags(&env, 0, DEFAULT_SERVICE_ID,
 					   WL_F_ACTIVE);
@@ -1712,7 +1713,7 @@ static int test_whitelist_missing_lpm_inner_fails_closed(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1725,7 +1726,7 @@ static int test_whitelist_missing_lpm_inner_fails_closed(void)
 					 DEFAULT_SERVICE_ID, 1, WL_F_ACTIVE);
 	if (!err)
 		err = seed_whitelist_bloom_key(&env, 0, DEFAULT_SERVICE_ID,
-					       0xc6336400);
+					       TEST_SRC_PUB_A_NET24);
 	if (!err)
 		err = seed_vip_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err && bpf_map_delete_elem(env.whitelist_lpm_fd, &slot) != 0) {
@@ -1756,7 +1757,7 @@ static int test_whitelist_disabled_service_precedes_stage(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1767,7 +1768,7 @@ static int test_whitelist_disabled_service_precedes_stage(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 0);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1798,7 +1799,7 @@ static int test_whitelist_gre_hit_redirects_protocol_blind(void)
 	pkt_frame_init(&frame);
 	if (build_eth(&frame, ETH_P_IP) != 0 ||
 	    build_ipv4(&frame, IPPROTO_GRE, 0, 5) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1809,7 +1810,7 @@ static int test_whitelist_gre_hit_redirects_protocol_blind(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1836,7 +1837,7 @@ static int test_vip_ceiling_pps_deterministic_terminal_drop(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1851,7 +1852,7 @@ static int test_vip_ceiling_pps_deterministic_terminal_drop(void)
 	if (!err)
 		err = seed_match_all_rule_block(&env, 0, DEFAULT_SERVICE_ID);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1898,7 +1899,7 @@ static int test_vip_ceiling_pps_zero_blocks(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -1911,7 +1912,7 @@ static int test_vip_ceiling_pps_zero_blocks(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1946,7 +1947,7 @@ static int test_vip_ceiling_pps_drop_preserves_bps_tokens(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 	bps_budget = frame.len * 10;
 	config.bps = bps_budget;
@@ -1961,7 +1962,7 @@ static int test_vip_ceiling_pps_drop_preserves_bps_tokens(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -1995,9 +1996,9 @@ static int test_vip_ceiling_aggregate_budget_across_sources(void)
 	int err;
 
 	if (build_default_udp_frame(&frame_a) != 0 ||
-	    set_ipv4_addrs(&frame_a, 0xc6336407, 0x0a000002) != 0 ||
+	    set_ipv4_addrs(&frame_a, TEST_SRC_PUB_A, 0x0a000002) != 0 ||
 	    build_default_udp_frame(&frame_b) != 0 ||
-	    set_ipv4_addrs(&frame_b, 0xc6336408, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame_b, TEST_SRC_PUB_B, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -2010,7 +2011,7 @@ static int test_vip_ceiling_aggregate_budget_across_sources(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -2045,7 +2046,7 @@ static int test_vip_ceiling_reset_on_config_version(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -2058,7 +2059,7 @@ static int test_vip_ceiling_reset_on_config_version(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -2095,7 +2096,7 @@ static int test_vip_ceiling_normal_mode_fresh_bucket_admits(void)
 	int err;
 
 	if (build_default_udp_frame(&frame) != 0 ||
-	    set_ipv4_addrs(&frame, 0xc6336407, 0x0a000002) != 0)
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
 		return -1;
 
 	err = env_open(&env);
@@ -2106,7 +2107,7 @@ static int test_vip_ceiling_normal_mode_fresh_bucket_admits(void)
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
-		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, 0xc6336400, 24,
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID, TEST_SRC_PUB_A_NET24, 24,
 				     &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
@@ -3195,7 +3196,7 @@ static int test_tcp_ports_written_to_meta(void)
 	if (!err)
 		err = expect_u16("dport", meta.dport, htons(443));
 	if (!err)
-		err = expect_u32("src_ip", meta.src_ip, htonl(0x0a000001));
+		err = expect_u32("src_ip", meta.src_ip, DEFAULT_SRC);
 	if (!err)
 		err = expect_u16("l3_off", meta.l3_off, sizeof(struct ethhdr));
 	if (!err)

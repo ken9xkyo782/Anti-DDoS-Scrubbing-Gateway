@@ -15,6 +15,12 @@
 #define PKT_FRAME_CAP 256
 #define IPV4_MF 0x2000
 #define IPV4_OFFMASK 0x1fff
+#define TEST_SRC_PUB_A 0x2d2d0001U
+#define TEST_SRC_PUB_B 0x2d2d0002U
+#define TEST_SRC_PUB_C 0xb9000001U
+#define TEST_SRC_PUB_D 0xb9000002U
+#define TEST_SRC_PUB_A_NET24 0x2d2d0000U
+#define TEST_SRC_PUB_A_NET16 0x2d2d0000U
 
 struct pkt_frame {
 	uint8_t data[PKT_FRAME_CAP];
@@ -114,7 +120,7 @@ static inline int build_ipv4(struct pkt_frame *frame, uint8_t proto,
 	iph->ttl = 64;
 	iph->protocol = proto;
 	iph->frag_off = htons(frag_off);
-	iph->saddr = htonl(0x0a000001);
+	iph->saddr = htonl(TEST_SRC_PUB_A);
 	iph->daddr = htonl(0x0a000002);
 
 	frame->ipv4_off = (uint8_t *)iph - frame->data;
