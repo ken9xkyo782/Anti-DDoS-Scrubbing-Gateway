@@ -20,6 +20,8 @@ DPSTAT_SRC := $(TOOLS_DIR)/dpstat.c
 DPSTAT := $(BUILD_DIR)/dpstat
 TEST_SRC := $(TEST_DIR)/test_parse.c
 TEST_BIN := $(BUILD_DIR)/test_parse
+BULK_SRC := $(TEST_DIR)/bulk_blacklist.c
+BULK_BIN := $(BUILD_DIR)/bulk_blacklist
 
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 UAPI_INCLUDE := /usr/include/$(shell uname -m)-linux-gnu
@@ -29,7 +31,7 @@ LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
 USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
-.PHONY: all bpf skel loader dpstat test smoke clean run
+.PHONY: all bpf skel loader dpstat test smoke blbulk clean run
 
 all: bpf skel loader
 
@@ -71,6 +73,12 @@ smoke: loader
 	$(TEST_DIR)/smoke_redirect.sh
 
 $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(TEST_SKEL) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
+
+blbulk: $(BULK_BIN)
+	$(BULK_BIN)
+
+$(BULK_BIN): $(BULK_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 run: loader

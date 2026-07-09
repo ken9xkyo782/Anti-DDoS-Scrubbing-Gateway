@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Executing (2026-07-09) — T1, T2, T3, T4, T5, T6 complete
+**Status**: Executing (2026-07-09) — T1, T2, T3, T4, T5, T6, T7 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -322,12 +322,21 @@ footprint recorded here + fed to T8 docs.
 
 **Done when**:
 
-- [ ] `sudo make blbulk` → 1M inserts succeed; footprint + spot-check numbers printed and recorded
+- [x] `sudo make blbulk` → 1M inserts succeed; footprint + spot-check numbers printed and recorded
       here on completion
-- [ ] Bloom + LPM agree on sampled members; non-members bloom-miss at plausible rate (sanity, not
+- [x] Bloom + LPM agree on sampled members; non-members bloom-miss at plausible rate (sanity, not
       an exact FP assertion)
-- [ ] `make test` untouched by the new target (count unchanged from T6)
-- [ ] Gate check passes: `make bpf skel loader dpstat && make test && sudo make blbulk`
+- [x] `make test` untouched by the new target (count unchanged from T6)
+- [x] Gate check passes: `make bpf skel loader dpstat && make test && sudo make blbulk`
+
+**Completion (2026-07-09)**: Added gated `make blbulk` (not part of `make test`) with
+`tests/bulk_blacklist.c`. Full gate
+`cd data-plane && make bpf skel loader dpstat && make test && sudo make blbulk` → **91 passed**,
+then **1,048,576** LPM inserts and **1,048,576** bloom pushes succeeded. Gate-run footprint:
+`cgroup_delta_kib=147364`, `rss_delta_kib=0`, deterministic key/value payload
+`13631488` bytes. Spot checks: `/24`-backed LPM hit OK, `/32` LPM hit OK, LPM miss OK,
+`avg_ns=1626.4` over 1,000 LPM lookups, bloom member hits `2`, nonmember misses `1024/1024`,
+nonmember maybes `0`, and `BPF_PROG_TEST_RUN` for a loaded source returned `XDP_DROP`.
 
 **Tests**: dp-integration (privileged, gated)
 **Gate**: full (blbulk variant)
