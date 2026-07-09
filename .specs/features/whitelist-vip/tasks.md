@@ -243,9 +243,11 @@ replace-only M4 note.
 
 **Done when**:
 
-- [ ] Both docs updated; TESTING.md dp-unit count matches T3's recorded N
-- [ ] Gate check passes: `make test` (docs-only; count unchanged)
-- [ ] Test count: T3's N pass
+- [x] Both docs updated; TESTING.md dp-unit count matches T3's recorded N
+- [x] Gate check passes: `make test` (docs-only; count unchanged)
+- [x] Test count: **68** pass
+
+**Completion (2026-07-09)**: docs updated; `cd data-plane && make test` → **68 passed**.
 
 **Tests**: none (docs; matrix has no doc layer)
 **Gate**: quick (count-stability check only)

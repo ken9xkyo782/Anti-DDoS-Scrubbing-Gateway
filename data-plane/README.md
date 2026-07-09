@@ -37,8 +37,18 @@ When `SERVICE_DEST` is set, the loader also seeds a no-quota match-all allow-rul
 slots. Without `SERVICE_DEST`, `active_config` is still seeded and the service map stays empty, so valid
 IPv4 traffic fails closed as `service_miss`.
 
+Optional whitelist seed variables let you demo VIP bypass before the M4 worker exists:
+
+- `XDPGW_SEED_WL_CIDR=<source-cidr>` seeds scoped whitelist bloom/LPM entries in both slots.
+- `XDPGW_SEED_VIP_PPS=<packets-per-second>` sets the aggregate VIP PPS ceiling.
+- `XDPGW_SEED_VIP_BPS=<bytes-per-second>` sets the aggregate VIP byte ceiling.
+
+If you set `XDPGW_SEED_WL_CIDR` without either VIP ceiling variable, the loader uses
+`XDPGW_SEED_VIP_PPS=1000`. This prevents a ceiling-less ACTIVE whitelist state.
+
 ```bash
 SERVICE_DEST=10.0.0.2 sudo ./build/xdp_gateway_loader <in-veth> <out-veth>
+SERVICE_DEST=10.0.0.2 XDPGW_SEED_WL_CIDR=10.0.0.1/32 XDPGW_SEED_VIP_PPS=1000 sudo ./build/xdp_gateway_loader <in-veth> <out-veth>
 SERVICE_DEST=10.0.0.0/24 make run IFACE=<in-veth> OUT=<out-veth>
 ```
 
@@ -51,6 +61,24 @@ second; the future worker must convert any control-plane unit before writing the
 `RULE_PROTO_ANY` matches only TCP, UDP, and ICMP. GRE, ESP, and other non-TCP/UDP/ICMP IPv4 protocols
 are unmatchable in v1 and drop with `not_allowed`, even when a service has a match-all `any` rule.
 Sustained `not_allowed` from tunnel traffic is expected behavior, not a loader or map-seeding failure.
+
+## Whitelist and VIP ceiling
+
+`src/whitelist.h` is the M4 map-build contract for scoped whitelist and VIP ceiling config. A
+whitelist entry only applies to its own `service_id`; it never edits or weakens global deny maps.
+
+A whitelist requires a VIP ceiling to take effect. If both `vip_pps` and `vip_bps` are NULL in config,
+the builder must leave `WL_F_ACTIVE` unset and the data plane treats the whitelist as inert. One set
+dimension is enough: the unset dimension is unlimited, while `0` means explicit block for that
+dimension.
+
+Whitelist bloom filters are replace-only. The future worker must build fresh bloom inners for the
+inactive slot, keep bloom contents a superset of the LPM entries, then swap the inactive slot into
+service. It must not try to clear or delete individual bloom values in place.
+
+The VIP ceiling is aggregate per service. A spoofed flood that matches a whitelisted source can exhaust
+that service's VIP budget and cause legitimate VIP traffic to drop with `vip_ceiling_drop`. This is the
+bounded BL-08 residual self-DoS mode; alerting on repeated VIP ceiling hits belongs to M6.
 
 ## Drop counters and sampling
 

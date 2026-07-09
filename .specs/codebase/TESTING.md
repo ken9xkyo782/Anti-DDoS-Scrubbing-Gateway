@@ -130,11 +130,25 @@ Rate-limit tests pin the runner to CPU 0, set `rl_ncpus` rodata before BPF load,
 `rl_config.test_no_refill=1` when exact quotas are required. In deterministic mode, a rule's `pps` and
 `bps` values are the exact per-CPU token budgets, and refill is disabled.
 
+### Whitelist-stage conventions
+
+Whitelist tests seed services first, then call `seed_whitelist()` to populate the slot's bloom,
+scoped LPM, VIP config, and `service_val.wl_flags`. Use lower-level helpers only for structural cases
+such as a bloom false positive, an inactive `WL_F_ACTIVE` gate, or a missing map inner. Bloom filters
+are replace-only, so tests use fresh skeleton instances or distinct keys instead of trying to clear a
+bloom map.
+
+The whitelist and allow-rule buckets share `rl_config.test_no_refill`. Set it to `1` when asserting
+exact VIP ceiling counts; in deterministic mode, VIP `pps` and `bps` values are exact per-CPU token
+budgets, just like rule quotas. VIP overflow is terminal: assert `DR_VIP_CEILING_DROP` at index 14 and
+verify overflow packets don't fall through to the rule stage.
+
 ### Data-plane Corpus
 
 `dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
 malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, too-deep
-VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits, and
-sampling budget cases. The current quick suite has **50**
+VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits,
+whitelist scoped-match and VIP ceiling cases, and sampling budget cases. The current quick suite has
+**68**
 tests. Each verdict task states the expected passing test count to prevent silent deletions or skipped
 coverage.
