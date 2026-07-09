@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <arpa/inet.h>
+#include <limits.h>
 #include <linux/if_link.h>
 #include <net/if.h>
 #include <signal.h>
@@ -16,6 +17,7 @@
 #include "drop_event.h"
 #include "rules.h"
 #include "service.h"
+#include "whitelist.h"
 #include "xdp_gateway.skel.h"
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
@@ -25,6 +27,14 @@
 #define SAMPLE_STATS_PIN_PATH PIN_DIR "/sample_stats"
 #define DEFAULT_SAMPLE_RATE_PER_SEC 256
 #define DEFAULT_SAMPLE_BURST 64
+#define DEFAULT_SEED_VIP_PPS 1000
+
+struct wl_seed {
+	int enabled;
+	struct service_key cidr;
+	struct vip_config config;
+	__u8 wl_flags;
+};
 
 static volatile sig_atomic_t exiting;
 
@@ -72,6 +82,8 @@ static void print_usage(const char *prog)
 	fprintf(stderr, "usage: %s <IN> <OUT>\n", prog);
 	fprintf(stderr, "       or set IN_IFACE=<IN> OUT_IFACE=<OUT>\n");
 	fprintf(stderr, "       optional: SERVICE_DEST=<ipv4-or-cidr>\n");
+	fprintf(stderr,
+		"       optional: XDPGW_SEED_WL_CIDR=<src-cidr> [XDPGW_SEED_VIP_PPS=N] [XDPGW_SEED_VIP_BPS=N]\n");
 }
 
 static int create_pin_dir(void)
@@ -229,6 +241,69 @@ static int parse_service_dest(const char *text, struct service_key *key)
 	return 0;
 }
 
+static int parse_u64_env(const char *name, __u64 *value, int *is_set)
+{
+	const char *text = getenv(name);
+	unsigned long long parsed;
+	char *end;
+
+	*is_set = 0;
+	if (!text || text[0] == '\0')
+		return 0;
+
+	errno = 0;
+	parsed = strtoull(text, &end, 10);
+	if (errno || end == text || *end != '\0') {
+		fprintf(stderr, "invalid %s=%s (expected unsigned integer)\n",
+			name, text);
+		return -1;
+	}
+
+	*value = (__u64)parsed;
+	*is_set = 1;
+	return 0;
+}
+
+static int prepare_wl_seed(struct wl_seed *seed)
+{
+	const char *wl_cidr = getenv("XDPGW_SEED_WL_CIDR");
+	int pps_set = 0;
+	int bps_set = 0;
+
+	memset(seed, 0, sizeof(*seed));
+	if (!wl_cidr || wl_cidr[0] == '\0')
+		return 0;
+
+	if (parse_service_dest(wl_cidr, &seed->cidr) != 0) {
+		fprintf(stderr,
+			"invalid XDPGW_SEED_WL_CIDR %s (expected canonical IPv4 CIDR)\n",
+			wl_cidr);
+		return -1;
+	}
+
+	seed->config.version = 1;
+	if (parse_u64_env("XDPGW_SEED_VIP_PPS", &seed->config.pps,
+			  &pps_set) != 0 ||
+	    parse_u64_env("XDPGW_SEED_VIP_BPS", &seed->config.bps,
+			  &bps_set) != 0)
+		return -1;
+
+	if (pps_set)
+		seed->config.flags |= VIP_F_PPS_SET;
+	if (bps_set)
+		seed->config.flags |= VIP_F_BPS_SET;
+	if (!pps_set && !bps_set) {
+		seed->config.flags = VIP_F_PPS_SET;
+		seed->config.pps = DEFAULT_SEED_VIP_PPS;
+	}
+
+	seed->wl_flags = WL_F_ACTIVE;
+	if (seed->cidr.prefixlen < WL_BLOOM_PREFIX)
+		seed->wl_flags |= WL_F_HAS_BROAD;
+	seed->enabled = 1;
+	return 0;
+}
+
 static int populate_tx_devmap(struct xdp_gateway_bpf *skel, int out_ifindex,
 			      const char *out_ifname)
 {
@@ -347,17 +422,90 @@ static int seed_match_all_rule_blocks(struct xdp_gateway_bpf *skel,
 	return 0;
 }
 
+static int seed_wl_slot(struct xdp_gateway_bpf *skel, __u32 slot,
+			__u32 service_id, const struct wl_seed *seed)
+{
+	int bloom_fd = slot == 0 ? bpf_map__fd(skel->maps.whitelist_bloom_0) :
+				   bpf_map__fd(skel->maps.whitelist_bloom_1);
+	int lpm_fd = slot == 0 ? bpf_map__fd(skel->maps.whitelist_lpm_0) :
+				 bpf_map__fd(skel->maps.whitelist_lpm_1);
+	int vip_fd = slot == 0 ? bpf_map__fd(skel->maps.vip_config_0) :
+				 bpf_map__fd(skel->maps.vip_config_1);
+	struct wl_lpm_key lpm_key = {
+		.prefixlen = 32 + seed->cidr.prefixlen,
+		.service_id = htonl(service_id),
+		.src = seed->cidr.addr,
+	};
+	__u32 src_host = ntohl(seed->cidr.addr);
+	__u8 present = 1;
+
+	if (seed->cidr.prefixlen >= WL_BLOOM_PREFIX) {
+		struct wl_bloom_key bloom_key = {
+			.service_id = htonl(service_id),
+			.src24 = htonl(src_host & WL_SRC24_MASK),
+		};
+
+		if (bloom_fd < 0 ||
+		    bpf_map_update_elem(bloom_fd, NULL, &bloom_key,
+					BPF_ANY) != 0) {
+			fprintf(stderr, "failed to seed whitelist_bloom_%u: %s\n",
+				slot, strerror(errno));
+			return -1;
+		}
+	}
+
+	if (lpm_fd < 0 ||
+	    bpf_map_update_elem(lpm_fd, &lpm_key, &present, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed whitelist_lpm_%u: %s\n", slot,
+			strerror(errno));
+		return -1;
+	}
+
+	if (vip_fd < 0 ||
+	    bpf_map_update_elem(vip_fd, &service_id, &seed->config,
+				BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed vip_config_%u: %s\n", slot,
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int seed_whitelist_from_env(struct xdp_gateway_bpf *skel,
+				   __u32 service_id, const struct wl_seed *seed)
+{
+	if (!seed->enabled)
+		return 0;
+
+	if (seed_wl_slot(skel, 0, service_id, seed) != 0 ||
+	    seed_wl_slot(skel, 1, service_id, seed) != 0)
+		return -1;
+
+	printf("seeded whitelist_bloom/lpm + vip_config for service_id=%u pps=%llu bps=%llu flags=0x%x\n",
+	       service_id, (unsigned long long)seed->config.pps,
+	       (unsigned long long)seed->config.bps, seed->config.flags);
+	return 0;
+}
+
 static int seed_service_from_env(struct xdp_gateway_bpf *skel)
 {
 	const char *service_dest = getenv("SERVICE_DEST");
+	const char *wl_cidr = getenv("XDPGW_SEED_WL_CIDR");
 	struct service_val val = {
 		.service_id = 1,
 		.enabled = 1,
 	};
 	struct service_key key = {};
+	struct wl_seed wl_seed;
 	int fd;
 
 	if (!service_dest || service_dest[0] == '\0') {
+		if (wl_cidr && wl_cidr[0] != '\0') {
+			fprintf(stderr,
+				"XDPGW_SEED_WL_CIDR requires SERVICE_DEST so a service can be marked active\n");
+			return -1;
+		}
 		printf("SERVICE_DEST unset; service map remains empty\n");
 		return 0;
 	}
@@ -369,6 +517,10 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel)
 		return -1;
 	}
 
+	if (prepare_wl_seed(&wl_seed) != 0)
+		return -1;
+	val.wl_flags = wl_seed.wl_flags;
+
 	fd = bpf_map__fd(skel->maps.service_inner_0);
 	if (fd < 0 || bpf_map_update_elem(fd, &key, &val, BPF_ANY) != 0) {
 		fprintf(stderr, "failed to seed service_inner_0 from SERVICE_DEST: %s\n",
@@ -376,9 +528,11 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel)
 		return -1;
 	}
 
-	printf("seeded service_inner_0 with SERVICE_DEST=%s service_id=1 enabled=1\n",
-	       service_dest);
-	return seed_match_all_rule_blocks(skel, val.service_id);
+	printf("seeded service_inner_0 with SERVICE_DEST=%s service_id=1 enabled=1 wl_flags=0x%x\n",
+	       service_dest, val.wl_flags);
+	if (seed_match_all_rule_blocks(skel, val.service_id) != 0)
+		return -1;
+	return seed_whitelist_from_env(skel, val.service_id, &wl_seed);
 }
 
 int main(int argc, char **argv)

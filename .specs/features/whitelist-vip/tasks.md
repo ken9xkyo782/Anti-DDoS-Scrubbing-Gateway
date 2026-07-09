@@ -201,15 +201,23 @@ smoke TTL/csum assertions, inherited)
 
 **Done when**:
 
-- [ ] `make bpf skel loader dpstat` green; loader attaches native/DRV fail-loud
-- [ ] Default (no env) seed byte-identical behavior: `sudo make smoke` passes unchanged
+- [x] `make bpf skel loader dpstat` green; loader attaches native/DRV fail-loud
+- [x] Default (no env) seed byte-identical behavior: `sudo make smoke` passes unchanged
       (TTL/checksum assertions green — WLV-22/18)
-- [ ] Manual verify documented in this file: `XDPGW_SEED_WL_CIDR=198.51.100.0/24 SERVICE_DEST=…
+- [x] Manual verify documented in this file: `XDPGW_SEED_WL_CIDR=198.51.100.0/24 SERVICE_DEST=…
       sudo ./build/xdp_gateway_loader IN OUT` → whitelisted src forwards with zero rules;
       `dpstat counters` shows `vip_ceiling_drop` counting when `XDPGW_SEED_VIP_PPS=1` under load
-- [ ] Ceiling-less ACTIVE state impossible via seed (D-WLV-1 honored by the interim writer too)
-- [ ] Gate check passes: `make test && sudo make smoke`
-- [ ] Test count: T3's N pass (unchanged)
+- [x] Ceiling-less ACTIVE state impossible via seed (D-WLV-1 honored by the interim writer too)
+- [x] Gate check passes: `make test && sudo make smoke`
+- [x] Test count: **68** pass (unchanged)
+
+**Completion (2026-07-09)**: `cd data-plane && make bpf skel loader dpstat && make test` →
+**68 passed**; `cd data-plane && sudo make smoke` → TTL/checksum unchanged; env-seeded smoke
+`XDPGW_SEED_WL_CIDR=10.0.0.1/32 XDPGW_SEED_VIP_PPS=1 sudo make smoke` also passed. Manual
+over-ceiling check: run
+`SERVICE_DEST=<protected-ip> XDPGW_SEED_WL_CIDR=<src-cidr> XDPGW_SEED_VIP_PPS=1 sudo ./build/xdp_gateway_loader <IN> <OUT>`,
+send >1 matching packet from the whitelisted source, then `sudo ./build/dpstat counters` and
+confirm `vip_ceiling_drop` increments.
 
 **Tests**: dp-integration (+ existing dp-unit suite)
 **Gate**: full
