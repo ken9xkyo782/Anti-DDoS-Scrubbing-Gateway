@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Executing (2026-07-09) — T1, T2, T3, T4, T5, T6, T7 complete
+**Status**: Executed/VERIFIED (2026-07-09) — T1–T8 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -363,9 +363,17 @@ posture, and the measured 1M footprint from T7.
 
 **Done when**:
 
-- [ ] Both docs updated; TESTING.md dp-unit count matches T4's recorded N; README lists both sets
+- [x] Both docs updated; TESTING.md dp-unit count matches T4's recorded N; README lists both sets
       verbatim + footprint
-- [ ] Gate check passes: `make test` (docs-only; count unchanged)
+- [x] Gate check passes: `make test` (docs-only; count unchanged)
+
+**Completion (2026-07-09)**: Updated `.specs/codebase/TESTING.md` with deny-stage testing
+conventions, named non-bogon packet-source guidance, deterministic bloom false-positive induction,
+the `sudo make blbulk` scale gate, and the final **91**-test quick-suite count. Updated
+`data-plane/README.md` with the hardcoded UDP amplification source-port set, bogon ranges, resolver
+and NTP whitelist guidance, seed-only bitmap posture, `bloom_stats` pin, `dpstat counters`
+observability note, and the T7 1M footprint (`cgroup_delta_kib=147364`). Gate
+`cd data-plane && make test` → **91 passed**.
 
 **Tests**: none (docs; matrix has no doc layer)
 **Gate**: quick (count-stability check only)

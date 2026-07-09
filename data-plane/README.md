@@ -52,6 +52,17 @@ SERVICE_DEST=10.0.0.2 XDPGW_SEED_WL_CIDR=10.0.0.1/32 XDPGW_SEED_VIP_PPS=1000 sud
 SERVICE_DEST=10.0.0.0/24 make run IFACE=<in-veth> OUT=<out-veth>
 ```
 
+Optional deny seed variables let you demo blacklist behavior before the M4 worker exists:
+
+- `XDPGW_SEED_GBL_CIDR=<source-cidr>` seeds one global blacklist CIDR in slot 0.
+- `XDPGW_SEED_SBL_CIDR=<source-cidr>` seeds one service-scoped blacklist CIDR in slot 0.
+  Set `SERVICE_DEST` with this variable so the loader can mark the demo service active.
+- `XDPGW_SEED_BLOCKED_PORT=<udp-source-port>` sets one slot-0 UDP blocked-port bitmap bit.
+
+The loader seed path is intentionally small. It writes one CIDR or port for smoke testing and leaves
+the 16..23 global-bloom expansion band, snapshot replacement, and bulk map population to the M4
+builder.
+
 ## Allow rules and tunnel traffic
 
 `src/rules.h` is the M4 map-build contract for allow rules. Rule blocks must be pre-sorted by ascending
@@ -80,6 +91,49 @@ The VIP ceiling is aggregate per service. A spoofed flood that matches a whiteli
 that service's VIP budget and cause legitimate VIP traffic to drop with `vip_ceiling_drop`. This is the
 bounded BL-08 residual self-DoS mode; alerting on repeated VIP ceiling hits belongs to M6.
 
+## Deny filters and blacklist
+
+`src/blacklist.h` is the M4 map-build contract for global and service-scoped blacklist maps. The deny
+stage runs after whitelist miss and before allow rules, so a whitelist hit can bypass deny filters only
+when the service has an active whitelist and VIP ceiling.
+
+The data plane drops UDP packets from these source ports before checking dynamic maps:
+`17`, `19`, `53`, `111`, `123`, `137`, `161`, `389`, `520`, `1900`, `5353`, and `11211`.
+These ports cover common reflection and amplification sources. If a service legitimately receives
+UDP from sources such as resolvers or NTP servers, whitelist those upstream source CIDRs and configure
+a VIP ceiling. A whitelist without an active VIP ceiling is inert.
+
+The data plane drops source addresses in these bogon ranges:
+
+- `0.0.0.0/8`
+- `10.0.0.0/8`
+- `100.64.0.0/10`
+- `127.0.0.0/8`
+- `169.254.0.0/16`
+- `172.16.0.0/12`
+- `192.0.0.0/24`
+- `192.0.2.0/24`
+- `192.168.0.0/16`
+- `198.18.0.0/15`
+- `198.51.100.0/24`
+- `203.0.113.0/24`
+- `224.0.0.0/4`
+- `240.0.0.0/4`
+
+The UDP blocked-port bitmap is a seed-only demo surface until the M4 builder lands. Use
+`XDPGW_SEED_BLOCKED_PORT` for a single slot-0 port in smoke tests. Production snapshots must build
+fresh inactive-slot bitmap and blacklist maps, then swap slots in one active-config update.
+
+Run the gated scale check when you change blacklist capacity or map shape:
+
+```bash
+sudo make blbulk
+```
+
+The July 9, 2026 gate inserted 1,048,576 global blacklist entries and 1,048,576 bloom keys. It
+measured `cgroup_delta_kib=147364`, `rss_delta_kib=0`, and `13631488` deterministic key/value bytes;
+sampled `/24` and `/32` hits, a miss, bloom membership, and one XDP drop verdict all passed.
+
 ## Drop counters and sampling
 
 `src/drop_reason.h` is the source of truth for the frozen drop-reason ABI. Reasons `0..15` are fixed
@@ -93,6 +147,7 @@ The loader pins these maps for operators and later workers:
 | `/sys/fs/bpf/xdp_gateway/drop_ringbuf` | Rate-limited sampled drop events. |
 | `/sys/fs/bpf/xdp_gateway/sample_config` | Runtime sample budget: `rate_per_sec` and `burst`. |
 | `/sys/fs/bpf/xdp_gateway/sample_stats` | Per-CPU emitted, suppressed, and lost sample counters. |
+| `/sys/fs/bpf/xdp_gateway/bloom_stats` | Per-stage bloom-hit/LPM-miss counters. |
 
 Use `dpstat` while the loader is running:
 
@@ -106,7 +161,8 @@ sudo ./build/dpstat rate 256 64
 Counter maps reset when the XDP program is reloaded. Consumers must compute deltas between reads, not
 interpret values as lifetime totals. Sampling budget is per CPU; a rate of `256` permits up to
 `256 * online_cpu_count` events per second across the node, with burst `64` per CPU by default. Exact
-drop counters stay correct even when samples are suppressed or lost.
+drop counters stay correct even when samples are suppressed or lost. `dpstat counters` also prints
+the `bloom_hit_lpm_miss` rows for whitelist, global blacklist, service blacklist, and total.
 
 ## Requirements
 

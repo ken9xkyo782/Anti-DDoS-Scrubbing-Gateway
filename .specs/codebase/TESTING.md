@@ -81,6 +81,7 @@ Run these from `data-plane/`.
 | **build** | `make bpf skel loader dpstat` | Scaffold, loader, observability tooling, and wiring tasks |
 | **quick** | `make test` | Parser/verdict tasks with `dp-unit` coverage |
 | **full** | `make test && sudo make smoke` | Pre-merge checks on a BPF+veth-capable runner; `make smoke` is privileged and not parallel-safe |
+| **scale** | `sudo make blbulk` | Privileged 1M global-blacklist load and footprint check; run only when blacklist map capacity or kernel memory posture changes |
 
 The native-mode loader is verified by the build gate plus a manual veth/NIC smoke:
 `SERVICE_DEST=<ipv4-or-cidr> sudo ./build/xdp_gateway_loader <in-ifname> <out-ifname>` should attach to
@@ -143,12 +144,34 @@ exact VIP ceiling counts; in deterministic mode, VIP `pps` and `bps` values are 
 budgets, just like rule quotas. VIP overflow is terminal: assert `DR_VIP_CEILING_DROP` at index 14 and
 verify overflow packets don't fall through to the rule stage.
 
+### Deny-stage conventions
+
+Deny-stage tests seed services first, then use the blacklist helpers to populate slotted global
+blacklist bloom/LPM maps, service-scoped bloom/LPM maps, `gbl_meta`, and the UDP blocked-port
+bitmap. Use lower-level bloom-only helpers for deterministic false-positive induction. A bloom hit
+with an LPM miss must increment exactly one `bloom_stats` stage counter and must not change
+drop-reason counters.
+
+Packet sources in new non-bogon tests must come from the named public pools in
+`data-plane/tests/pkt_build.h`, such as `TEST_SRC_PUB_A`, `TEST_SRC_PUB_B`, and
+`TEST_SRC_PUB_C`. Keep RFC 1918, TEST-NET, loopback, multicast, and reserved ranges only for tests
+that deliberately assert `bogon_drop`.
+
+Bloom filters are replace-only. Tests use fresh skeleton instances or distinct keys instead of
+trying to clear bloom values. Use missing map inners for fail-closed coverage, because valid
+`ARRAY` slots such as `gbl_meta[0]` and `gbl_meta[1]` are not deletable.
+
+Run `sudo make blbulk` when you change blacklist map definitions, bloom/LPM key formats, or kernel
+capacity assumptions. The target is not part of `make test`; it loads the normal skeleton, inserts
+1,048,576 mixed `/24` and `/32` global blacklist entries, checks sampled bloom/LPM membership, and
+runs one `BPF_PROG_TEST_RUN` packet that must return `XDP_DROP`.
+
 ### Data-plane Corpus
 
 `dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
 malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, too-deep
 VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits,
-whitelist scoped-match and VIP ceiling cases, and sampling budget cases. The current quick suite has
-**68**
+whitelist scoped-match and VIP ceiling cases, blacklist amp-port, bogon, bitmap, global/service
+bloom-to-LPM, bloom false-positive, and sampling budget cases. The current quick suite has **91**
 tests. Each verdict task states the expected passing test count to prevent silent deletions or skipped
 coverage.
