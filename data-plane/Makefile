@@ -56,7 +56,7 @@ $(TEST_SKEL): $(TEST_BPF_OBJ)
 
 loader: $(LOADER)
 
-$(LOADER): $(LOADER_SRC) $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SRC_DIR)/whitelist.h $(SKEL) | $(BUILD_DIR)
+$(LOADER): $(LOADER_SRC) $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 dpstat: $(DPSTAT)

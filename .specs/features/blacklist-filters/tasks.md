@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Executing (2026-07-09) — T1, T2, T3, T4 complete
+**Status**: Executing (2026-07-09) — T1, T2, T3, T4, T5 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -242,15 +242,23 @@ that the 16..23 expansion band is M4-builder behavior, not implemented here (D-B
 
 **Done when**:
 
-- [ ] `make bpf skel loader dpstat` green; loader attaches native/DRV fail-loud
-- [ ] Default (no env) behavior byte-identical: `sudo make smoke` passes unchanged
-- [ ] Env-seeded smoke: `XDPGW_SEED_GBL_CIDR=<smoke-src>/32 sudo make smoke` **fails to deliver**
+- [x] `make bpf skel loader dpstat` green; loader attaches native/DRV fail-loud
+- [x] Default (no env) behavior byte-identical: `sudo make smoke` passes unchanged
+- [x] Env-seeded smoke: `XDPGW_SEED_GBL_CIDR=<smoke-src>/32 sudo make smoke` **fails to deliver**
       (blacklisted source dropped — inverse assertion documented in the smoke script or checked
       manually and recorded here on completion)
-- [ ] Manual verify documented here: seeded blocked port drops matching UDP; `active_slot` flip
+- [x] Manual verify documented here: seeded blocked port drops matching UDP; `active_slot` flip
       via seeded slots changes deny verdicts in one write
-- [ ] Gate check passes: `make test && sudo make smoke`
-- [ ] Test count: unchanged from T4 (N recorded)
+- [x] Gate check passes: `make test && sudo make smoke`
+- [x] Test count: unchanged from T4 (**91** recorded)
+
+**Completion (2026-07-09)**: Loader pins `bloom_stats`, seeds `gbl_meta[0]={0}`, accepts
+`XDPGW_SEED_GBL_CIDR`, `XDPGW_SEED_SBL_CIDR`, and `XDPGW_SEED_BLOCKED_PORT`, and seeds the demo
+service in both slots while deny demo data lands in slot 0. The live smoke source moved to
+`45.45.0.1` so default smoke is not bogon-dropped. Gates:
+`cd data-plane && make bpf skel loader dpstat && make test && sudo make smoke` → **91 passed** +
+smoke delivered; `sudo env XDPGW_SEED_GBL_CIDR=45.45.0.1/32 make smoke` → no redirected frame
+(expected); `sudo env XDPGW_SEED_BLOCKED_PORT=1234 make smoke` → no redirected frame (expected).
 
 **Tests**: dp-integration (+ existing dp-unit suite)
 **Gate**: full

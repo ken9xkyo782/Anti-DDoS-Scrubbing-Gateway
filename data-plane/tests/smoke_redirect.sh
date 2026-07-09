@@ -100,7 +100,7 @@ def checksum(data):
     return (~total) & 0xffff
 
 
-src_ip = struct.unpack("!I", socket.inet_aton("10.0.0.1"))[0]
+src_ip = struct.unpack("!I", socket.inet_aton("45.45.0.1"))[0]
 dst_ip = struct.unpack("!I", socket.inet_aton("10.0.0.2"))[0]
 payload = b"x" * 18
 udp = struct.pack("!HHHH", 1234, 53, 8 + len(payload), 0)
