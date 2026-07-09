@@ -1,7 +1,7 @@
 # Allow-Rule Matching & Rate-Limit Tasks
 
 **Design**: `.specs/features/allow-rule-ratelimit/design.md` (Approved 2026-07-09)
-**Status**: Approved (2026-07-09) → Execute
+**Status**: Executed / VERIFIED (2026-07-09)
 **Baseline**: `cd data-plane && make test` → **34 passed**; `make bpf skel loader dpstat` green.
 **Gates** (from `.specs/codebase/TESTING.md`, run in `data-plane/`): build = `make bpf skel loader dpstat` ·
 quick = `make test` · full = `make test && sudo make smoke`.
@@ -157,9 +157,9 @@ and the `rules.h`-is-the-M4-contract pointer (pre-sorted order, bytes/sec `bps`)
 
 **Done when**:
 
-- [ ] Both docs updated; TESTING.md baseline count matches T3's recorded N
-- [ ] Gate check passes: `make test` (docs-only change; count unchanged)
-- [ ] Test count: T3's N pass
+- [x] Both docs updated; TESTING.md baseline count matches T3's recorded N
+- [x] Gate check passes: `make test` (docs-only change; count unchanged)
+- [x] Test count: 50 pass
 
 **Tests**: none (docs)
 **Gate**: quick (regression only)

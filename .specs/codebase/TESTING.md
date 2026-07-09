@@ -120,10 +120,21 @@ later drops increment `SAMPLE_SUPPRESSED`. The `BPF_PROG_TEST_RUN` suite consume
 directly; the de-risk case passes in this environment. Exact `counter_map` totals must remain correct
 when samples are emitted, suppressed, or lost.
 
+### Rule-stage conventions
+
+Allow-rule tests seed `rule_block_0/1` with `seed_rule_block()`. Existing enabled-service cases use a
+match-all, no-quota rule block so service lookup behavior stays explicit after enabled services become
+default-deny. An absent block or a block with `rule_count=0` must drop with `not_allowed`.
+
+Rate-limit tests pin the runner to CPU 0, set `rl_ncpus` rodata before BPF load, and set
+`rl_config.test_no_refill=1` when exact quotas are required. In deterministic mode, a rule's `pps` and
+`bps` values are the exact per-CPU token budgets, and refill is disabled.
+
 ### Data-plane Corpus
 
 `dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
 malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, too-deep
-VLAN stacks, service lookup verdicts, and sampling budget cases. The current quick suite has **34**
+VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits, and
+sampling budget cases. The current quick suite has **50**
 tests. Each verdict task states the expected passing test count to prevent silent deletions or skipped
 coverage.

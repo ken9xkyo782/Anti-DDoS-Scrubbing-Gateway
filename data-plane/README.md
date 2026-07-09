@@ -33,13 +33,24 @@ loader unpins the maps and removes the directory.
 
 For a demo service before the M4 worker exists, set `SERVICE_DEST` to an IPv4 address or canonical CIDR.
 An address without a prefix is seeded as `/32`; invalid, IPv6, or non-canonical CIDRs are rejected.
-Without `SERVICE_DEST`, `active_config` is still seeded and the service map stays empty, so valid IPv4
-traffic fails closed as `service_miss`.
+When `SERVICE_DEST` is set, the loader also seeds a no-quota match-all allow-rule block into both rule
+slots. Without `SERVICE_DEST`, `active_config` is still seeded and the service map stays empty, so valid
+IPv4 traffic fails closed as `service_miss`.
 
 ```bash
 SERVICE_DEST=10.0.0.2 sudo ./build/xdp_gateway_loader <in-veth> <out-veth>
 SERVICE_DEST=10.0.0.0/24 make run IFACE=<in-veth> OUT=<out-veth>
 ```
+
+## Allow rules and tunnel traffic
+
+`src/rules.h` is the M4 map-build contract for allow rules. Rule blocks must be pre-sorted by ascending
+priority, because the hot path treats array position as first-match order. The `bps` field is bytes per
+second; the future worker must convert any control-plane unit before writing the map.
+
+`RULE_PROTO_ANY` matches only TCP, UDP, and ICMP. GRE, ESP, and other non-TCP/UDP/ICMP IPv4 protocols
+are unmatchable in v1 and drop with `not_allowed`, even when a service has a match-all `any` rule.
+Sustained `not_allowed` from tunnel traffic is expected behavior, not a loader or map-seeding failure.
 
 ## Drop counters and sampling
 
