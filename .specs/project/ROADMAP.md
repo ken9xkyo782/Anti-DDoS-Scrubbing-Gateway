@@ -93,9 +93,14 @@
 
 ### Features
 
-**Allow-rule matching & rate-limit** - PLANNED
-- First-match by ascending `priority`, terminal verdict, early-exit on `rule_count`
-- Per-CPU aggregate token buckets (`rate_limit_state`); `rate_limit_drop`, no fall-through
+**Allow-rule matching & rate-limit** - IN PROGRESS (spec APPROVED + context)
+- First-match by ascending `priority`, terminal verdict, early-exit on `rule_count`; no match (incl. zero rules) = `not_allowed` — enabled services become **default-deny**
+- Per-CPU aggregate token buckets (`rate_limit_state`, unslotted); `rate_limit_drop`, no fall-through; NULL quota = unlimited, 0 = block
+- Slotted `rule_block_map` (≤16/service, pinned-slot read, fail-closed `map_error`); wires frozen ABI indices 9/10; seed-helper interim writer (D-SLRD-1 posture); migrates the 34-case suite; marked admit→redirect seam for M3 #4
+- Spec `spec.md` (ARL-01..25; A-ARL-1..8); context `context.md` (**D-ARL-1** strict `any` = {tcp,udp,icmp} — other IPv4 protos always `not_allowed`, no tunnel/IPsec in v1; **D-ARL-2** buckets reset on config swap; AD-018); `design.md` + rendered diagrams (rule-stage flow + map layout)
+- Design (AD-019): `src/rules.h` = stage + M4 build contract; blocks **pre-sorted asc priority** (position = match order, no `priority` in kernel); lazy version-reset `PERCPU_HASH` buckets (zero worker plumbing); **rate÷nCPU** split via rodata `rl_ncpus` (node admit never exceeds configured rate); `bps` map unit = bytes/sec; `rl_config.test_no_refill` + CPU-pinned runner = deterministic dp-unit buckets. Kernel semantics web-verified (per-CPU-hash current-CPU access + zero-fill on create)
+- Tasks `tasks.md` (T1–T5; all 25 reqs mapped): **T1** contracts+maps+verifier de-risk (map-in-map HASH inner + bounded loop proven at load, fallback documented) · **T2** match engine + wire-in + 34-case migration · **T3** per-CPU buckets + lazy version reset + deterministic mode · **T4** loader match-all seed + `rl_ncpus` + live smoke (full gate) · **T5** TESTING.md/README `[P]`. Baseline **B=34**; T2 ≥42; T3 ≥49
+- Requires SLRD + drop-reason counters executed (both VERIFIED); rule shape mirrors SRL `allow_rule` (contractual, no DB read); design + tasks APPROVED → next: **Execute**
 
 **Whitelist/VIP (scoped) & VIP ceiling** - PLANNED
 - Bloom → LPM keyed by `service_id`+source CIDR (no cross-service bypass)

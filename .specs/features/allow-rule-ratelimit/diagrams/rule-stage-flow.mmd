@@ -1,0 +1,25 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart TD
+    hit(["Enabled service hit<br/>(service_lookup_redirect, SLRD)"]) --> blk{"rule_block_map[pinned slot]<br/>lookup service_id"}
+    blk -- "slot inner missing" --> me["DROP map_error<br/>fail-closed (ARL-19)"]
+    blk -- "no block / rule_count == 0" --> na["DROP not_allowed<br/>default-deny (ARL-06)"]
+    blk -- block --> loop["for i &lt; min(rule_count, 16)<br/>pre-sorted asc priority (ARL-07)"]
+    loop --> en{"rules[i] ENABLED?"}
+    en -- no --> next["i++"]
+    en -- yes --> pm{"proto match?<br/>any = {tcp,udp,icmp} strict (D-ARL-1)"}
+    pm -- no --> next
+    pm -- yes --> ports{"src &amp; dst port in range?<br/>wildcard = 0..65535 (ARL-04)"}
+    ports -- no --> next
+    next --> loop
+    loop -- exhausted --> na
+    ports -- "yes — FIRST MATCH, terminal (AD-004)" --> q{"pps/bps configured?"}
+    q -- neither --> admit["admit_clean(meta)<br/>ARL-24 seam → redirect_out"]
+    q -- "any set" --> bkt["rate_limit_state[(svc, i)] per-CPU bucket<br/>version mismatch → reinit full burst (D-ARL-2)"]
+    bkt --> tok{"every configured dim<br/>has tokens?"}
+    tok -- "yes — consume both" --> admit
+    tok -- "no — consume neither (ARL-12)" --> rl["DROP rate_limit_drop<br/>terminal, NO fall-through (ARL-10)"]
+
+    classDef dropped fill:#f59e0b,stroke:#d97706,color:#ffffff
+    classDef clean fill:#10b981,stroke:#059669,color:#ffffff
+    class me,na,rl dropped
+    class admit clean

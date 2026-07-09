@@ -1,0 +1,36 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    subgraph hotpath ["Hot path — xdp_gateway.bpf.c + rules.h"]
+        direction TB
+        gw["xdp_gateway<br/>parse + slot pin"] --> svc["service_lookup_redirect"]
+        svc -->|"enabled hit"| stage["allow_rule_stage (NEW)<br/>first-match + buckets"]
+        stage -->|admit| seam["admit_clean<br/>ARL-24 seam — M3#4 ladder"]
+        seam --> rdo["redirect_out"]
+    end
+
+    subgraph cfg ["Config maps — slotted (AD-005)"]
+        direction TB
+        ac["active_config<br/>active_slot · version"]
+        smap["service_map<br/>ARRAY_OF_MAPS[2] · LPM inners"]
+        rbm["rule_block_map (NEW)<br/>ARRAY_OF_MAPS[2] · HASH inners<br/>rule_block_0 / rule_block_1<br/>service_id → rule_block{version, count, rules[16]}"]
+    end
+
+    subgraph rt ["Runtime maps — unslotted (§8.3)"]
+        direction TB
+        rls["rate_limit_state (NEW)<br/>PERCPU_HASH (svc,idx) → bucket<br/>cfg_version ≠ block.version → lazy reset"]
+        rlc["rl_config (NEW)<br/>test_no_refill knob"]
+        cm["counter_map + drop_ringbuf<br/>indices 9 not_allowed · 10 rate_limit_drop"]
+        dm["tx_devmap → OUT"]
+    end
+
+    gw -.->|"pin slot once"| ac
+    svc -.-> smap
+    stage -.->|"pinned slot"| rbm
+    stage -.-> rls
+    stage -.-> rlc
+    stage -.->|"record_drop(9|10)"| cm
+    rdo -.-> dm
+    rbm -.-|"block.version drives reset (D-ARL-2)"| rls
+
+    classDef newmap fill:#4f46e5,stroke:#3730a3,color:#ffffff
+    class rbm,rls,rlc,stage newmap
