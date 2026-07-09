@@ -1,0 +1,48 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart TD
+    entry(["whitelist_miss()<br/>seam B → deny_filter_stage(ctx, meta, slot, bl_flags)"]) --> hardAmp{"UDP && src port in<br/>hardcoded amp set? (D-BLK-1)"}
+    hardAmp -- "yes" --> ampDrop["bl_state = AMP_HARDCODED<br/>record_drop(7 udp_amplification_drop)"]
+    hardAmp -- "no" --> bogon{"bogon_src(src)?<br/>compile-time IANA ranges"}
+    bogon -- "yes" --> bogonDrop["bl_state = BOGON<br/>record_drop(4 bogon_drop)"]
+    bogon -- "no" --> bitmap{"UDP && bit set in<br/>udp_blocked_port_bitmap[slot]?"}
+    bitmap -- "yes" --> bmDrop["bl_state = AMP_BITMAP<br/>record_drop(7 udp_amplification_drop)"]
+    bitmap -- "no" --> gblGate{"gbl_meta[slot]<br/>GBL_F_ACTIVE?"}
+
+    subgraph globalBl ["global blacklist (bloom → LPM)"]
+        gblBloom{"bloom peek src/24<br/>(skip if GBL_F_HAS_BROAD)"}
+        gblLpm{"LPM confirm {32, src}?"}
+        gblBloom -- "hit / skipped" --> gblLpm
+        gblLpm -- "miss + bloom consulted" --> gblFp["bloom_stats[GLOBAL]++"]
+    end
+
+    gblGate -- "yes" --> gblBloom
+    gblGate -- "no" --> sblGate
+    gblBloom -- "miss" --> sblGate
+    gblLpm -- "hit" --> blDrop["bl_state = GLOBAL_HIT<br/>record_drop(8 blacklist_drop)"]
+    gblFp --> sblGate
+
+    subgraph serviceBl ["service blacklist (scoped bloom → LPM)"]
+        sblBloom{"bloom peek {svc, src/24}<br/>(skip if BL_F_HAS_BROAD)"}
+        sblLpm{"LPM confirm {64, svc, src}?"}
+        sblBloom -- "hit / skipped" --> sblLpm
+        sblLpm -- "miss + bloom consulted" --> sblFp["bloom_stats[SERVICE]++"]
+    end
+
+    sblGate{"service_val.bl_flags<br/>BL_F_ACTIVE?"} -- "yes" --> sblBloom
+    sblGate -- "no" --> clean["bl_state = CLEAN"]
+    sblBloom -- "miss" --> clean
+    sblLpm -- "hit" --> sblDrop["bl_state = SERVICE_HIT<br/>record_drop(8 blacklist_drop)"]
+    sblFp --> clean
+
+    clean --> rules["allow_rule_stage()<br/>(existing, unchanged)"]
+
+    mapErr["any structural map failure →<br/>record_drop(15 map_error)"]
+
+    style ampDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style bogonDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style bmDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style blDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style sblDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style mapErr fill:#fff7ed,stroke:#f59e0b,color:#7c2d12
+    style clean fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    style rules fill:#ecfdf5,stroke:#10b981,color:#064e3b

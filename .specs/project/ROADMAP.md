@@ -112,9 +112,14 @@
 - Tasks `tasks.md` drafted (T1–T5; all 25 reqs mapped, baseline **B=50**): **T1** contracts+maps+bloom-composition de-risk (51) · **T2** scoped match stage+wire-in+seams (≥60) · **T3** VIP ceiling bucket, terminal idx 14 (≥66) · **T4** loader env-driven seed+live smoke (full gate) · **T5** docs `[P]`. Only T5 parallel (T1–T3 share files; T4 smoke not parallel-safe)
 - ARL executed → **A-WLV-8 execute gate satisfied**; reuses AD-019 bucket/determinism patterns; design + tasks APPROVED → next: **Execute**
 
-**Blacklist (bloom + LPM)** - PLANNED
-- Global + service blacklist via bloom → LPM; `blacklist_drop`; `bloom_hit_lpm_miss` counter
-- Hardcoded UDP amplification ports, bogon check, dynamic blocked-port bitmap
+**Blacklist (bloom + LPM)** - IN PROGRESS (spec + context + design + tasks APPROVED; Execute next)
+- Global + service blacklist via bloom → LPM at WLV seam B (whitelist-miss path); global = all services, service = scoped by `service_id` key (BL-02 posture); wires frozen ABI indices 4/7/8 (`bogon_drop`/`udp_amplification_drop`/`blacklist_drop`); global maps sized to the 1M-entry envelope
+- Hardcoded UDP amplification ports (compile-time **full set incl. 53/123** — D-BLK-1; resolver/NTP tenants whitelist upstreams), bogon check (compile-time IANA set — forces documented dp-unit source migration off RFC 5737), dynamic blocked-port bitmap (slotted config; **seed-only v1 writer** — D-BLK-2, control-plane writer deferred)
+- `bloom_hit_lpm_miss` exact per-CPU counter outside `counter_map` (covers whitelist + both blacklist blooms; dpstat gains a new surface); whitelist hit bypasses the whole stage (§6.5 VIP exception)
+- Spec `spec.md` (BLK-01..26); context `context.md` (D-BLK-1..2, A-BLK-1..8 — AD-022); `design.md` + rendered diagrams (deny-stage flow + map layout)
+- Design (AD-023): pure-code amp/bogon checks; global bloom = /24 buckets + 16..23 expansion band + slot-level `GBL_F_HAS_BROAD` escape + builder fill invariant; 1M LPM footprint measured at gated `make blbulk`; service pair = AD-021 verbatim gated by `service_val.bl_flags` pad byte; bitmap = ARRAY inner 1024×u64; per-stage `bloom_stats` PERCPU_ARRAY[3] + dpstat section (bump only when bloom consulted); `pkt_meta.bl_state`; BLK-24 migration via named non-bogon source constants. 3 kernel semantics web-verified (bloom 7/5 sizing; LPM NO_PREALLOC/kmalloc + ~670ns @1M Cloudflare; ARRAY inner)
+- Tasks `tasks.md` drafted (T1–T8; all 26 reqs mapped, baseline **B=68**): **T1** contracts+maps+1M load de-risk (68 unchanged) · **T2** `[P]` bogon-space suite migration (verdict-neutral, 68 unchanged) · **T3** amp/bogon/bitmap + seam-B wire (≥78) · **T4** blacklist bands + exact `bloom_stats` (≥88) · **T5** loader seed+smoke (full) · **T6** dpstat FP section · **T7** gated `blbulk` 1M + footprint · **T8** docs. Only T2 parallel; T5/T7 privileged
+- Requires WLV executed first (**satisfied** — WLV VERIFIED); consumes SRL `BlacklistEntry` rows contractually (maps = M4 build contract)
 
 **Fairness & bandwidth reservation (8.4)** - PLANNED
 - 2-tier committed (global + spin_lock) / burst (per-CPU) buckets per service

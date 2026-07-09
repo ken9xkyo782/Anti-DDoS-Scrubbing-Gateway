@@ -1,0 +1,37 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    stage["deny_filter_stage()<br/>src/blacklist.h<br/>(pinned active_slot)"]
+
+    subgraph slotted ["slotted config (double-buffer, M4 build contract)"]
+        gblBloom["global_blacklist_bloom<br/>ARRAY_OF_MAPS[2] → BLOOM_FILTER<br/>value __be32 src/24 · 2M · 5 hashes<br/>~2 MiB/slot"]
+        gblLpm["global_blacklist_lpm<br/>ARRAY_OF_MAPS[2] → LPM_TRIE<br/>key {prefixlen, src} · 1M · NO_PREALLOC"]
+        gblMeta["gbl_meta<br/>ARRAY[2] by slot<br/>GBL_F_ACTIVE | GBL_F_HAS_BROAD"]
+        sblBloom["service_blacklist_bloom<br/>ARRAY_OF_MAPS[2] → BLOOM_FILTER<br/>value {svc, src/24} 8B · 64K · 5 hashes"]
+        sblLpm["service_blacklist_lpm<br/>ARRAY_OF_MAPS[2] → LPM_TRIE<br/>key {prefixlen, svc, src} ≥32 · 64K"]
+        bitmap["udp_blocked_port_bitmap<br/>ARRAY_OF_MAPS[2] → ARRAY<br/>1024 × __u64 = 65536 bits · 8 KiB/slot"]
+    end
+
+    subgraph runtime ["unslotted runtime (pinned for dpstat)"]
+        bloomStats["bloom_stats<br/>PERCPU_ARRAY[3]<br/>WHITELIST | GLOBAL | SERVICE<br/>bloom_hit_lpm_miss, exact"]
+    end
+
+    subgraph inline ["compile-time (no maps)"]
+        ampSet["hardcoded amp ports (D-BLK-1)<br/>17 19 53 111 123 137 161 389<br/>520 1900 5353 11211"]
+        bogonSet["bogon ranges (A-BLK-1)<br/>IANA special-purpose IPv4"]
+    end
+
+    svcVal["service_val.bl_flags<br/>(pad byte, size 8 frozen)<br/>BL_F_ACTIVE | BL_F_HAS_BROAD"]
+    wl["whitelist_stage (WLV)<br/>bloom FP → bloom_stats[WHITELIST]"]
+
+    stage --> gblMeta --> gblBloom --> gblLpm
+    stage --> sblBloom --> sblLpm
+    stage --> bitmap
+    stage --> ampSet
+    stage --> bogonSet
+    svcVal --> stage
+    stage --> bloomStats
+    wl --> bloomStats
+
+    style bloomStats fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    style ampSet fill:#fffbeb,stroke:#f59e0b,color:#78350f
+    style bogonSet fill:#fffbeb,stroke:#f59e0b,color:#78350f
