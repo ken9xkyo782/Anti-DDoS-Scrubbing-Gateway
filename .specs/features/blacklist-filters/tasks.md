@@ -1,7 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters — Tasks
 
 **Design**: `.specs/features/blacklist-filters/design.md` (AD-023, APPROVED)
-**Status**: Executing (2026-07-09) — T1, T2, T3 complete
+**Status**: Executing (2026-07-09) — T1, T2, T3, T4 complete
 **Baseline**: dp-unit suite **B = 68** (post-WLV, re-verified 2026-07-09: `make test` → 68 passed).
 WLV is Executed/VERIFIED, so the A-BLK-5 execute gate is **satisfied**.
 **Tools (per STATE Preferences)**: Skill `coding-guidelines` on all C/XDP code tasks (T1–T7); no
@@ -204,12 +204,19 @@ completes)
 
 **Done when**:
 
-- [ ] All T3-level expectations still pass (empty blacklists ⇒ bands inactive ⇒ verdicts identical)
-- [ ] Scope + precedence + FP + escape + fail-closed cases above all pass
-- [ ] FP counter is **exact** (deterministic: N induced FPs read exactly N) and lives outside
+- [x] All T3-level expectations still pass (empty blacklists ⇒ bands inactive ⇒ verdicts identical)
+- [x] Scope + precedence + FP + escape + fail-closed cases above all pass
+- [x] FP counter is **exact** (deterministic: N induced FPs read exactly N) and lives outside
       `counter_map` (drop-reason rows untouched — BLK-18/22)
-- [ ] Gate check passes: `make test`
-- [ ] Test count: **≥ 88** pass (T3's N + ~10 new; exact N recorded on completion)
+- [x] Gate check passes: `make test`
+- [x] Test count: **91** pass (T3's N + 10 new plus whitelist FP assertion; exact N recorded on completion)
+
+**Completion (2026-07-09)**: Added global and service bloom→LPM bands plus exact per-stage
+`bloom_stats` accounting, including WLV's deferred whitelist FP bump. RED check failed on the
+whitelist FP assertion before implementation. Gate `cd data-plane && make test` → **91 passed**;
+`make bpf` rebuilt the normal object successfully. Structural fail-closed coverage uses missing
+global/service LPM inners; the `gbl_meta` lookup guard exists, but valid `ARRAY` slots are not
+deletable by design.
 
 **Tests**: dp-unit
 **Gate**: quick

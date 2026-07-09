@@ -93,6 +93,7 @@ _Static_assert(sizeof(struct gbl_meta) == 4,
 
 #ifdef __BPF__
 #include <linux/bpf.h>
+#include <linux/errno.h>
 #include <linux/in.h>
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
@@ -299,13 +300,103 @@ static __always_inline int bl_record_drop(struct pkt_meta *meta, __u8 state,
 	return record_drop(meta, reason);
 }
 
+static __always_inline struct sbl_bloom_key sbl_bloom_key(__u32 service_id,
+							  __be32 src)
+{
+	struct sbl_bloom_key key = {
+		.service_id = bpf_htonl(service_id),
+		.src24 = src & bpf_htonl(BL_SRC24_MASK),
+	};
+
+	return key;
+}
+
+static __always_inline int gbl_bloom_maybe(__u32 slot, __be32 src,
+					   int *maybe)
+{
+	__be32 key = src & bpf_htonl(BL_SRC24_MASK);
+	void *inner = bpf_map_lookup_elem(&global_blacklist_bloom, &slot);
+	long ret;
+
+	if (!inner)
+		return -1;
+
+	ret = bpf_map_peek_elem(inner, &key);
+	if (ret == 0) {
+		*maybe = 1;
+		return 0;
+	}
+	if (ret == -ENOENT) {
+		*maybe = 0;
+		return 0;
+	}
+	return -1;
+}
+
+static __always_inline int gbl_lpm_hit(__u32 slot, __be32 src, int *hit)
+{
+	struct bl_lpm_key key = {
+		.prefixlen = 32,
+		.src = src,
+	};
+	void *inner = bpf_map_lookup_elem(&global_blacklist_lpm, &slot);
+	__u8 *present;
+
+	if (!inner)
+		return -1;
+
+	present = bpf_map_lookup_elem(inner, &key);
+	*hit = present != 0;
+	return 0;
+}
+
+static __always_inline int sbl_bloom_maybe(__u32 slot, __u32 service_id,
+					   __be32 src, int *maybe)
+{
+	struct sbl_bloom_key key = sbl_bloom_key(service_id, src);
+	void *inner = bpf_map_lookup_elem(&service_blacklist_bloom, &slot);
+	long ret;
+
+	if (!inner)
+		return -1;
+
+	ret = bpf_map_peek_elem(inner, &key);
+	if (ret == 0) {
+		*maybe = 1;
+		return 0;
+	}
+	if (ret == -ENOENT) {
+		*maybe = 0;
+		return 0;
+	}
+	return -1;
+}
+
+static __always_inline int sbl_lpm_hit(__u32 slot, __u32 service_id,
+				       __be32 src, int *hit)
+{
+	struct sbl_lpm_key key = {
+		.prefixlen = 64,
+		.service_id = bpf_htonl(service_id),
+		.src = src,
+	};
+	void *inner = bpf_map_lookup_elem(&service_blacklist_lpm, &slot);
+	__u8 *present;
+
+	if (!inner)
+		return -1;
+
+	present = bpf_map_lookup_elem(inner, &key);
+	*hit = present != 0;
+	return 0;
+}
+
 static __always_inline int deny_filter_stage(struct xdp_md *ctx,
 					     struct pkt_meta *meta, __u32 slot,
 					     __u8 bl_flags)
 {
 	__u16 sport = bpf_ntohs(meta->sport);
-
-	(void)bl_flags;
+	struct gbl_meta *global_meta;
 
 	if (meta->ip_proto == IPPROTO_UDP && amp_port_hardcoded(sport))
 		return bl_record_drop(meta, BL_STATE_AMP_HARDCODED,
@@ -334,6 +425,62 @@ static __always_inline int deny_filter_stage(struct xdp_md *ctx,
 					      DR_UDP_AMPLIFICATION_DROP);
 	}
 
+	global_meta = bpf_map_lookup_elem(&gbl_meta, &slot);
+	if (!global_meta)
+		return bl_record_drop(meta, BL_STATE_NONE, DR_MAP_ERROR);
+
+	if (global_meta->flags & GBL_F_ACTIVE) {
+		int bloom_consulted = 0;
+		int maybe = 1;
+		int hit = 0;
+
+		if (!(global_meta->flags & GBL_F_HAS_BROAD)) {
+			if (gbl_bloom_maybe(slot, meta->src_ip, &maybe) != 0)
+				return bl_record_drop(meta, BL_STATE_NONE,
+						      DR_MAP_ERROR);
+			if (!maybe)
+				goto service_blacklist;
+			bloom_consulted = 1;
+		}
+
+		if (gbl_lpm_hit(slot, meta->src_ip, &hit) != 0)
+			return bl_record_drop(meta, BL_STATE_NONE,
+					      DR_MAP_ERROR);
+		if (hit)
+			return bl_record_drop(meta, BL_STATE_GLOBAL_HIT,
+					      DR_BLACKLIST_DROP);
+		if (bloom_consulted)
+			bump_bloom_fp(BLOOM_FP_GLOBAL);
+	}
+
+service_blacklist:
+	if (bl_flags & BL_F_ACTIVE) {
+		int bloom_consulted = 0;
+		int maybe = 1;
+		int hit = 0;
+
+		if (!(bl_flags & BL_F_HAS_BROAD)) {
+			if (sbl_bloom_maybe(slot, meta->service_id,
+					    meta->src_ip, &maybe) != 0)
+				return bl_record_drop(meta, BL_STATE_NONE,
+						      DR_MAP_ERROR);
+			if (!maybe)
+				goto clean;
+			bloom_consulted = 1;
+		}
+
+		if (sbl_lpm_hit(slot, meta->service_id, meta->src_ip,
+				&hit) != 0)
+			return bl_record_drop(meta, BL_STATE_NONE,
+					      DR_MAP_ERROR);
+		if (hit)
+			return bl_record_drop(meta, BL_STATE_SERVICE_HIT,
+					      DR_BLACKLIST_DROP);
+		if (bloom_consulted)
+			bump_bloom_fp(BLOOM_FP_SERVICE);
+	}
+
+clean:
 	meta->bl_state = BL_STATE_CLEAN;
 	write_test_meta(meta);
 	return allow_rule_stage(ctx, meta, slot);

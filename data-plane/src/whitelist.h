@@ -366,6 +366,7 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 	__u64 pkt_len = data_end - data;
 	__u8 wl_flags = service->wl_flags;
 	__u8 bl_flags = service->bl_flags;
+	int bloom_consulted = 0;
 	int admitted;
 	int maybe = 1;
 	int hit = 0;
@@ -379,12 +380,16 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 			return record_drop(meta, DR_MAP_ERROR);
 		if (!maybe)
 			return whitelist_miss(ctx, meta, slot, bl_flags, 1);
+		bloom_consulted = 1;
 	}
 
 	if (wl_lpm_hit(slot, meta->service_id, meta->src_ip, &hit) != 0)
 		return record_drop(meta, DR_MAP_ERROR);
-	if (!hit)
+	if (!hit) {
+		if (bloom_consulted)
+			bump_bloom_fp(BLOOM_FP_WHITELIST);
 		return whitelist_miss(ctx, meta, slot, bl_flags, 1);
+	}
 
 	config = vip_config_lookup(slot, meta->service_id);
 	if (!config)

@@ -37,6 +37,18 @@ struct test_env {
 	int rule_block0_fd;
 	int rule_block1_fd;
 	int rule_block_map_fd;
+	int global_blacklist_bloom0_fd;
+	int global_blacklist_bloom1_fd;
+	int global_blacklist_bloom_fd;
+	int global_blacklist_lpm0_fd;
+	int global_blacklist_lpm1_fd;
+	int global_blacklist_lpm_fd;
+	int service_blacklist_bloom0_fd;
+	int service_blacklist_bloom1_fd;
+	int service_blacklist_bloom_fd;
+	int service_blacklist_lpm0_fd;
+	int service_blacklist_lpm1_fd;
+	int service_blacklist_lpm_fd;
 	int whitelist_bloom0_fd;
 	int whitelist_bloom1_fd;
 	int whitelist_bloom_fd;
@@ -59,6 +71,8 @@ struct test_env {
 	int sample_config_fd;
 	int sample_bucket_fd;
 	int sample_stats_fd;
+	int gbl_meta_fd;
+	int bloom_stats_fd;
 	int possible_cpus;
 };
 
@@ -107,6 +121,30 @@ static int env_open(struct test_env *env)
 	env->rule_block0_fd = bpf_map__fd(env->skel->maps.rule_block_0);
 	env->rule_block1_fd = bpf_map__fd(env->skel->maps.rule_block_1);
 	env->rule_block_map_fd = bpf_map__fd(env->skel->maps.rule_block_map);
+	env->global_blacklist_bloom0_fd =
+		bpf_map__fd(env->skel->maps.global_blacklist_bloom_0);
+	env->global_blacklist_bloom1_fd =
+		bpf_map__fd(env->skel->maps.global_blacklist_bloom_1);
+	env->global_blacklist_bloom_fd =
+		bpf_map__fd(env->skel->maps.global_blacklist_bloom);
+	env->global_blacklist_lpm0_fd =
+		bpf_map__fd(env->skel->maps.global_blacklist_lpm_0);
+	env->global_blacklist_lpm1_fd =
+		bpf_map__fd(env->skel->maps.global_blacklist_lpm_1);
+	env->global_blacklist_lpm_fd =
+		bpf_map__fd(env->skel->maps.global_blacklist_lpm);
+	env->service_blacklist_bloom0_fd =
+		bpf_map__fd(env->skel->maps.service_blacklist_bloom_0);
+	env->service_blacklist_bloom1_fd =
+		bpf_map__fd(env->skel->maps.service_blacklist_bloom_1);
+	env->service_blacklist_bloom_fd =
+		bpf_map__fd(env->skel->maps.service_blacklist_bloom);
+	env->service_blacklist_lpm0_fd =
+		bpf_map__fd(env->skel->maps.service_blacklist_lpm_0);
+	env->service_blacklist_lpm1_fd =
+		bpf_map__fd(env->skel->maps.service_blacklist_lpm_1);
+	env->service_blacklist_lpm_fd =
+		bpf_map__fd(env->skel->maps.service_blacklist_lpm);
 	env->whitelist_bloom0_fd = bpf_map__fd(env->skel->maps.whitelist_bloom_0);
 	env->whitelist_bloom1_fd = bpf_map__fd(env->skel->maps.whitelist_bloom_1);
 	env->whitelist_bloom_fd = bpf_map__fd(env->skel->maps.whitelist_bloom);
@@ -132,10 +170,24 @@ static int env_open(struct test_env *env)
 	env->sample_config_fd = bpf_map__fd(env->skel->maps.sample_config);
 	env->sample_bucket_fd = bpf_map__fd(env->skel->maps.sample_bucket);
 	env->sample_stats_fd = bpf_map__fd(env->skel->maps.sample_stats);
+	env->gbl_meta_fd = bpf_map__fd(env->skel->maps.gbl_meta);
+	env->bloom_stats_fd = bpf_map__fd(env->skel->maps.bloom_stats);
 	if (env->prog_fd < 0 || env->counter_fd < 0 || env->meta_fd < 0 ||
 	    env->service_inner0_fd < 0 || env->service_inner1_fd < 0 ||
 	    env->service_map_fd < 0 || env->rule_block0_fd < 0 ||
 	    env->rule_block1_fd < 0 || env->rule_block_map_fd < 0 ||
+	    env->global_blacklist_bloom0_fd < 0 ||
+	    env->global_blacklist_bloom1_fd < 0 ||
+	    env->global_blacklist_bloom_fd < 0 ||
+	    env->global_blacklist_lpm0_fd < 0 ||
+	    env->global_blacklist_lpm1_fd < 0 ||
+	    env->global_blacklist_lpm_fd < 0 ||
+	    env->service_blacklist_bloom0_fd < 0 ||
+	    env->service_blacklist_bloom1_fd < 0 ||
+	    env->service_blacklist_bloom_fd < 0 ||
+	    env->service_blacklist_lpm0_fd < 0 ||
+	    env->service_blacklist_lpm1_fd < 0 ||
+	    env->service_blacklist_lpm_fd < 0 ||
 	    env->whitelist_bloom0_fd < 0 || env->whitelist_bloom1_fd < 0 ||
 	    env->whitelist_bloom_fd < 0 || env->whitelist_lpm0_fd < 0 ||
 	    env->whitelist_lpm1_fd < 0 || env->whitelist_lpm_fd < 0 ||
@@ -148,7 +200,8 @@ static int env_open(struct test_env *env)
 	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
 	    env->trigger_fd < 0 ||
 	    env->ringbuf_fd < 0 || env->sample_config_fd < 0 ||
-	    env->sample_bucket_fd < 0 || env->sample_stats_fd < 0) {
+	    env->sample_bucket_fd < 0 || env->sample_stats_fd < 0 ||
+	    env->gbl_meta_fd < 0 || env->bloom_stats_fd < 0) {
 		fprintf(stderr, "failed to resolve BPF fds\n");
 		xdp_gateway_test_bpf__destroy(env->skel);
 		return -1;
@@ -204,6 +257,11 @@ static int reset_observability(struct test_env *env)
 			err = -1;
 	}
 
+	for (key = 0; !err && key < BLOOM_STAT_MAX; key++) {
+		if (bpf_map_update_elem(env->bloom_stats_fd, &key, zero_counts, 0) != 0)
+			err = -1;
+	}
+
 	free(zero_buckets);
 	free(zero_counts);
 	return err;
@@ -243,6 +301,42 @@ static int clear_whitelist_lpm_map(int fd)
 	}
 
 	return errno == ENOENT ? 0 : -1;
+}
+
+static int clear_global_blacklist_lpm_map(int fd)
+{
+	struct bl_lpm_key key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int clear_service_blacklist_lpm_map(int fd)
+{
+	struct sbl_lpm_key key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int reset_gbl_meta_map(int fd)
+{
+	struct gbl_meta zero = {};
+
+	for (__u32 key = 0; key < SERVICE_SLOTS; key++) {
+		if (bpf_map_update_elem(fd, &key, &zero, 0) != 0)
+			return -1;
+	}
+
+	return 0;
 }
 
 static int reset_blocked_port_bitmap_map(int fd)
@@ -314,8 +408,13 @@ static int reset_config(struct test_env *env)
 	    clear_service_map(env->service_inner1_fd) != 0 ||
 	    clear_rule_block_map(env->rule_block0_fd) != 0 ||
 	    clear_rule_block_map(env->rule_block1_fd) != 0 ||
+	    clear_global_blacklist_lpm_map(env->global_blacklist_lpm0_fd) != 0 ||
+	    clear_global_blacklist_lpm_map(env->global_blacklist_lpm1_fd) != 0 ||
+	    clear_service_blacklist_lpm_map(env->service_blacklist_lpm0_fd) != 0 ||
+	    clear_service_blacklist_lpm_map(env->service_blacklist_lpm1_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm0_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm1_fd) != 0 ||
+	    reset_gbl_meta_map(env->gbl_meta_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap0_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap1_fd) != 0 ||
 	    clear_vip_config_map(env->vip_config0_fd) != 0 ||
@@ -360,6 +459,50 @@ static int rule_block_fd_for_slot(struct test_env *env, __u32 slot)
 		return env->rule_block0_fd;
 	if (slot == 1)
 		return env->rule_block1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int global_blacklist_bloom_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->global_blacklist_bloom0_fd;
+	if (slot == 1)
+		return env->global_blacklist_bloom1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int global_blacklist_lpm_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->global_blacklist_lpm0_fd;
+	if (slot == 1)
+		return env->global_blacklist_lpm1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int service_blacklist_bloom_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->service_blacklist_bloom0_fd;
+	if (slot == 1)
+		return env->service_blacklist_bloom1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int service_blacklist_lpm_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->service_blacklist_lpm0_fd;
+	if (slot == 1)
+		return env->service_blacklist_lpm1_fd;
 
 	errno = EINVAL;
 	return -1;
@@ -470,6 +613,141 @@ static int set_service_wl_flags(struct test_env *env, __u32 slot,
 
 	errno = ENOENT;
 	return -1;
+}
+
+static int set_service_bl_flags(struct test_env *env, __u32 slot,
+				__u32 service_id, __u8 bl_flags)
+{
+	struct service_key key;
+	struct service_key next_key;
+	struct service_key *prev = NULL;
+	struct service_val val;
+	int fd = service_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	while (bpf_map_get_next_key(fd, prev, &next_key) == 0) {
+		key = next_key;
+		prev = &key;
+		if (bpf_map_lookup_elem(fd, &key, &val) != 0)
+			return -1;
+		if (val.service_id != service_id)
+			continue;
+
+		val.bl_flags = bl_flags;
+		return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+	}
+
+	errno = ENOENT;
+	return -1;
+}
+
+static int set_gbl_meta_flags(struct test_env *env, __u32 slot, __u8 flags)
+{
+	struct gbl_meta meta = {
+		.flags = flags,
+	};
+
+	return bpf_map_update_elem(env->gbl_meta_fd, &slot, &meta, 0);
+}
+
+static int seed_global_blacklist_bloom_key(struct test_env *env, __u32 slot,
+					   __u32 src_host)
+{
+	__be32 key = htonl(src_host & BL_SRC24_MASK);
+	int fd = global_blacklist_bloom_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, NULL, &key, BPF_ANY);
+}
+
+static int seed_global_blacklist_lpm_entry(struct test_env *env, __u32 slot,
+					   __u32 cidr_host,
+					   __u32 prefixlen)
+{
+	__u8 present = 1;
+	struct bl_lpm_key key = {
+		.prefixlen = prefixlen,
+		.src = htonl(cidr_host & ipv4_prefix_mask(prefixlen)),
+	};
+	int fd = global_blacklist_lpm_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &key, &present, BPF_ANY);
+}
+
+static int seed_global_blacklist(struct test_env *env, __u32 slot,
+				 __u32 cidr_host, __u32 prefixlen)
+{
+	__u8 flags = GBL_F_ACTIVE;
+
+	if (prefixlen >= GBL_BLOOM_PREFIX &&
+	    seed_global_blacklist_bloom_key(env, slot, cidr_host) != 0)
+		return -1;
+	if (prefixlen < GBL_BLOOM_PREFIX)
+		flags |= GBL_F_HAS_BROAD;
+	if (seed_global_blacklist_lpm_entry(env, slot, cidr_host,
+					    prefixlen) != 0)
+		return -1;
+	return set_gbl_meta_flags(env, slot, flags);
+}
+
+static int seed_service_blacklist_bloom_key(struct test_env *env, __u32 slot,
+					    __u32 service_id,
+					    __u32 src_host)
+{
+	struct sbl_bloom_key key = {
+		.service_id = htonl(service_id),
+		.src24 = htonl(src_host & BL_SRC24_MASK),
+	};
+	int fd = service_blacklist_bloom_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, NULL, &key, BPF_ANY);
+}
+
+static int seed_service_blacklist_lpm_entry(struct test_env *env, __u32 slot,
+					    __u32 service_id,
+					    __u32 cidr_host,
+					    __u32 prefixlen)
+{
+	__u8 present = 1;
+	struct sbl_lpm_key key = {
+		.prefixlen = 32 + prefixlen,
+		.service_id = htonl(service_id),
+		.src = htonl(cidr_host & ipv4_prefix_mask(prefixlen)),
+	};
+	int fd = service_blacklist_lpm_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &key, &present, BPF_ANY);
+}
+
+static int seed_service_blacklist(struct test_env *env, __u32 slot,
+				  __u32 service_id, __u32 cidr_host,
+				  __u32 prefixlen)
+{
+	__u8 flags = BL_F_ACTIVE;
+
+	if (prefixlen >= SBL_BLOOM_PREFIX &&
+	    seed_service_blacklist_bloom_key(env, slot, service_id,
+					     cidr_host) != 0)
+		return -1;
+	if (prefixlen < SBL_BLOOM_PREFIX)
+		flags |= BL_F_HAS_BROAD;
+	if (seed_service_blacklist_lpm_entry(env, slot, service_id,
+					     cidr_host, prefixlen) != 0)
+		return -1;
+	return set_service_bl_flags(env, slot, service_id, flags);
 }
 
 static int seed_whitelist_bloom_key(struct test_env *env, __u32 slot,
@@ -696,6 +974,28 @@ static int read_sample_stat(struct test_env *env, enum sample_stat stat,
 		return -1;
 
 	err = bpf_map_lookup_elem(env->sample_stats_fd, &key, values);
+	if (err == 0) {
+		*sum = 0;
+		for (int i = 0; i < env->possible_cpus; i++)
+			*sum += values[i];
+	}
+
+	free(values);
+	return err;
+}
+
+static int read_bloom_stat(struct test_env *env, enum bloom_fp_stage stage,
+			   __u64 *sum)
+{
+	__u64 *values;
+	__u32 key = (__u32)stage;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->bloom_stats_fd, &key, values);
 	if (err == 0) {
 		*sum = 0;
 		for (int i = 0; i < env->possible_cpus; i++)
@@ -940,6 +1240,25 @@ static int expect_sample_stat(struct test_env *env, enum sample_stat stat,
 		return 0;
 
 	fprintf(stderr, "sample_stat[%u]: got %llu, want %llu\n", stat,
+		(unsigned long long)got, (unsigned long long)want);
+	return -1;
+}
+
+static int expect_bloom_stat(struct test_env *env, enum bloom_fp_stage stage,
+			     __u64 want)
+{
+	__u64 got = 0;
+
+	if (read_bloom_stat(env, stage, &got) != 0) {
+		fprintf(stderr, "bloom_stat[%u]: read failed: %s\n", stage,
+			strerror(errno));
+		return -1;
+	}
+
+	if (got == want)
+		return 0;
+
+	fprintf(stderr, "bloom_stat[%u]: got %llu, want %llu\n", stage,
 		(unsigned long long)got, (unsigned long long)want);
 	return -1;
 }
@@ -1602,6 +1921,8 @@ static int test_whitelist_bloom_false_positive_clean_miss(void)
 		err = read_meta(&env, &meta);
 	if (!err)
 		err = expect_u8("wl_state", meta.wl_state, WL_STATE_MISS);
+	if (!err)
+		err = expect_bloom_stat(&env, BLOOM_FP_WHITELIST, 1);
 
 	env_close(&env);
 	return err;
@@ -2243,6 +2564,421 @@ static int test_blacklist_missing_bitmap_inner_fails_closed(void)
 		err = seed_default_enabled_service(&env);
 	if (!err && bpf_map_delete_elem(env.blocked_port_bitmap_fd, &slot) != 0) {
 		fprintf(stderr, "failed to delete bitmap outer slot: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_global_hit_drops_two_services(void)
+{
+	struct pkt_frame frame_a;
+	struct pkt_frame frame_b;
+	struct test_env env;
+	__u32 service_b_dst = htonl(0x0a000003);
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame_a) != 0 ||
+	    set_ipv4_addrs(&frame_a, TEST_SRC_PUB_C, 0x0a000002) != 0 ||
+	    build_default_udp_frame(&frame_b) != 0 ||
+	    set_ipv4_addrs(&frame_b, TEST_SRC_PUB_C, 0x0a000003) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_service(&env, 0, service_b_dst, 32, 77, 1);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, TEST_SRC_PUB_C, 32);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame_a, &retval);
+	if (!err)
+		err = expect_u32("service A retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_GLOBAL_HIT);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame_b, &retval);
+	if (!err)
+		err = expect_u32("service B retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 2);
+	if (!err)
+		err = expect_bloom_stat(&env, BLOOM_FP_GLOBAL, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_service_scoped_hit_does_not_cross_service(void)
+{
+	struct pkt_frame frame_a;
+	struct pkt_frame frame_b;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 service_b_dst = htonl(0x0a000003);
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame_a) != 0 ||
+	    set_ipv4_addrs(&frame_a, TEST_SRC_PUB_A, 0x0a000002) != 0 ||
+	    build_default_udp_frame(&frame_b) != 0 ||
+	    set_ipv4_addrs(&frame_b, TEST_SRC_PUB_A, 0x0a000003) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_service(&env, 0, service_b_dst, 32, 77, 1);
+	if (!err)
+		err = seed_match_all_rule_block(&env, 0, 77);
+	if (!err)
+		err = seed_service_blacklist(&env, 0, DEFAULT_SERVICE_ID,
+					     TEST_SRC_PUB_A, 32);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame_a, &retval);
+	if (!err)
+		err = expect_u32("service A retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_SERVICE_HIT);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame_b, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, 77, 0);
+	if (!err)
+		err = expect_u8("service B bl_state", meta.bl_state, BL_STATE_CLEAN);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_clean_miss_reaches_rules_with_active_global(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, TEST_SRC_PUB_C, 32);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("bl_state", meta.bl_state, BL_STATE_CLEAN);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 0);
+	if (!err)
+		err = expect_bloom_stat(&env, BLOOM_FP_GLOBAL, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_whitelist_over_global_blacklist(void)
+{
+	struct vip_config config = vip_pps_config(100);
+	struct pkt_frame frame_a;
+	struct pkt_frame frame_b;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 service_b_dst = htonl(0x0a000003);
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame_a) != 0 ||
+	    set_ipv4_addrs(&frame_a, TEST_SRC_PUB_A, 0x0a000002) != 0 ||
+	    build_default_udp_frame(&frame_b) != 0 ||
+	    set_ipv4_addrs(&frame_b, TEST_SRC_PUB_A, 0x0a000003) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_service(&env, 0, service_b_dst, 32, 77, 1);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID,
+				     TEST_SRC_PUB_A_NET24, 24, &config);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, TEST_SRC_PUB_A, 32);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame_a, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("service A bl_state", meta.bl_state, BL_STATE_NONE);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame_b, &retval);
+	if (!err)
+		err = expect_u32("service B retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 1);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_GLOBAL_HIT);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_global_precedes_service_attribution(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, TEST_SRC_PUB_A, 32);
+	if (!err)
+		err = seed_service_blacklist(&env, 0, DEFAULT_SERVICE_ID,
+					     TEST_SRC_PUB_A, 32);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 1);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_GLOBAL_HIT);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_global_bloom_false_positive_counts(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist_bloom_key(&env, 0, TEST_SRC_PUB_A);
+	if (!err)
+		err = set_gbl_meta_flags(&env, 0, GBL_F_ACTIVE);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("bl_state", meta.bl_state, BL_STATE_CLEAN);
+	if (!err)
+		err = expect_bloom_stat(&env, BLOOM_FP_GLOBAL, 1);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_service_bloom_false_positive_counts(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_service_blacklist_bloom_key(&env, 0,
+						       DEFAULT_SERVICE_ID,
+						       TEST_SRC_PUB_A);
+	if (!err)
+		err = set_service_bl_flags(&env, 0, DEFAULT_SERVICE_ID,
+					   BL_F_ACTIVE);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("bl_state", meta.bl_state, BL_STATE_CLEAN);
+	if (!err)
+		err = expect_bloom_stat(&env, BLOOM_FP_SERVICE, 1);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_global_broad_escape_hits_without_fp(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_C, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, 0xb9000000, 8);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_bl_state(&env, BL_STATE_GLOBAL_HIT);
+	if (!err)
+		err = expect_bloom_stat(&env, BLOOM_FP_GLOBAL, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_missing_global_lpm_inner_fails_closed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 slot = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist_bloom_key(&env, 0, TEST_SRC_PUB_A);
+	if (!err)
+		err = set_gbl_meta_flags(&env, 0, GBL_F_ACTIVE);
+	if (!err && bpf_map_delete_elem(env.global_blacklist_lpm_fd, &slot) != 0) {
+		fprintf(stderr, "failed to delete global LPM outer slot: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_blacklist_missing_service_lpm_inner_fails_closed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 slot = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_service_blacklist_bloom_key(&env, 0,
+						       DEFAULT_SERVICE_ID,
+						       TEST_SRC_PUB_A);
+	if (!err)
+		err = set_service_bl_flags(&env, 0, DEFAULT_SERVICE_ID,
+					   BL_F_ACTIVE);
+	if (!err && bpf_map_delete_elem(env.service_blacklist_lpm_fd, &slot) != 0) {
+		fprintf(stderr, "failed to delete service LPM outer slot: %s\n",
 			strerror(errno));
 		err = -1;
 	}
@@ -4062,6 +4798,26 @@ int main(void)
 			  test_blacklist_icmp_skips_port_filters },
 			{ "blacklist missing bitmap inner fails closed",
 			  test_blacklist_missing_bitmap_inner_fails_closed },
+			{ "blacklist global hit drops two services",
+			  test_blacklist_global_hit_drops_two_services },
+			{ "blacklist service scoped hit does not cross service",
+			  test_blacklist_service_scoped_hit_does_not_cross_service },
+			{ "blacklist clean miss reaches rules with active global",
+			  test_blacklist_clean_miss_reaches_rules_with_active_global },
+			{ "blacklist whitelist over global blacklist",
+			  test_blacklist_whitelist_over_global_blacklist },
+			{ "blacklist global precedes service attribution",
+			  test_blacklist_global_precedes_service_attribution },
+			{ "blacklist global bloom false positive counts",
+			  test_blacklist_global_bloom_false_positive_counts },
+			{ "blacklist service bloom false positive counts",
+			  test_blacklist_service_bloom_false_positive_counts },
+			{ "blacklist global broad escape hits without fp",
+			  test_blacklist_global_broad_escape_hits_without_fp },
+			{ "blacklist missing global LPM inner fails closed",
+			  test_blacklist_missing_global_lpm_inner_fails_closed },
+			{ "blacklist missing service LPM inner fails closed",
+			  test_blacklist_missing_service_lpm_inner_fails_closed },
 			{ "VIP ceiling PPS deterministic terminal drop",
 			  test_vip_ceiling_pps_deterministic_terminal_drop },
 			{ "VIP ceiling PPS zero blocks",
