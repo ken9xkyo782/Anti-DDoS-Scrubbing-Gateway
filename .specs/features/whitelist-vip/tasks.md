@@ -62,18 +62,22 @@ LPM-inner precedent (SLRD), `_Static_assert` size-pinning convention
 
 **Done when**:
 
-- [ ] `whitelist.h` matches the design Data Models field-for-field (incl. bytes/sec `bps` note,
+- [x] `whitelist.h` matches the design Data Models field-for-field (incl. bytes/sec `bps` note,
       M4 contract comments: bloom replace-only + meta-equal params, superset-of-LPM invariant,
       D-WLV-1 builder rules)
-- [ ] `sizeof(struct service_val) == 8` and `sizeof(struct pkt_meta) == 32` static-asserted
+- [x] `sizeof(struct service_val) == 8` and `sizeof(struct pkt_meta) == 32` static-asserted
       (existing asserts still pass)
-- [ ] `sizeof(struct vip_config) == 24` and `sizeof(struct wl_bloom_key) == 8` static-asserted
-- [ ] Program **loads** with all whitelist maps present (bloom-as-static-inner proven or fallback
+- [x] `sizeof(struct vip_config) == 24` and `sizeof(struct wl_bloom_key) == 8` static-asserted
+- [x] Program **loads** with all whitelist maps present (bloom-as-static-inner proven or fallback
       rung documented here + in STATE)
-- [ ] De-risk dp-unit case: userspace push → lookup round-trip on a slot-selected bloom inner
+- [x] De-risk dp-unit case: userspace push → lookup round-trip on a slot-selected bloom inner
       (definitely-absent vs maybe-present asserted)
-- [ ] Gate check passes: `make bpf skel loader dpstat && make test`
-- [ ] Test count: **51** pass (50 baseline unchanged + 1 de-risk case)
+- [x] Gate check passes: `make bpf skel loader dpstat && make test`
+- [x] Test count: **51** pass (50 baseline unchanged + 1 de-risk case)
+
+**Completion (2026-07-09)**: primary rung proven — static `BLOOM_FILTER` inners inside
+`ARRAY_OF_MAPS` loaded, XDP `bpf_map_peek_elem` on the slot-selected inner passed, and
+`cd data-plane && make bpf skel loader dpstat && make test` → **51 passed**.
 
 **Tests**: dp-unit
 **Gate**: build + quick

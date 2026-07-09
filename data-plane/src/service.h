@@ -13,8 +13,12 @@ struct service_key {
 struct service_val {
 	__u32 service_id;
 	__u8 enabled;
-	__u8 _pad[3];
+	__u8 wl_flags;
+	__u8 _pad[2];
 };
+
+_Static_assert(sizeof(struct service_val) == 8,
+	       "service_val size is part of the M4 map contract");
 
 struct active_config {
 	__u32 active_slot;

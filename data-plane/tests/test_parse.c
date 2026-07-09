@@ -18,6 +18,7 @@
 #include "pkt_meta.h"
 #include "rules.h"
 #include "service.h"
+#include "whitelist.h"
 #include "xdp_gateway.test.skel.h"
 
 #define DEFAULT_SERVICE_ID 42
@@ -34,6 +35,16 @@ struct test_env {
 	int rule_block0_fd;
 	int rule_block1_fd;
 	int rule_block_map_fd;
+	int whitelist_bloom0_fd;
+	int whitelist_bloom1_fd;
+	int whitelist_bloom_fd;
+	int whitelist_lpm0_fd;
+	int whitelist_lpm1_fd;
+	int whitelist_lpm_fd;
+	int vip_config0_fd;
+	int vip_config1_fd;
+	int vip_config_map_fd;
+	int vip_ceiling_state_fd;
 	int rate_limit_state_fd;
 	int rl_config_fd;
 	int active_config_fd;
@@ -91,6 +102,16 @@ static int env_open(struct test_env *env)
 	env->rule_block0_fd = bpf_map__fd(env->skel->maps.rule_block_0);
 	env->rule_block1_fd = bpf_map__fd(env->skel->maps.rule_block_1);
 	env->rule_block_map_fd = bpf_map__fd(env->skel->maps.rule_block_map);
+	env->whitelist_bloom0_fd = bpf_map__fd(env->skel->maps.whitelist_bloom_0);
+	env->whitelist_bloom1_fd = bpf_map__fd(env->skel->maps.whitelist_bloom_1);
+	env->whitelist_bloom_fd = bpf_map__fd(env->skel->maps.whitelist_bloom);
+	env->whitelist_lpm0_fd = bpf_map__fd(env->skel->maps.whitelist_lpm_0);
+	env->whitelist_lpm1_fd = bpf_map__fd(env->skel->maps.whitelist_lpm_1);
+	env->whitelist_lpm_fd = bpf_map__fd(env->skel->maps.whitelist_lpm);
+	env->vip_config0_fd = bpf_map__fd(env->skel->maps.vip_config_0);
+	env->vip_config1_fd = bpf_map__fd(env->skel->maps.vip_config_1);
+	env->vip_config_map_fd = bpf_map__fd(env->skel->maps.vip_config_map);
+	env->vip_ceiling_state_fd = bpf_map__fd(env->skel->maps.vip_ceiling_state);
 	env->rate_limit_state_fd = bpf_map__fd(env->skel->maps.rate_limit_state);
 	env->rl_config_fd = bpf_map__fd(env->skel->maps.rl_config);
 	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
@@ -104,6 +125,11 @@ static int env_open(struct test_env *env)
 	    env->service_inner0_fd < 0 || env->service_inner1_fd < 0 ||
 	    env->service_map_fd < 0 || env->rule_block0_fd < 0 ||
 	    env->rule_block1_fd < 0 || env->rule_block_map_fd < 0 ||
+	    env->whitelist_bloom0_fd < 0 || env->whitelist_bloom1_fd < 0 ||
+	    env->whitelist_bloom_fd < 0 || env->whitelist_lpm0_fd < 0 ||
+	    env->whitelist_lpm1_fd < 0 || env->whitelist_lpm_fd < 0 ||
+	    env->vip_config0_fd < 0 || env->vip_config1_fd < 0 ||
+	    env->vip_config_map_fd < 0 || env->vip_ceiling_state_fd < 0 ||
 	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
 	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
 	    env->trigger_fd < 0 ||
@@ -376,6 +402,16 @@ static int set_bad_reason_trigger(struct test_env *env, __u32 enabled)
 	__u32 key = 0;
 
 	return bpf_map_update_elem(env->trigger_fd, &key, &enabled, 0);
+}
+
+static struct wl_bloom_key test_wl_bloom_key(__u32 src24)
+{
+	struct wl_bloom_key key = {
+		.service_id = htonl(WL_TEST_BLOOM_SERVICE_ID),
+		.src24 = htonl(src24),
+	};
+
+	return key;
 }
 
 static int read_counter(struct test_env *env, enum drop_reason reason, __u64 *sum)
@@ -891,6 +927,26 @@ static int test_config_maps_load(void)
 	if (!err)
 		err = expect_fd("rule_block_map", env.rule_block_map_fd);
 	if (!err)
+		err = expect_fd("whitelist_bloom_0", env.whitelist_bloom0_fd);
+	if (!err)
+		err = expect_fd("whitelist_bloom_1", env.whitelist_bloom1_fd);
+	if (!err)
+		err = expect_fd("whitelist_bloom", env.whitelist_bloom_fd);
+	if (!err)
+		err = expect_fd("whitelist_lpm_0", env.whitelist_lpm0_fd);
+	if (!err)
+		err = expect_fd("whitelist_lpm_1", env.whitelist_lpm1_fd);
+	if (!err)
+		err = expect_fd("whitelist_lpm", env.whitelist_lpm_fd);
+	if (!err)
+		err = expect_fd("vip_config_0", env.vip_config0_fd);
+	if (!err)
+		err = expect_fd("vip_config_1", env.vip_config1_fd);
+	if (!err)
+		err = expect_fd("vip_config_map", env.vip_config_map_fd);
+	if (!err)
+		err = expect_fd("vip_ceiling_state", env.vip_ceiling_state_fd);
+	if (!err)
 		err = expect_fd("rate_limit_state", env.rate_limit_state_fd);
 	if (!err)
 		err = expect_fd("rl_config", env.rl_config_fd);
@@ -908,6 +964,67 @@ static int test_config_maps_load(void)
 		err = expect_fd("sample_bucket", env.sample_bucket_fd);
 	if (!err)
 		err = expect_fd("sample_stats", env.sample_stats_fd);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_whitelist_bloom_round_trip(void)
+{
+	struct wl_bloom_key present =
+		test_wl_bloom_key(WL_TEST_BLOOM_PRESENT_SRC24);
+	struct wl_bloom_key absent =
+		test_wl_bloom_key(WL_TEST_BLOOM_ABSENT_SRC24);
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err &&
+	    bpf_map_update_elem(env.whitelist_bloom0_fd, NULL, &present,
+				BPF_ANY) != 0) {
+		fprintf(stderr, "failed to push whitelist bloom key: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err && bpf_map_lookup_elem(env.whitelist_bloom0_fd, NULL,
+				       &present) != 0) {
+		fprintf(stderr, "present bloom lookup failed: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err && bpf_map_lookup_elem(env.whitelist_bloom0_fd, NULL,
+				       &absent) == 0) {
+		fprintf(stderr, "absent bloom lookup unexpectedly matched\n");
+		err = -1;
+	}
+	if (!err && errno != ENOENT) {
+		fprintf(stderr, "absent bloom lookup errno: got %d, want ENOENT\n",
+			errno);
+		err = -1;
+	}
+	if (!err)
+		err = set_bad_reason_trigger(&env, 2);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("present retval", retval, XDP_PASS);
+	if (!err)
+		err = set_bad_reason_trigger(&env, 3);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("absent retval", retval, XDP_PASS);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 0);
 
 	env_close(&env);
 	return err;
@@ -2462,10 +2579,12 @@ static int pin_to_cpu0(void)
 
 int main(void)
 {
-	const struct test_case tests[] = {
-		{ "config maps load", test_config_maps_load },
-		{ "drop reason ABI exposes 16 slots",
-		  test_drop_reason_abi_exposes_16_slots },
+		const struct test_case tests[] = {
+			{ "config maps load", test_config_maps_load },
+			{ "whitelist bloom round trip",
+			  test_whitelist_bloom_round_trip },
+			{ "drop reason ABI exposes 16 slots",
+			  test_drop_reason_abi_exposes_16_slots },
 		{ "ringbuf delivers after test_run",
 		  test_ringbuf_delivers_after_test_run },
 		{ "sampling disabled keeps counters exact",
