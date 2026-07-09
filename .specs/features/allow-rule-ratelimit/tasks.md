@@ -132,10 +132,10 @@ TTL/checksum assertions green with the rule stage live (ARL-23's runtime half, D
 
 **Done when**:
 
-- [ ] `make bpf skel loader dpstat` green; loader attaches native/DRV fail-loud
-- [ ] Gate check passes: `make test && sudo make smoke` (dp-integration: frame forwarded `IN→OUT`,
+- [x] `make bpf skel loader dpstat` green; loader attaches native/DRV fail-loud
+- [x] Gate check passes: `make test && sudo make smoke` (dp-integration: frame forwarded `IN→OUT`,
       TTL + IPv4 checksum byte-identical, with the match-all block seeded)
-- [ ] Test count: T3's N pass (unchanged)
+- [x] Test count: 50 pass (unchanged)
 
 **Tests**: dp-integration (existing smoke re-validated; not parallel-safe)
 **Gate**: full

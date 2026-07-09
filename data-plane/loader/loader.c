@@ -14,6 +14,7 @@
 #include <bpf/libbpf.h>
 
 #include "drop_event.h"
+#include "rules.h"
 #include "service.h"
 #include "xdp_gateway.skel.h"
 
@@ -286,6 +287,66 @@ static int seed_sample_config(struct xdp_gateway_bpf *skel)
 	return 0;
 }
 
+static int configure_rodata(struct xdp_gateway_bpf *skel)
+{
+	int possible_cpus = libbpf_num_possible_cpus();
+
+	if (possible_cpus <= 0) {
+		fprintf(stderr, "failed to detect possible CPUs for rl_ncpus\n");
+		return -1;
+	}
+
+	skel->rodata->rl_ncpus = (__u32)possible_cpus;
+	printf("configured rl_ncpus=%u\n", skel->rodata->rl_ncpus);
+	return 0;
+}
+
+static struct rule_entry loader_match_all_rule(void)
+{
+	struct rule_entry rule = {
+		.src_lo = 0,
+		.src_hi = UINT16_MAX,
+		.dst_lo = 0,
+		.dst_hi = UINT16_MAX,
+		.proto = RULE_PROTO_ANY,
+		.flags = RULE_F_ENABLED,
+	};
+
+	return rule;
+}
+
+static int seed_rule_block_fd(int fd, const char *name, __u32 service_id)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+
+	block.rules[0] = loader_match_all_rule();
+	if (fd < 0 ||
+	    bpf_map_update_elem(fd, &service_id, &block, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed %s with match-all rule: %s\n",
+			name, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int seed_match_all_rule_blocks(struct xdp_gateway_bpf *skel,
+				      __u32 service_id)
+{
+	if (seed_rule_block_fd(bpf_map__fd(skel->maps.rule_block_0),
+			       "rule_block_0", service_id) != 0 ||
+	    seed_rule_block_fd(bpf_map__fd(skel->maps.rule_block_1),
+			       "rule_block_1", service_id) != 0)
+		return -1;
+
+	printf("seeded rule_block_0/1 with match-all rule for service_id=%u\n",
+	       service_id);
+	return 0;
+}
+
 static int seed_service_from_env(struct xdp_gateway_bpf *skel)
 {
 	const char *service_dest = getenv("SERVICE_DEST");
@@ -317,7 +378,7 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel)
 
 	printf("seeded service_inner_0 with SERVICE_DEST=%s service_id=1 enabled=1\n",
 	       service_dest);
-	return 0;
+	return seed_match_all_rule_blocks(skel, val.service_id);
 }
 
 int main(int argc, char **argv)
@@ -363,6 +424,11 @@ int main(int argc, char **argv)
 	}
 
 	if (set_observability_pin_paths(skel) != 0) {
+		err = 1;
+		goto cleanup;
+	}
+
+	if (configure_rodata(skel) != 0) {
 		err = 1;
 		goto cleanup;
 	}
