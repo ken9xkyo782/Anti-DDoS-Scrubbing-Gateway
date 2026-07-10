@@ -144,13 +144,17 @@ reason attribution asserted at each exhaustion point (13 → 11 → 12).
 **Requirement**: FAIR-05, FAIR-24 (dp-unit half), FAIR-26
 
 **Done when**:
-- [ ] Scenario: A seeded tight (small committed/burst/cap), B seeded normal; interleaved
+- [x] Scenario: A seeded tight (small committed/burst/cap), B seeded normal; interleaved
       A-flood/B-committed frames → **every** B packet admits `FAIR_COMMITTED`; A shows
       `ingress_cap_drop`, `service_ceiling_drop`, `congestion_drop` at the seeded exhaustion
       points with exact counter deltas
-- [ ] A second pass with A's flood removed proves B's admit count identical (flood changed
+- [x] A second pass with A's flood removed proves B's admit count identical (flood changed
       nothing for B — CM-04 stated as an assertion)
-- [ ] Full suite green: `make test` → **≥ 110** (T3 count intact + ≥3 scenario cases)
+- [x] Full suite green: `make test` → **≥ 110** (T3 count intact + ≥3 scenario cases)
+
+**Completion (2026-07-10)**: Three deterministic A/B scenarios prove committed isolation at cap,
+ceiling, and node-headroom exhaustion. Each compares the interleaved B admission count against a
+no-flood control. `cd data-plane && make test` → **110 passed**.
 
 **Tests**: dp-unit · **Gate**: quick
 **Commit**: `test(fairness): deterministic fairness scenario proving committed isolation`

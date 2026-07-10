@@ -26,6 +26,8 @@
 #define DEFAULT_SERVICE_ID 42
 #define DEFAULT_SRC htonl(TEST_SRC_PUB_A)
 #define DEFAULT_DST htonl(0x0a000002)
+#define FAIR_TEST_B_SERVICE_ID 43
+#define FAIR_TEST_B_DST htonl(0x0a000003)
 
 struct test_env {
 	struct xdp_gateway_test_bpf *skel;
@@ -2386,6 +2388,225 @@ static int test_fair_zero_node_headroom_sheds_all_burst(void)
 		err = expect_counter(&env, DR_CONGESTION_DROP, 2);
 	if (!err)
 		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int setup_fairness_pair(struct test_env *env,
+				       const struct fair_config *a_config,
+				       const struct fair_config *b_config,
+				       const struct fair_node_config *node)
+{
+	if (reset_maps(env) != 0 || set_rl_config(env, 1) != 0 ||
+	    seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0 ||
+	    seed_service(env, 0, FAIR_TEST_B_DST, 32, FAIR_TEST_B_SERVICE_ID, 1) != 0 ||
+	    seed_fair_config(env, 0, DEFAULT_SERVICE_ID, a_config) != 0 ||
+	    seed_fair_config(env, 0, FAIR_TEST_B_SERVICE_ID, b_config) != 0 ||
+	    seed_fair_node_config(env, 0, node) != 0 ||
+	    seed_match_all_rule_block(env, 0, DEFAULT_SERVICE_ID) != 0 ||
+	    seed_match_all_rule_block(env, 0, FAIR_TEST_B_SERVICE_ID) != 0)
+		return -1;
+	return set_active(env, 0, 1);
+}
+
+static int run_fairness_b_committed(struct test_env *env,
+					    const struct pkt_frame *frame,
+					    __u64 *admitted)
+{
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	err = run_frame_current_maps(env, frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(env, &meta, FAIR_TEST_B_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("B fair_state", meta.fair_state, FAIR_COMMITTED);
+	if (!err)
+		(*admitted)++;
+	return err;
+}
+
+static int test_fairness_cap_isolates_committed_neighbor(void)
+{
+	struct pkt_frame a_frame;
+	struct pkt_frame b_frame;
+	struct test_env env;
+	struct fair_config a_config;
+	struct fair_config b_config;
+	struct fair_node_config node = {
+		.version = 1,
+		.headroom_bps = 0,
+	};
+	struct pkt_meta meta;
+	__u64 flooded_b = 0;
+	__u64 clear_b = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&a_frame) != 0 ||
+	    build_default_udp_frame(&b_frame) != 0 ||
+	    set_ipv4_addrs(&b_frame, TEST_SRC_PUB_B, 0x0a000003) != 0)
+		return -1;
+	a_config = fair_ladder_config(1, a_frame.len, 0);
+	a_config.cap_pps = 1;
+	a_config.cap_bps = a_frame.len * 2;
+	b_config = fair_ladder_config(1, b_frame.len * 4, 0);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fairness_pair(&env, &a_config, &b_config, &node);
+	for (int i = 0; !err && i < 2; i++) {
+		err = run_frame_current_maps(&env, &a_frame, &retval);
+		if (!err && i == 0)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i == 1)
+			err = expect_u32("cap flood retval", retval, XDP_DROP);
+		if (!err && i == 1)
+			err = read_meta(&env, &meta);
+		if (!err && i == 1)
+			err = expect_u8("cap flood fair_state", meta.fair_state,
+					FAIR_CAP_DROP);
+		if (!err)
+			err = run_fairness_b_committed(&env, &b_frame, &flooded_b);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 0);
+	if (!err)
+		err = expect_counter(&env, DR_CONGESTION_DROP, 0);
+
+	if (!err)
+		err = setup_fairness_pair(&env, &a_config, &b_config, &node);
+	for (int i = 0; !err && i < 2; i++)
+		err = run_fairness_b_committed(&env, &b_frame, &clear_b);
+	if (!err)
+		err = expect_u64("cap flood B admission parity", flooded_b, clear_b);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fairness_ceiling_isolates_committed_neighbor(void)
+{
+	struct pkt_frame a_frame;
+	struct pkt_frame b_frame;
+	struct test_env env;
+	struct fair_config a_config;
+	struct fair_config b_config;
+	struct fair_node_config node = {
+		.version = 1,
+	};
+	struct pkt_meta meta;
+	__u64 flooded_b = 0;
+	__u64 clear_b = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&a_frame) != 0 ||
+	    build_default_udp_frame(&b_frame) != 0 ||
+	    set_ipv4_addrs(&b_frame, TEST_SRC_PUB_B, 0x0a000003) != 0)
+		return -1;
+	a_config = fair_ladder_config(1, a_frame.len, a_frame.len);
+	b_config = fair_ladder_config(1, b_frame.len * 6, 0);
+	node.headroom_bps = a_frame.len;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fairness_pair(&env, &a_config, &b_config, &node);
+	for (int i = 0; !err && i < 3; i++) {
+		err = run_frame_current_maps(&env, &a_frame, &retval);
+		if (!err && i < 2)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i == 2)
+			err = expect_u32("ceiling flood retval", retval, XDP_DROP);
+		if (!err && i == 2)
+			err = read_meta(&env, &meta);
+		if (!err && i == 2)
+			err = expect_u8("ceiling flood fair_state", meta.fair_state,
+					FAIR_CEILING_DROP);
+		if (!err)
+			err = run_fairness_b_committed(&env, &b_frame, &flooded_b);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 0);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_CONGESTION_DROP, 0);
+
+	if (!err)
+		err = setup_fairness_pair(&env, &a_config, &b_config, &node);
+	for (int i = 0; !err && i < 3; i++)
+		err = run_fairness_b_committed(&env, &b_frame, &clear_b);
+	if (!err)
+		err = expect_u64("ceiling flood B admission parity", flooded_b, clear_b);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fairness_congestion_isolates_committed_neighbor(void)
+{
+	struct pkt_frame a_frame;
+	struct pkt_frame b_frame;
+	struct test_env env;
+	struct fair_config a_config;
+	struct fair_config b_config;
+	struct fair_node_config node = {
+		.version = 1,
+		.headroom_bps = 0,
+	};
+	struct pkt_meta meta;
+	__u64 flooded_b = 0;
+	__u64 clear_b = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&a_frame) != 0 ||
+	    build_default_udp_frame(&b_frame) != 0 ||
+	    set_ipv4_addrs(&b_frame, TEST_SRC_PUB_B, 0x0a000003) != 0)
+		return -1;
+	a_config = fair_ladder_config(1, 0, a_frame.len * 2);
+	b_config = fair_ladder_config(1, b_frame.len * 4, 0);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fairness_pair(&env, &a_config, &b_config, &node);
+	for (int i = 0; !err && i < 2; i++) {
+		err = run_frame_current_maps(&env, &a_frame, &retval);
+		if (!err)
+			err = expect_u32("congestion flood retval", retval, XDP_DROP);
+		if (!err)
+			err = read_meta(&env, &meta);
+		if (!err)
+			err = expect_u8("congestion flood fair_state", meta.fair_state,
+					FAIR_CONGESTION_DROP);
+		if (!err)
+			err = run_fairness_b_committed(&env, &b_frame, &flooded_b);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 0);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 0);
+	if (!err)
+		err = expect_counter(&env, DR_CONGESTION_DROP, 2);
+
+	if (!err)
+		err = setup_fairness_pair(&env, &a_config, &b_config, &node);
+	for (int i = 0; !err && i < 2; i++)
+		err = run_fairness_b_committed(&env, &b_frame, &clear_b);
+	if (!err)
+		err = expect_u64("congestion flood B admission parity", flooded_b,
+				clear_b);
 
 	env_close(&env);
 	return err;
@@ -5691,6 +5912,12 @@ int main(void)
 			  test_fair_version_flip_regrants_burst_once },
 			{ "fair zero node headroom sheds all burst",
 			  test_fair_zero_node_headroom_sheds_all_burst },
+			{ "fairness cap isolates committed neighbor",
+			  test_fairness_cap_isolates_committed_neighbor },
+			{ "fairness ceiling isolates committed neighbor",
+			  test_fairness_ceiling_isolates_committed_neighbor },
+			{ "fairness congestion isolates committed neighbor",
+			  test_fairness_congestion_isolates_committed_neighbor },
 			{ "whitelist bloom round trip",
 			  test_whitelist_bloom_round_trip },
 			{ "drop reason ABI exposes 16 slots",

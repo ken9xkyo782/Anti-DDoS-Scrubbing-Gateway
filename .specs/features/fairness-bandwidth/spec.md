@@ -446,7 +446,7 @@ for recomputing headroom on plan changes.
 | FAIR-02 | P1: Two-tier bucket | §8.4/TDD 4.3 spin-lock committed | Execute | Verified (T3) |
 | FAIR-03 | P1: Two-tier bucket | §8.4 burst tier, AD-019 split | Execute | Verified (T3) |
 | FAIR-04 | P1: Two-tier bucket | §10.2 idx 11 | Execute | Verified (T3) |
-| FAIR-05 | P1: Two-tier bucket | CM-04 isolation, §15 fairness | Spec | Pending |
+| FAIR-05 | P1: Two-tier bucket | CM-04 isolation, §15 fairness | Execute | Verified (T4) |
 | FAIR-06 | P1: Two-tier bucket | SRL-43 plan shapes | Execute | Verified (T3) |
 | FAIR-07 | P1: Two-tier bucket | §8.3 slotted config, D-ARL-2, fail-closed | Execute | Verified (T3) |
 | FAIR-08 | P1: Two-tier bucket | test hooks (D-PKT-4) | Execute | Verified (T3) |
@@ -465,9 +465,9 @@ for recomputing headroom on plan changes.
 | FAIR-21 | P1: Maps, gate & docs | AD-016/17 idx 11/12/13 | Execute | In progress (T2–T3 wired; T5 live pending) |
 | FAIR-22 | P1: Maps, gate & docs | spin-lock de-risk, A-FAIR-8 | Execute | Verified (T1) |
 | FAIR-23 | P1: Maps, gate & docs | D-SLRD-1 seed, post-BLK baseline | Spec | Pending |
-| FAIR-24 | P1: Maps, gate & docs | §15 fairness test = M3 gate | Spec | Pending |
+| FAIR-24 | P1: Maps, gate & docs | §15 fairness test = M3 gate | Execute | In progress (T4 dp-unit; T5 smoke pending) |
 | FAIR-25 | P1: Maps, gate & docs | AD-019 deterministic conventions | Execute | Verified (T3) |
-| FAIR-26 | P1: Maps, gate & docs | native mandate, baseline | Spec | Pending |
+| FAIR-26 | P1: Maps, gate & docs | native mandate, baseline | Execute | In progress (T4 quick; T5 native smoke pending) |
 | FAIR-27 | P1: Maps, gate & docs | §8.4.6 residual, A-PKT-2 TESTING.md | Spec | Pending |
 
 **Coverage:** 27 total, 0 mapped to tasks (Tasks phase pending), 27 unmapped ⚠️
