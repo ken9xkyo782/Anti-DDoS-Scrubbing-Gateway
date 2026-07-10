@@ -13,6 +13,7 @@ static __always_inline void write_test_meta(const struct pkt_meta *meta);
 #include "rules.h"
 #include "blacklist.h"
 #include "whitelist.h"
+#include "fairness.h"
 
 struct service_inner_map_def {
 	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
@@ -108,6 +109,23 @@ static __always_inline int test_whitelist_bloom_probe(struct pkt_meta *meta)
 #endif
 }
 
+static __always_inline int test_fair_spin_lock_probe(struct pkt_meta *meta)
+{
+#ifdef PKT_TEST_HOOKS
+	__u32 key = 0;
+	__u32 *trigger = bpf_map_lookup_elem(&test_trigger_map, &key);
+
+	if (!trigger || *trigger != FAIR_TEST_TRIGGER_SPIN_LOCK)
+		return -1;
+	if (fair_test_spin_lock_mutate() != 0)
+		return record_drop(meta, DR_MAP_ERROR);
+	return XDP_PASS;
+#else
+	(void)meta;
+	return -1;
+#endif
+}
+
 static __always_inline int redirect_out(struct pkt_meta *meta)
 {
 	meta->verdict = PKT_VERDICT_REDIRECT;
@@ -167,6 +185,9 @@ int xdp_gateway(struct xdp_md *ctx)
 	if (test_bad_reason_enabled())
 		return record_drop(&meta, (enum drop_reason)DROP_REASON_CAP);
 	test_ret = test_whitelist_bloom_probe(&meta);
+	if (test_ret >= 0)
+		return test_ret;
+	test_ret = test_fair_spin_lock_probe(&meta);
 	if (test_ret >= 0)
 		return test_ret;
 

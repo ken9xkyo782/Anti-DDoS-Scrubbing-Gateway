@@ -14,6 +14,7 @@
 
 #include "drop_reason.h"
 #include "drop_event.h"
+#include "fairness.h"
 #include "pkt_build.h"
 #include "pkt_meta.h"
 #include "rules.h"
@@ -62,6 +63,14 @@ struct test_env {
 	int vip_config1_fd;
 	int vip_config_map_fd;
 	int vip_ceiling_state_fd;
+	int fair_config0_fd;
+	int fair_config1_fd;
+	int fair_config_map_fd;
+	int fair_node_config_fd;
+	int svc_committed_state_fd;
+	int svc_burst_state_fd;
+	int node_burst_state_fd;
+	int service_ingress_cap_state_fd;
 	int rate_limit_state_fd;
 	int rl_config_fd;
 	int active_config_fd;
@@ -161,6 +170,16 @@ static int env_open(struct test_env *env)
 	env->vip_config1_fd = bpf_map__fd(env->skel->maps.vip_config_1);
 	env->vip_config_map_fd = bpf_map__fd(env->skel->maps.vip_config_map);
 	env->vip_ceiling_state_fd = bpf_map__fd(env->skel->maps.vip_ceiling_state);
+	env->fair_config0_fd = bpf_map__fd(env->skel->maps.fair_config_0);
+	env->fair_config1_fd = bpf_map__fd(env->skel->maps.fair_config_1);
+	env->fair_config_map_fd = bpf_map__fd(env->skel->maps.fair_config_map);
+	env->fair_node_config_fd = bpf_map__fd(env->skel->maps.fair_node_config);
+	env->svc_committed_state_fd =
+		bpf_map__fd(env->skel->maps.svc_committed_state);
+	env->svc_burst_state_fd = bpf_map__fd(env->skel->maps.svc_burst_state);
+	env->node_burst_state_fd = bpf_map__fd(env->skel->maps.node_burst_state);
+	env->service_ingress_cap_state_fd =
+		bpf_map__fd(env->skel->maps.service_ingress_cap_state);
 	env->rate_limit_state_fd = bpf_map__fd(env->skel->maps.rate_limit_state);
 	env->rl_config_fd = bpf_map__fd(env->skel->maps.rl_config);
 	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
@@ -196,6 +215,11 @@ static int env_open(struct test_env *env)
 	    env->blocked_port_bitmap_fd < 0 ||
 	    env->vip_config0_fd < 0 || env->vip_config1_fd < 0 ||
 	    env->vip_config_map_fd < 0 || env->vip_ceiling_state_fd < 0 ||
+	    env->fair_config0_fd < 0 || env->fair_config1_fd < 0 ||
+	    env->fair_config_map_fd < 0 || env->fair_node_config_fd < 0 ||
+	    env->svc_committed_state_fd < 0 || env->svc_burst_state_fd < 0 ||
+	    env->node_burst_state_fd < 0 ||
+	    env->service_ingress_cap_state_fd < 0 ||
 	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
 	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
 	    env->trigger_fd < 0 ||
@@ -924,11 +948,11 @@ static int set_rl_config(struct test_env *env, __u32 test_no_refill)
 	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
 }
 
-static int set_bad_reason_trigger(struct test_env *env, __u32 enabled)
+static int set_test_trigger(struct test_env *env, __u32 value)
 {
 	__u32 key = 0;
 
-	return bpf_map_update_elem(env->trigger_fd, &key, &enabled, 0);
+	return bpf_map_update_elem(env->trigger_fd, &key, &value, 0);
 }
 
 static struct wl_bloom_key test_wl_bloom_key(__u32 src24)
@@ -1155,6 +1179,16 @@ static int expect_u32(const char *label, __u32 got, __u32 want)
 		return 0;
 
 	fprintf(stderr, "%s: got %u, want %u\n", label, got, want);
+	return -1;
+}
+
+static int expect_u64(const char *label, __u64 got, __u64 want)
+{
+	if (got == want)
+		return 0;
+
+	fprintf(stderr, "%s: got %llu, want %llu\n", label,
+		(unsigned long long)got, (unsigned long long)want);
 	return -1;
 }
 
@@ -1469,13 +1503,52 @@ static int test_bad_reason_clamps_to_map_error(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_bad_reason_trigger(&env, 1);
+		err = set_test_trigger(&env, 1);
 	if (!err)
 		err = run_frame_current_maps(&env, &frame, &retval);
 	if (!err)
 		err = expect_u32("retval", retval, XDP_DROP);
 	if (!err)
 		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_committed_spin_lock_mutates_tokens(void)
+{
+	struct fair_committed_bucket bucket = {};
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 key = FAIR_TEST_LOCK_SERVICE_ID;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = bpf_map_update_elem(env.svc_committed_state_fd, &key, &bucket,
+					  BPF_ANY);
+	if (!err)
+		err = set_test_trigger(&env, FAIR_TEST_TRIGGER_SPIN_LOCK);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_PASS);
+	if (!err &&
+	    bpf_map_lookup_elem(env.svc_committed_state_fd, &key, &bucket) != 0) {
+		fprintf(stderr, "failed to read committed bucket: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+	if (!err)
+		err = expect_u64("committed lock tokens", bucket.tokens, 1);
 
 	env_close(&env);
 	return err;
@@ -1549,6 +1622,23 @@ static int test_config_maps_load(void)
 	if (!err)
 		err = expect_fd("vip_ceiling_state", env.vip_ceiling_state_fd);
 	if (!err)
+		err = expect_fd("fair_config_0", env.fair_config0_fd);
+	if (!err)
+		err = expect_fd("fair_config_1", env.fair_config1_fd);
+	if (!err)
+		err = expect_fd("fair_config_map", env.fair_config_map_fd);
+	if (!err)
+		err = expect_fd("fair_node_config", env.fair_node_config_fd);
+	if (!err)
+		err = expect_fd("svc_committed_state", env.svc_committed_state_fd);
+	if (!err)
+		err = expect_fd("svc_burst_state", env.svc_burst_state_fd);
+	if (!err)
+		err = expect_fd("node_burst_state", env.node_burst_state_fd);
+	if (!err)
+		err = expect_fd("service_ingress_cap_state",
+				env.service_ingress_cap_state_fd);
+	if (!err)
 		err = expect_fd("rate_limit_state", env.rate_limit_state_fd);
 	if (!err)
 		err = expect_fd("rl_config", env.rl_config_fd);
@@ -1614,13 +1704,13 @@ static int test_whitelist_bloom_round_trip(void)
 		err = -1;
 	}
 	if (!err)
-		err = set_bad_reason_trigger(&env, 2);
+		err = set_test_trigger(&env, 2);
 	if (!err)
 		err = run_frame_current_maps(&env, &frame, &retval);
 	if (!err)
 		err = expect_u32("present retval", retval, XDP_PASS);
 	if (!err)
-		err = set_bad_reason_trigger(&env, 3);
+		err = set_test_trigger(&env, 3);
 	if (!err)
 		err = run_frame_current_maps(&env, &frame, &retval);
 	if (!err)
@@ -4734,6 +4824,8 @@ int main(void)
 {
 		const struct test_case tests[] = {
 			{ "config maps load", test_config_maps_load },
+			{ "fair committed spin lock mutates tokens",
+			  test_fair_committed_spin_lock_mutates_tokens },
 			{ "whitelist bloom round trip",
 			  test_whitelist_bloom_round_trip },
 			{ "drop reason ABI exposes 16 slots",

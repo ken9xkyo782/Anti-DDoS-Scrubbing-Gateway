@@ -22,9 +22,12 @@ struct pkt_meta {
 	__u8 rule_idx;
 	__u8 wl_state;
 	__u8 bl_state;
+	/* Deliberate 32 -> 40 B growth for the fairness-stage test-hook ABI. */
+	__u8 fair_state;
+	__u8 _pad2[7];
 };
 
-_Static_assert(sizeof(struct pkt_meta) == 32,
+_Static_assert(sizeof(struct pkt_meta) == 40,
 	       "pkt_meta size is part of the test hook ABI");
 
 #endif

@@ -41,19 +41,23 @@ native/DRV, selecting the FAIR-22 rung fail-fast; grow `pkt_meta` 32→40.
 **Requirement**: FAIR-20, FAIR-22, FAIR-08 (field), A-FAIR-2/8
 
 **Done when**:
-- [ ] `struct fair_config` (40 B), `struct fair_node_config` (16 B),
+- [x] `struct fair_config` (40 B), `struct fair_node_config` (16 B),
       `struct fair_committed_bucket` (lock top-level, one per value) + static asserts;
       `FAIR_CONFIG_MAX_ENTRIES = 1024`, `FAIR_RATE_MAX = 16000000000ULL`, `fair_state` enum
       (`FAIR_NONE..FAIR_ERR`)
-- [ ] 6 maps defined: `fair_config_map` (AoM[2]/HASH), `fair_node_config` (ARRAY[2]),
+- [x] 6 maps defined: `fair_config_map` (AoM[2]/HASH), `fair_node_config` (ARRAY[2]),
       `svc_committed_state` (HASH+lock, prealloc), `svc_burst_state` (PERCPU_HASH),
       `node_burst_state` (PERCPU_ARRAY[1]), `service_ingress_cap_state` (PERCPU_HASH)
-- [ ] `pkt_meta` grows to 40 B (`fair_state` + `_pad2[7]`), assert migrated — deliberate growth
+- [x] `pkt_meta` grows to 40 B (`fair_state` + `_pad2[7]`), assert migrated — deliberate growth
       documented in a header comment
-- [ ] De-risk dp-unit case: test hook takes/releases the committed-bucket lock and mutates
+- [x] De-risk dp-unit case: test hook takes/releases the committed-bucket lock and mutates
       tokens (pure-ALU CS, `now` captured outside); **rung selection recorded** — if the verifier
       rejects, stop and document the fallback rung before proceeding (FAIR-22)
-- [ ] Gate: `make bpf skel loader dpstat` passes; `make test` → **92** (B+1, zero baseline churn)
+- [x] Gate: `make bpf skel loader dpstat` passes; `make test` → **92** (B+1, zero baseline churn)
+
+**Completion (2026-07-10)**: Primary BTF HASH + `bpf_spin_lock` rung loaded successfully. The
+dp-unit hook acquired/released the lock and incremented the committed token counter; no fallback
+rung was needed. `cd data-plane && make bpf skel loader dpstat && make test` → **92 passed**.
 
 **Tests**: dp-unit (de-risk case) · **Gate**: build + quick
 **Commit**: `feat(fairness): map contracts, pkt_meta growth and spin-lock de-risk`

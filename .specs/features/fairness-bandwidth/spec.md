@@ -449,7 +449,7 @@ for recomputing headroom on plan changes.
 | FAIR-05 | P1: Two-tier bucket | CM-04 isolation, §15 fairness | Spec | Pending |
 | FAIR-06 | P1: Two-tier bucket | SRL-43 plan shapes | Spec | Pending |
 | FAIR-07 | P1: Two-tier bucket | §8.3 slotted config, D-ARL-2, fail-closed | Spec | Pending |
-| FAIR-08 | P1: Two-tier bucket | test hooks (D-PKT-4) | Spec | Pending |
+| FAIR-08 | P1: Two-tier bucket | test hooks (D-PKT-4) | Execute | In progress (T1 field) |
 | FAIR-09 | P1: Node headroom | §8.4.2 headroom rate, §7.2 | Spec | Pending |
 | FAIR-10 | P1: Node headroom | §8.4 dual-draw burst | Spec | Pending |
 | FAIR-11 | P1: Node headroom | §10.2 idx 12, committed skips | Spec | Pending |
@@ -461,9 +461,9 @@ for recomputing headroom on plan changes.
 | FAIR-17 | P1: Ingress cap | §13/§11.1 destination-keyed | Spec | Pending |
 | FAIR-18 | P1: Ingress cap | cap-before-whitelist precedence | Spec | Pending |
 | FAIR-19 | P1: Ingress cap | fail-closed posture | Spec | Pending |
-| FAIR-20 | P1: Maps, gate & docs | §8.3 map groups, AD-005, M4 contract | Spec | Pending |
+| FAIR-20 | P1: Maps, gate & docs | §8.3 map groups, AD-005, M4 contract | Execute | Verified (T1) |
 | FAIR-21 | P1: Maps, gate & docs | AD-016/17 idx 11/12/13 | Spec | Pending |
-| FAIR-22 | P1: Maps, gate & docs | spin-lock de-risk, A-FAIR-8 | Spec | Pending |
+| FAIR-22 | P1: Maps, gate & docs | spin-lock de-risk, A-FAIR-8 | Execute | Verified (T1) |
 | FAIR-23 | P1: Maps, gate & docs | D-SLRD-1 seed, post-BLK baseline | Spec | Pending |
 | FAIR-24 | P1: Maps, gate & docs | §15 fairness test = M3 gate | Spec | Pending |
 | FAIR-25 | P1: Maps, gate & docs | AD-019 deterministic conventions | Spec | Pending |
