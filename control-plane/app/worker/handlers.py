@@ -3,12 +3,22 @@ from collections.abc import Awaitable, Callable
 from app.db.models import AgentJob, JobType
 from app.db.session import session_scope
 from app.worker.applier import Applier, load_service_config
+from app.worker.feed_runner import FeedRunner
 
 Handler = Callable[[AgentJob, Applier], Awaitable[None]]
 
 
 class NoHandlerError(Exception):
     pass
+
+
+_feed_runner: FeedRunner | None = None
+
+
+def configure_feed_runner(runner: FeedRunner | None) -> None:
+    """Install worker-lifetime feed dependencies until the coordinator owns wiring."""
+    global _feed_runner
+    _feed_runner = runner
 
 
 async def handle_service_update(
@@ -22,4 +32,26 @@ async def handle_service_update(
     await applier.apply(config)
 
 
-HANDLERS: dict[JobType, Handler] = {JobType.service_update: handle_service_update}
+async def handle_feed_sync(job: AgentJob, applier: Applier) -> None:
+    del applier
+    runner = _require_feed_runner()
+    await runner.handle_feed_sync(job)
+
+
+async def handle_global_deny_apply(job: AgentJob, applier: Applier) -> None:
+    del applier
+    runner = _require_feed_runner()
+    await runner.handle_global_deny_apply(job)
+
+
+def _require_feed_runner() -> FeedRunner:
+    if _feed_runner is None:
+        raise RuntimeError("feed runner dependencies are not configured")
+    return _feed_runner
+
+
+HANDLERS: dict[JobType, Handler] = {
+    JobType.service_update: handle_service_update,
+    JobType.feed_sync: handle_feed_sync,
+    JobType.global_deny_apply: handle_global_deny_apply,
+}
