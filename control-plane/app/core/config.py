@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     worker_backoff_max_seconds: float = Field(default=30.0, gt=0)
     worker_shutdown_grace_seconds: float = Field(default=10.0, gt=0)
 
+    feed_fetch_connect_timeout_seconds: float = Field(default=5.0, gt=0)
+    feed_fetch_read_timeout_seconds: float = Field(default=10.0, gt=0)
+    feed_fetch_write_timeout_seconds: float = Field(default=5.0, gt=0)
+    feed_fetch_pool_timeout_seconds: float = Field(default=5.0, gt=0)
+    feed_fetch_wall_timeout_seconds: float = Field(default=30.0, gt=0)
+    feed_fetch_max_decoded_body_bytes: int = Field(default=32 * 1024 * 1024, gt=0)
+
 
 @lru_cache
 def get_settings() -> Settings:
