@@ -1,0 +1,31 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    writer["seed helper (v1)<br/>M4 worker (authoritative)<br/>env: CAPACITY_BPS, FAIR_K,<br/>REF_PKT, COMMITTED/CEILING_BPS<br/>→ precomputes all budgets"]
+
+    subgraph cfg ["slotted config (double-buffer, M4 build contract)"]
+        fcm["fair_config_map<br/>ARRAY_OF_MAPS[2] of HASH 1024<br/>service_id → fair_config (40 B)<br/>{version, committed_bps, burst_bps,<br/>cap_bps, cap_pps}"]
+        fnc["fair_node_config<br/>ARRAY[2], key = slot<br/>{version, headroom_bps}"]
+    end
+
+    subgraph rt ["unslotted runtime state (§8.3 — never slotted)"]
+        cst["svc_committed_state<br/>HASH 1024 + bpf_spin_lock<br/>(BTF value, exact tokens)"]
+        bst["svc_burst_state<br/>PERCPU_HASH 1024 → rl_bucket"]
+        nbs["node_burst_state<br/>PERCPU_ARRAY[1] → rl_bucket"]
+        ics["service_ingress_cap_state<br/>PERCPU_HASH 1024 → rl_bucket<br/>(dual pps + bps)"]
+    end
+
+    subgraph stages ["src/fairness.h (hot path, pinned slot)"]
+        capStage["ingress_cap_stage()<br/>seam A"]
+        ladderStage["fair_admit_stage()<br/>@ admit_clean()"]
+    end
+
+    writer -- "build inactive slot,<br/>flip active_slot" --> cfg
+    fcm -- "cap budgets" --> capStage
+    fcm -- "ladder rates" --> ladderStage
+    fnc -- "headroom rate" --> ladderStage
+    capStage <--> ics
+    ladderStage <--> cst
+    ladderStage <--> bst
+    ladderStage <--> nbs
+    capStage -- "idx 13" --> cm["record_drop →<br/>counter_map 11/12/13<br/>+ ringbuf sampling<br/>(dpstat zero-change)"]
+    ladderStage -- "idx 11/12" --> cm

@@ -112,7 +112,7 @@
 - Tasks `tasks.md` drafted (T1–T5; all 25 reqs mapped, baseline **B=50**): **T1** contracts+maps+bloom-composition de-risk (51) · **T2** scoped match stage+wire-in+seams (≥60) · **T3** VIP ceiling bucket, terminal idx 14 (≥66) · **T4** loader env-driven seed+live smoke (full gate) · **T5** docs `[P]`. Only T5 parallel (T1–T3 share files; T4 smoke not parallel-safe)
 - ARL executed → **A-WLV-8 execute gate satisfied**; reuses AD-019 bucket/determinism patterns; design + tasks APPROVED → next: **Execute**
 
-**Blacklist (bloom + LPM)** - IN PROGRESS (spec + context + design + tasks APPROVED; Execute next)
+**Blacklist (bloom + LPM)** - VERIFIED (executed; `make test` → 91 passed)
 - Global + service blacklist via bloom → LPM at WLV seam B (whitelist-miss path); global = all services, service = scoped by `service_id` key (BL-02 posture); wires frozen ABI indices 4/7/8 (`bogon_drop`/`udp_amplification_drop`/`blacklist_drop`); global maps sized to the 1M-entry envelope
 - Hardcoded UDP amplification ports (compile-time **full set incl. 53/123** — D-BLK-1; resolver/NTP tenants whitelist upstreams), bogon check (compile-time IANA set — forces documented dp-unit source migration off RFC 5737), dynamic blocked-port bitmap (slotted config; **seed-only v1 writer** — D-BLK-2, control-plane writer deferred)
 - `bloom_hit_lpm_miss` exact per-CPU counter outside `counter_map` (covers whitelist + both blacklist blooms; dpstat gains a new surface); whitelist hit bypasses the whole stage (§6.5 VIP exception)
@@ -121,9 +121,15 @@
 - Tasks `tasks.md` drafted (T1–T8; all 26 reqs mapped, baseline **B=68**): **T1** contracts+maps+1M load de-risk (68 unchanged) · **T2** `[P]` bogon-space suite migration (verdict-neutral, 68 unchanged) · **T3** amp/bogon/bitmap + seam-B wire (≥78) · **T4** blacklist bands + exact `bloom_stats` (≥88) · **T5** loader seed+smoke (full) · **T6** dpstat FP section · **T7** gated `blbulk` 1M + footprint · **T8** docs. Only T2 parallel; T5/T7 privileged
 - Requires WLV executed first (**satisfied** — WLV VERIFIED); consumes SRL `BlacklistEntry` rows contractually (maps = M4 build contract)
 
-**Fairness & bandwidth reservation (8.4)** - PLANNED
-- 2-tier committed (global + spin_lock) / burst (per-CPU) buckets per service
-- Node headroom bucket (`congestion_drop`); ingress-cost cap (`ingress_cap_drop`); `service_ceiling_drop`
+**Fairness & bandwidth reservation (8.4)** - IN PROGRESS (spec + context + design APPROVED + tasks drafted)
+- 2-tier committed (global + `bpf_spin_lock`, exact) / burst (per-CPU, `ceiling−committed`) buckets per service at the **ARL-24 seam** (`admit_clean()`); burst dual-draws the node headroom bucket (`capacity−Σcommitted`, floor 0); drops `service_ceiling_drop`/`congestion_drop`; VIP never enters the ladder (§8.4.6 structural)
+- Ingress-cost cap at **WLV-24 seam A** (pre-whitelist, destination-keyed spoof-immune): dual bps + derived-pps budget = `k×ceiling`, **k=3** default, ref packet size ~512 B node-tunable (**D-FAIR-1**); over-cap = early `ingress_cap_drop`; VIP traffic subject to the cap (documented precedence)
+- Wires the last 3 frozen ABI indices **11/12/13** — all 16 §9.2 reasons live; per-service rates via a **new** slotted config map from `ServicePlan` (M4 build contract, A-FAIR-2); 3 runtime maps unslotted; `node_clean_capacity` = env-driven seed, 40 Gbps §15 default when unset (**D-FAIR-2**)
+- Deterministic fairness scenario = the **M3 milestone gate** (flood A → B's committed admits 100%, FAIR-24); spin-lock-in-XDP de-risked fail-fast with fallback (FAIR-22); default seed keeps post-BLK baseline verdict-identical
+- Spec `spec.md` (FAIR-01..27); context `context.md` (D-FAIR-1..2, A-FAIR-1..8 — AD-024); `design.md` + rendered diagrams (ladder flow + map layout)
+- Design (AD-025): new `src/fairness.h` (both stages + 2 slotted config maps + 4 runtime bucket maps); committed = top-level HASH + BTF `bpf_spin_lock` (now-before-lock, pure-ALU CS; fallback → `__sync` atomics → per-CPU split); burst/node/cap reuse `rl_bucket`/helpers verbatim; budgets precomputed userspace (k/ref-pkt/capacity = env only); `pkt_meta` first deliberate growth 32→40 (`fair_state`); `FAIR_RATE_MAX` 16e9 B/s overflow clamp. 3 kernel semantics web-verified (spin_lock in XDP: program types, map homes, CS rules)
+- Tasks `tasks.md` (T1–T6; all 27 reqs mapped, baseline **B=91** pinned live): **T1** contracts+maps+pkt_meta growth+spin-lock de-risk (92) · **T2** ingress-cap stage+seam A (≥99) · **T3** admit ladder at `admit_clean` (≥107) · **T4** fairness scenario = M3 gate (≥110) · **T5** loader env seed+fairness smoke (full gate) · **T6** docs `[P]`
+- Blacklist-filters executed (A-FAIR-1 satisfied); completes the §8.2 pipeline
 
 ---
 

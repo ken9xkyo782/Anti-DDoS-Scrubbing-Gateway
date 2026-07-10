@@ -1,0 +1,22 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart TD
+    svc(["service match + enabled<br/>(service_lookup_redirect)"]) --> cap{"ingress_cap_stage — seam A<br/>dual pps+bps ≤ k×ceiling?<br/>(per-CPU, dest-keyed)"}
+    cap -- "over cap" --> capDrop["fair_state = CAP_DROP<br/>record_drop(13 ingress_cap_drop)<br/>no whitelist/deny/rule work"]
+    cap -- "under" --> wl{"whitelist_stage (WLV)"}
+    wl -- "VIP hit + ceiling ok" --> vipRd["redirect_out()<br/>never enters the ladder (§8.4.6)"]
+    wl -- "miss" --> deny["deny filters (BLK)"] --> rules{"allow_rule_stage (ARL)<br/>rule match + quota?"}
+    rules -- "rule admit" --> ladder(["fair_admit_stage<br/>@ admit_clean() — ARL-24 seam"])
+
+    subgraph admitLadder ["admit ladder (clean non-VIP)"]
+        c{"committed bucket<br/>global HASH + bpf_spin_lock<br/>refill = committed_bps (exact)"}
+        b{"service burst bucket<br/>PERCPU_HASH<br/>refill = (ceiling−committed)÷nCPU"}
+        n{"node headroom bucket<br/>PERCPU_ARRAY<br/>refill = (capacity−Σcommitted)÷nCPU"}
+        c -- "empty" --> b
+        b -- "tokens → draw node too" --> n
+    end
+
+    ladder --> c
+    c -- "tokens" --> rdC["fair_state = COMMITTED<br/>redirect_out()"]
+    b -- "empty" --> ceilDrop["fair_state = CEILING_DROP<br/>record_drop(11 service_ceiling_drop)"]
+    n -- "empty" --> congDrop["fair_state = CONGESTION_DROP<br/>record_drop(12 congestion_drop)"]
+    n -- "tokens" --> rdB["fair_state = BURST<br/>redirect_out()"]
