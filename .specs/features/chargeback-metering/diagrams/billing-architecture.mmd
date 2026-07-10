@@ -1,0 +1,33 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+graph LR
+    subgraph DP["Data-plane (telemetry-owned, reused)"]
+        SS[("svc_stat_map<br/>clean_bytes per dp_id")]
+        SNAP["dpstat snapshot --json"]
+        SS --> SNAP
+    end
+    subgraph WK["Python worker — new background lane"]
+        RDR["TelemetryReader<br/>(reused)"]
+        SNAP -->|"JSON via subprocess"| RDR
+        RDR --> MET["BillingMeter.run_loop<br/>every 5 min"]
+        MET -->|"sample_once: dbytes / elapsed"| BS[("billing_sample<br/>clean_bps series")]
+        BS --> MET
+        MET -->|"roll_up: p95 -> open estimate"| BU[("billing_usage<br/>open | final")]
+        MET -->|"period boundary: finalize (immutable)"| BU
+        MET -->|"prune finalized-period samples"| BS
+    end
+    PLAN[("ServicePlan<br/>committed / metric / overage_policy")] --> MET
+    DPID["ProtectedService.dp_id -> service, tenant"] --> MET
+    subgraph API["FastAPI /billing (new router)"]
+        GU["GET /billing/usage<br/>tenant own (404 cross-tenant) · admin all"]
+        EX["GET /billing/usage/export<br/>admin CSV/JSON (finalized)"]
+    end
+    BU --> GU
+    BU --> EX

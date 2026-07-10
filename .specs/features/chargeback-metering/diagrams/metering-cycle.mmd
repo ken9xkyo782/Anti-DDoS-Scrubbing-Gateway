@@ -1,0 +1,36 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    autonumber
+    participant T as Timer (5 min)
+    participant M as BillingMeter
+    participant R as TelemetryReader
+    participant DB as Postgres
+
+    loop every worker_billing_interval_seconds
+        T->>M: tick()
+        M->>R: snapshot()
+        alt gateway offline (None)
+            R-->>M: None
+            M-->>M: skip sample (no fabricated data)
+        else snapshot with clean_bytes per dp_id
+            R-->>M: services[].clean_bytes, active.version
+            M-->>M: delta = clean_bytes - prev[dp_id]
+            M-->>M: reset? (delta<0 or version changed) -> use post-reset value
+            M->>DB: upsert BillingSample(service_id, sample_ts, clean_bps)  [idempotent]
+        end
+        M->>DB: refresh open BillingUsage: p95 -> billed=max(committed,p95), overage
+        alt period_end <= now  OR  service_id IS NULL (deleted)
+            M->>DB: finalize -> status=final (immutable), finalized_at
+        end
+        M->>DB: prune BillingSample for finalized periods past retention
+    end
+
+    note over M,DB: p95_clean_gbps = nearest-rank(clean_bps) x 8 / 1e9<br/>billed_gbps = max(committed_clean_gbps, p95_clean_gbps)
