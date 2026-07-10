@@ -24,6 +24,7 @@
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
 #define COUNTER_PIN_PATH PIN_DIR "/counter_map"
+#define SVC_STAT_PIN_PATH PIN_DIR "/svc_stat_map"
 #define RINGBUF_PIN_PATH PIN_DIR "/drop_ringbuf"
 #define SAMPLE_CONFIG_PIN_PATH PIN_DIR "/sample_config"
 #define SAMPLE_STATS_PIN_PATH PIN_DIR "/sample_stats"
@@ -106,6 +107,7 @@ static void print_usage(const char *prog)
 	fprintf(stderr, "usage: %s <IN> <OUT>\n", prog);
 	fprintf(stderr, "       or set IN_IFACE=<IN> OUT_IFACE=<OUT>\n");
 	fprintf(stderr, "       optional: SERVICE_DEST=<ipv4-or-cidr>\n");
+	fprintf(stderr, "       optional: SERVICE_DP_ID=<non-zero-u32> (default 1)\n");
 	fprintf(stderr,
 		"       optional: XDPGW_SEED_WL_CIDR=<src-cidr> [XDPGW_SEED_VIP_PPS=N] [XDPGW_SEED_VIP_BPS=N]\n");
 	fprintf(stderr,
@@ -150,6 +152,7 @@ static int set_pin_path(struct bpf_map *map, const char *path)
 static int set_observability_pin_paths(struct xdp_gateway_bpf *skel)
 {
 	if (set_pin_path(skel->maps.counter_map, COUNTER_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.svc_stat_map, SVC_STAT_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.drop_ringbuf, RINGBUF_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.sample_config, SAMPLE_CONFIG_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.sample_stats, SAMPLE_STATS_PIN_PATH) != 0 ||
@@ -182,6 +185,7 @@ static void unpin_map(struct bpf_map *map, const char *name)
 static void unpin_observability_maps(struct xdp_gateway_bpf *skel)
 {
 	unpin_map(skel->maps.counter_map, "counter_map");
+	unpin_map(skel->maps.svc_stat_map, "svc_stat_map");
 	unpin_map(skel->maps.drop_ringbuf, "drop_ringbuf");
 	unpin_map(skel->maps.sample_config, "sample_config");
 	unpin_map(skel->maps.sample_stats, "sample_stats");
@@ -192,6 +196,8 @@ static int pin_observability_maps(struct xdp_gateway_bpf *skel)
 {
 	if (pin_map(skel->maps.counter_map, "counter_map") != 0)
 		return -1;
+	if (pin_map(skel->maps.svc_stat_map, "svc_stat_map") != 0)
+		goto rollback;
 	if (pin_map(skel->maps.drop_ringbuf, "drop_ringbuf") != 0)
 		goto rollback;
 	if (pin_map(skel->maps.sample_config, "sample_config") != 0)
@@ -851,12 +857,13 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 {
 	const char *service_dest = getenv("SERVICE_DEST");
 	const char *wl_cidr = getenv("XDPGW_SEED_WL_CIDR");
-	struct service_val val = {
-		.service_id = 1,
-		.enabled = 1,
-	};
 	struct service_key key = {};
 	struct wl_seed wl_seed;
+	struct service_val val = {
+		.enabled = 1,
+	};
+	__u64 dp_id = 1;
+	int is_set;
 	int fd;
 
 	if (!service_dest || service_dest[0] == '\0') {
@@ -876,6 +883,16 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 		return -1;
 	}
 
+	if (parse_u64_env("SERVICE_DP_ID", &dp_id, &is_set) != 0)
+		return -1;
+	if (dp_id == 0 || dp_id > UINT32_MAX) {
+		fprintf(stderr,
+			"invalid SERVICE_DP_ID=%llu (expected 1..%u)\n",
+			(unsigned long long)dp_id, UINT32_MAX);
+		return -1;
+	}
+	val.service_id = (__u32)dp_id;
+
 	if (prepare_wl_seed(&wl_seed) != 0)
 		return -1;
 	val.wl_flags = wl_seed.wl_flags;
@@ -894,8 +911,8 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 		return -1;
 	}
 
-	printf("seeded service_inner_0/1 with SERVICE_DEST=%s service_id=1 enabled=1 wl_flags=0x%x bl_flags=0x%x\n",
-	       service_dest, val.wl_flags, val.bl_flags);
+	printf("seeded service_inner_0/1 with SERVICE_DEST=%s service_id=%u enabled=1 wl_flags=0x%x bl_flags=0x%x\n",
+	       service_dest, val.service_id, val.wl_flags, val.bl_flags);
 	if (seed_match_all_rule_blocks(skel, val.service_id) != 0)
 		return -1;
 	if (seed_fairness_for_service(skel, val.service_id, fair_seed) != 0)
