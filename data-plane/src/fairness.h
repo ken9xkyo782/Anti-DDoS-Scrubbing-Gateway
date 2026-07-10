@@ -144,6 +144,15 @@ static __always_inline struct fair_config *fair_config_lookup(__u32 slot,
 	return bpf_map_lookup_elem(inner, &service_id);
 }
 
+static __always_inline int fair_record_drop(struct pkt_meta *meta,
+					     enum fair_state state,
+					     enum drop_reason reason)
+{
+	meta->fair_state = state;
+	write_test_meta(meta);
+	return record_drop(meta, reason);
+}
+
 static __always_inline void fair_cap_bucket_reset(struct rl_bucket *bucket,
 						   const struct fair_config *config,
 						   __u64 now, __u32 ncpus,
@@ -245,24 +254,236 @@ static __always_inline int ingress_cap_stage(struct xdp_md *ctx,
 	int admitted;
 
 	config = fair_config_lookup(slot, meta->service_id);
-	if (!config) {
-		meta->fair_state = FAIR_ERR;
-		return record_drop(meta, DR_MAP_ERROR);
-	}
+	if (!config)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
 
 	admitted = fair_cap_admit(config, meta, pkt_len);
-	if (admitted < 0) {
-		meta->fair_state = FAIR_ERR;
-		return record_drop(meta, DR_MAP_ERROR);
-	}
+	if (admitted < 0)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
 	if (!admitted) {
-		meta->fair_state = FAIR_CAP_DROP;
 		meta->rule_idx = RULE_IDX_NONE;
-		write_test_meta(meta);
-		return record_drop(meta, DR_INGRESS_CAP_DROP);
+		return fair_record_drop(meta, FAIR_CAP_DROP, DR_INGRESS_CAP_DROP);
 	}
 
 	return FAIR_CONTINUE;
+}
+
+static __always_inline void fair_bps_bucket_reset(struct rl_bucket *bucket,
+						   __u32 version, __u64 rate,
+						   __u64 now, __u32 ncpus,
+						   int test_no_refill)
+{
+	bucket->cfg_version = version;
+	bucket->_pad = 0;
+	bucket->last_ns = now;
+	bucket->pps_tokens = 0;
+	bucket->bps_tokens = rl_burst(rate, ncpus, test_no_refill);
+}
+
+static __always_inline void fair_bps_bucket_refill(struct rl_bucket *bucket,
+						    __u64 rate, __u64 now,
+						    __u32 ncpus)
+{
+	__u64 burst;
+	__u64 elapsed;
+	__u64 advance;
+
+	if (now <= bucket->last_ns)
+		return;
+
+	elapsed = now - bucket->last_ns;
+	if (elapsed > NSEC_PER_SEC)
+		elapsed = NSEC_PER_SEC;
+
+	burst = rl_burst(rate, ncpus, 0);
+	advance = rl_refill_dim(&bucket->bps_tokens, rate, burst, elapsed,
+				ncpus);
+	if (advance > 0)
+		bucket->last_ns += advance;
+}
+
+static __always_inline int fair_bps_bucket_consume(struct rl_bucket *bucket,
+						     __u64 rate, __u64 pkt_len)
+{
+	struct rule_entry limit = {
+		.bps = rate,
+		.flags = RULE_F_BPS_SET,
+	};
+
+	return rl_bucket_consume(bucket, &limit, pkt_len);
+}
+
+static __always_inline int fair_burst_admit(const struct fair_config *config,
+						    const struct pkt_meta *meta,
+						    __u64 pkt_len)
+{
+	__u32 key = meta->service_id;
+	struct rl_bucket fresh = {};
+	struct rl_bucket *bucket;
+	__u32 ncpus;
+	__u64 now;
+	int test_no_refill;
+	int admitted;
+
+	ncpus = rl_cpu_count();
+	test_no_refill = rl_test_no_refill();
+	now = bpf_ktime_get_ns();
+	bucket = bpf_map_lookup_elem(&svc_burst_state, &key);
+	if (!bucket) {
+		fair_bps_bucket_reset(&fresh, config->version, config->burst_bps,
+				      now, ncpus, test_no_refill);
+		admitted = fair_bps_bucket_consume(&fresh, config->burst_bps,
+						   pkt_len);
+		if (bpf_map_update_elem(&svc_burst_state, &key, &fresh,
+					BPF_ANY) != 0)
+			return -1;
+		return admitted;
+	}
+
+	if (bucket->cfg_version != config->version)
+		fair_bps_bucket_reset(bucket, config->version, config->burst_bps,
+				      now, ncpus, test_no_refill);
+	else if (!test_no_refill)
+		fair_bps_bucket_refill(bucket, config->burst_bps, now, ncpus);
+
+	return fair_bps_bucket_consume(bucket, config->burst_bps, pkt_len);
+}
+
+static __always_inline int fair_node_admit(const struct fair_node_config *config,
+						   __u64 pkt_len)
+{
+	__u32 key = 0;
+	struct rl_bucket *bucket;
+	__u32 ncpus;
+	__u64 now;
+	int test_no_refill;
+
+	ncpus = rl_cpu_count();
+	test_no_refill = rl_test_no_refill();
+	now = bpf_ktime_get_ns();
+	bucket = bpf_map_lookup_elem(&node_burst_state, &key);
+	if (!bucket)
+		return -1;
+
+	if (bucket->cfg_version != config->version)
+		fair_bps_bucket_reset(bucket, config->version, config->headroom_bps,
+				      now, ncpus, test_no_refill);
+	else if (!test_no_refill)
+		fair_bps_bucket_refill(bucket, config->headroom_bps, now, ncpus);
+
+	return fair_bps_bucket_consume(bucket, config->headroom_bps, pkt_len);
+}
+
+static __always_inline int fair_committed_admit(const struct fair_config *config,
+							const struct pkt_meta *meta,
+							__u64 pkt_len)
+{
+	__u32 key = meta->service_id;
+	struct fair_committed_bucket fresh = {};
+	struct fair_committed_bucket *bucket;
+	__u64 now;
+	__u64 burst;
+	int test_no_refill;
+	int admitted;
+
+	test_no_refill = rl_test_no_refill();
+	now = bpf_ktime_get_ns();
+	burst = rl_burst(config->committed_bps, 1, test_no_refill);
+	bucket = bpf_map_lookup_elem(&svc_committed_state, &key);
+	if (!bucket) {
+		fresh.cfg_version = config->version;
+		fresh.tokens = burst;
+		fresh.last_ns = now;
+		if (bpf_map_update_elem(&svc_committed_state, &key, &fresh,
+					BPF_NOEXIST) != 0) {
+			bucket = bpf_map_lookup_elem(&svc_committed_state, &key);
+			if (!bucket)
+				return -1;
+		} else {
+			bucket = bpf_map_lookup_elem(&svc_committed_state, &key);
+			if (!bucket)
+				return -1;
+		}
+	}
+
+	bpf_spin_lock(&bucket->lock);
+	if (bucket->cfg_version != config->version) {
+		bucket->cfg_version = config->version;
+		bucket->tokens = burst;
+		bucket->last_ns = now;
+	} else if (!test_no_refill && now > bucket->last_ns &&
+		   config->committed_bps != 0 && bucket->tokens < burst) {
+		__u64 elapsed = now - bucket->last_ns;
+		__u64 grant;
+		__u64 space;
+		__u64 advance;
+
+		if (elapsed > NSEC_PER_SEC)
+			elapsed = NSEC_PER_SEC;
+		grant = elapsed * config->committed_bps / NSEC_PER_SEC;
+		if (grant > 0) {
+			space = burst - bucket->tokens;
+			if (grant > space)
+				grant = space;
+			bucket->tokens += grant;
+			advance = grant * NSEC_PER_SEC / config->committed_bps;
+			if (advance == 0)
+				advance = 1;
+			if (advance > elapsed)
+				advance = elapsed;
+			bucket->last_ns += advance;
+		}
+	}
+
+	admitted = bucket->tokens >= pkt_len;
+	if (admitted)
+		bucket->tokens -= pkt_len;
+	bpf_spin_unlock(&bucket->lock);
+	return admitted;
+}
+
+static __always_inline int fair_admit_stage(struct xdp_md *ctx,
+						    struct pkt_meta *meta, __u32 slot)
+{
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+	struct fair_config *config;
+	struct fair_node_config *node;
+	__u64 pkt_len = data_end - data;
+	int admitted;
+
+	config = fair_config_lookup(slot, meta->service_id);
+	if (!config)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
+
+	admitted = fair_committed_admit(config, meta, pkt_len);
+	if (admitted < 0)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
+	if (admitted) {
+		meta->fair_state = FAIR_COMMITTED;
+		return redirect_out(meta);
+	}
+
+	admitted = fair_burst_admit(config, meta, pkt_len);
+	if (admitted < 0)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
+	if (!admitted)
+		return fair_record_drop(meta, FAIR_CEILING_DROP,
+					DR_SERVICE_CEILING_DROP);
+
+	node = bpf_map_lookup_elem(&fair_node_config, &slot);
+	if (!node)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
+
+	admitted = fair_node_admit(node, pkt_len);
+	if (admitted < 0)
+		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
+	if (!admitted)
+		return fair_record_drop(meta, FAIR_CONGESTION_DROP,
+					DR_CONGESTION_DROP);
+
+	meta->fair_state = FAIR_BURST;
+	return redirect_out(meta);
 }
 #endif
 

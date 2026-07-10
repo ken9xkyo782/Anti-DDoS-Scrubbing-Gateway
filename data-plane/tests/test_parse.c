@@ -377,6 +377,18 @@ static int reset_blocked_port_bitmap_map(int fd)
 	return 0;
 }
 
+static int reset_fair_node_config_map(int fd)
+{
+	struct fair_node_config zero = {};
+
+	for (__u32 key = 0; key < SERVICE_SLOTS; key++) {
+		if (bpf_map_update_elem(fd, &key, &zero, 0) != 0)
+			return -1;
+	}
+
+	return 0;
+}
+
 static int clear_vip_config_map(int fd)
 {
 	__u32 key;
@@ -425,6 +437,21 @@ static int clear_u32_hash_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int reset_node_burst_state(struct test_env *env)
+{
+	struct rl_bucket *zero;
+	__u32 key = 0;
+	int err;
+
+	zero = calloc(env->possible_cpus, sizeof(*zero));
+	if (!zero)
+		return -1;
+
+	err = bpf_map_update_elem(env->node_burst_state_fd, &key, zero, 0);
+	free(zero);
+	return err;
+}
+
 static int reset_rate_limit(struct test_env *env)
 {
 	struct rl_config config = {};
@@ -435,6 +462,12 @@ static int reset_rate_limit(struct test_env *env)
 	if (clear_vip_ceiling_state(env->vip_ceiling_state_fd) != 0)
 		return -1;
 	if (clear_u32_hash_map(env->service_ingress_cap_state_fd) != 0)
+		return -1;
+	if (clear_u32_hash_map(env->svc_committed_state_fd) != 0)
+		return -1;
+	if (clear_u32_hash_map(env->svc_burst_state_fd) != 0)
+		return -1;
+	if (reset_node_burst_state(env) != 0)
 		return -1;
 	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
 }
@@ -456,6 +489,7 @@ static int reset_config(struct test_env *env)
 	    clear_whitelist_lpm_map(env->whitelist_lpm1_fd) != 0 ||
 	    clear_u32_hash_map(env->fair_config0_fd) != 0 ||
 	    clear_u32_hash_map(env->fair_config1_fd) != 0 ||
+	    reset_fair_node_config_map(env->fair_node_config_fd) != 0 ||
 	    reset_gbl_meta_map(env->gbl_meta_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap0_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap1_fd) != 0 ||
@@ -633,6 +667,13 @@ static int seed_fair_config(struct test_env *env, __u32 slot,
 	if (fd < 0)
 		return -1;
 	return bpf_map_update_elem(fd, &service_id, config, BPF_ANY);
+}
+
+static int seed_fair_node_config(struct test_env *env, __u32 slot,
+				  const struct fair_node_config *config)
+{
+	return bpf_map_update_elem(env->fair_node_config_fd, &slot, config,
+				  BPF_ANY);
 }
 
 static int seed_service_raw(struct test_env *env, __u32 slot, __be32 addr,
@@ -1153,6 +1194,51 @@ static int read_fair_cap_bucket_cpu0(struct test_env *env, __u32 service_id,
 
 	free(values);
 	return err;
+}
+
+static int read_fair_burst_bucket_cpu0(struct test_env *env, __u32 service_id,
+				       struct rl_bucket *bucket)
+{
+	struct rl_bucket *values;
+	__u32 key = service_id;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->svc_burst_state_fd, &key, values);
+	if (err == 0)
+		*bucket = values[0];
+
+	free(values);
+	return err;
+}
+
+static int read_fair_node_bucket_cpu0(struct test_env *env,
+				      struct rl_bucket *bucket)
+{
+	struct rl_bucket *values;
+	__u32 key = 0;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->node_burst_state_fd, &key, values);
+	if (err == 0)
+		*bucket = values[0];
+
+	free(values);
+	return err;
+}
+
+static int read_fair_committed_bucket(struct test_env *env, __u32 service_id,
+				      struct fair_committed_bucket *bucket)
+{
+	return bpf_map_lookup_elem(env->svc_committed_state_fd, &service_id,
+				  bucket);
 }
 
 static int __attribute__((unused)) read_meta(struct test_env *env,
@@ -1686,7 +1772,7 @@ static int test_ingress_cap_under_cap_continues(void)
 	if (!err)
 		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
-		err = expect_u8("fair_state", meta.fair_state, FAIR_NONE);
+		err = expect_u8("fair_state", meta.fair_state, FAIR_COMMITTED);
 	if (!err)
 		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 0);
 
@@ -1931,6 +2017,375 @@ static int test_ingress_cap_version_flip_resets_bucket(void)
 		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
 	if (!err)
 		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static struct fair_config fair_ladder_config(__u32 version, __u64 committed_bps,
+					       __u64 burst_bps)
+{
+	struct fair_config config = {
+		.version = version,
+		.committed_bps = committed_bps,
+		.burst_bps = burst_bps,
+		.cap_pps = FAIR_RATE_MAX,
+		.cap_bps = FAIR_RATE_MAX,
+	};
+
+	return config;
+}
+
+static int setup_fair_ladder_service(struct test_env *env,
+				     const struct fair_config *config,
+				     const struct fair_node_config *node)
+{
+	if (reset_maps(env) != 0 || set_rl_config(env, 1) != 0 ||
+	    seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0 ||
+	    seed_fair_config(env, 0, DEFAULT_SERVICE_ID, config) != 0 ||
+	    seed_fair_node_config(env, 0, node) != 0 ||
+	    seed_match_all_rule_block(env, 0, DEFAULT_SERVICE_ID) != 0)
+		return -1;
+	return set_active(env, 0, 1);
+}
+
+static int test_fair_committed_exact_admit_count(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct fair_committed_bucket bucket;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+		.headroom_bps = 0,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, frame.len * 2, 0);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	for (int i = 0; !err && i < 3; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i < 2)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i < 2)
+			err = expect_u8("committed fair_state", meta.fair_state,
+					FAIR_COMMITTED);
+		if (!err && i == 2)
+			err = expect_u32("committed overflow retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("committed overflow fair_state", meta.fair_state,
+				FAIR_CEILING_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 1);
+	if (!err)
+		err = read_fair_committed_bucket(&env, DEFAULT_SERVICE_ID, &bucket);
+	if (!err)
+		err = expect_u64("committed tokens", bucket.tokens, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_burst_dual_draws_node_headroom(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct rl_bucket service_bucket;
+	struct rl_bucket node_bucket;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, 0, frame.len * 2);
+	node.headroom_bps = frame.len * 2;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	for (int i = 0; !err && i < 2; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err)
+			err = expect_u8("burst fair_state", meta.fair_state,
+					FAIR_BURST);
+	}
+	if (!err)
+		err = read_fair_burst_bucket_cpu0(&env, DEFAULT_SERVICE_ID,
+						&service_bucket);
+	if (!err)
+		err = expect_u64("service burst tokens", service_bucket.bps_tokens, 0);
+	if (!err)
+		err = read_fair_node_bucket_cpu0(&env, &node_bucket);
+	if (!err)
+		err = expect_u64("node burst tokens", node_bucket.bps_tokens, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_service_ceiling_drop(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, 0, frame.len);
+	node.headroom_bps = frame.len * 2;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	err = !err ? run_frame_current_maps(&env, &frame, &retval) : err;
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("ceiling retval", retval, XDP_DROP);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("ceiling fair_state", meta.fair_state,
+				FAIR_CEILING_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_congestion_drop_keeps_reason_at_node(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct rl_bucket service_bucket;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+		.headroom_bps = 0,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, 0, frame.len * 2);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("congestion retval", retval, XDP_DROP);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("congestion fair_state", meta.fair_state,
+				FAIR_CONGESTION_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_CONGESTION_DROP, 1);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 0);
+	if (!err)
+		err = read_fair_burst_bucket_cpu0(&env, DEFAULT_SERVICE_ID,
+						&service_bucket);
+	if (!err)
+		err = expect_u64("unrefunded service burst", service_bucket.bps_tokens,
+				frame.len);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_zero_committed_uses_burst_only(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct fair_committed_bucket committed;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, 0, frame.len);
+	node.headroom_bps = frame.len;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("best effort fair_state", meta.fair_state, FAIR_BURST);
+	if (!err)
+		err = read_fair_committed_bucket(&env, DEFAULT_SERVICE_ID, &committed);
+	if (!err)
+		err = expect_u64("best effort committed tokens", committed.tokens, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_committed_equals_ceiling_has_no_burst(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, frame.len, 0);
+	node.headroom_bps = frame.len * 2;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	err = !err ? run_frame_current_maps(&env, &frame, &retval) : err;
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("equal fair_state", meta.fair_state, FAIR_COMMITTED);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("equal overflow retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_version_flip_regrants_burst_once(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+	};
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, 0, frame.len);
+	node.headroom_bps = frame.len;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	err = !err ? run_frame_current_maps(&env, &frame, &retval) : err;
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("pre-flip ladder retval", retval, XDP_DROP);
+	config.version = 2;
+	node.version = 2;
+	if (!err)
+		err = seed_fair_config(&env, 0, DEFAULT_SERVICE_ID, &config);
+	if (!err)
+		err = seed_fair_node_config(&env, 0, &node);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("post-flip fair_state", meta.fair_state, FAIR_BURST);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_fair_zero_node_headroom_sheds_all_burst(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct fair_config config;
+	struct fair_node_config node = {
+		.version = 1,
+		.headroom_bps = 0,
+	};
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_ladder_config(1, 0, frame.len * 2);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_ladder_service(&env, &config, &node);
+	for (int i = 0; !err && i < 2; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err)
+			err = expect_u32("zero headroom retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = expect_counter(&env, DR_CONGESTION_DROP, 2);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 0);
 
 	env_close(&env);
 	return err;
@@ -5221,6 +5676,21 @@ int main(void)
 			  test_ingress_cap_missing_config_fails_closed },
 			{ "ingress cap version flip resets bucket",
 			  test_ingress_cap_version_flip_resets_bucket },
+			{ "fair committed exact admit count",
+			  test_fair_committed_exact_admit_count },
+			{ "fair burst dual draws node headroom",
+			  test_fair_burst_dual_draws_node_headroom },
+			{ "fair service ceiling drop", test_fair_service_ceiling_drop },
+			{ "fair congestion drop keeps node reason",
+			  test_fair_congestion_drop_keeps_reason_at_node },
+			{ "fair zero committed uses burst only",
+			  test_fair_zero_committed_uses_burst_only },
+			{ "fair committed equals ceiling has no burst",
+			  test_fair_committed_equals_ceiling_has_no_burst },
+			{ "fair version flip regrants burst once",
+			  test_fair_version_flip_regrants_burst_once },
+			{ "fair zero node headroom sheds all burst",
+			  test_fair_zero_node_headroom_sheds_all_burst },
 			{ "whitelist bloom round trip",
 			  test_whitelist_bloom_round_trip },
 			{ "drop reason ABI exposes 16 slots",

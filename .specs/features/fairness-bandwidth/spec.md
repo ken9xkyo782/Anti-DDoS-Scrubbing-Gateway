@@ -442,19 +442,19 @@ for recomputing headroom on plan changes.
 
 | Requirement ID | Story | Refs | Phase | Status |
 | --- | --- | --- | --- | --- |
-| FAIR-01 | P1: Two-tier bucket | §8.4.1, ARL-24 seam, §8.4.6/AD-021 | Spec | Pending |
-| FAIR-02 | P1: Two-tier bucket | §8.4/TDD 4.3 spin-lock committed | Spec | Pending |
-| FAIR-03 | P1: Two-tier bucket | §8.4 burst tier, AD-019 split | Spec | Pending |
-| FAIR-04 | P1: Two-tier bucket | §10.2 idx 11 | Spec | Pending |
+| FAIR-01 | P1: Two-tier bucket | §8.4.1, ARL-24 seam, §8.4.6/AD-021 | Execute | Verified (T3) |
+| FAIR-02 | P1: Two-tier bucket | §8.4/TDD 4.3 spin-lock committed | Execute | Verified (T3) |
+| FAIR-03 | P1: Two-tier bucket | §8.4 burst tier, AD-019 split | Execute | Verified (T3) |
+| FAIR-04 | P1: Two-tier bucket | §10.2 idx 11 | Execute | Verified (T3) |
 | FAIR-05 | P1: Two-tier bucket | CM-04 isolation, §15 fairness | Spec | Pending |
-| FAIR-06 | P1: Two-tier bucket | SRL-43 plan shapes | Spec | Pending |
-| FAIR-07 | P1: Two-tier bucket | §8.3 slotted config, D-ARL-2, fail-closed | Spec | Pending |
-| FAIR-08 | P1: Two-tier bucket | test hooks (D-PKT-4) | Execute | In progress (T1 field) |
-| FAIR-09 | P1: Node headroom | §8.4.2 headroom rate, §7.2 | Spec | Pending |
-| FAIR-10 | P1: Node headroom | §8.4 dual-draw burst | Spec | Pending |
-| FAIR-11 | P1: Node headroom | §10.2 idx 12, committed skips | Spec | Pending |
+| FAIR-06 | P1: Two-tier bucket | SRL-43 plan shapes | Execute | Verified (T3) |
+| FAIR-07 | P1: Two-tier bucket | §8.3 slotted config, D-ARL-2, fail-closed | Execute | Verified (T3) |
+| FAIR-08 | P1: Two-tier bucket | test hooks (D-PKT-4) | Execute | Verified (T3) |
+| FAIR-09 | P1: Node headroom | §8.4.2 headroom rate, §7.2 | Execute | Verified (T3) |
+| FAIR-10 | P1: Node headroom | §8.4 dual-draw burst | Execute | Verified (T3) |
+| FAIR-11 | P1: Node headroom | §10.2 idx 12, committed skips | Execute | Verified (T3) |
 | FAIR-12 | P1: Node headroom | **GA-2**, A-SRL-4, D-SLRD-1 | Spec | Pending |
-| FAIR-13 | P1: Node headroom | SRL-36 oversubscription consequence | Spec | Pending |
+| FAIR-13 | P1: Node headroom | SRL-36 oversubscription consequence | Execute | Verified (T3) |
 | FAIR-14 | P1: Ingress cap | §8.4.3, WLV-24 seam A, raw cost | Execute | Verified (T2) |
 | FAIR-15 | P1: Ingress cap | **GA-1** k×ceiling, AD-019 rodata posture | Execute | Verified (T2) |
 | FAIR-16 | P1: Ingress cap | §10.2 idx 13, early terminal | Execute | Verified (T2) |
@@ -462,11 +462,11 @@ for recomputing headroom on plan changes.
 | FAIR-18 | P1: Ingress cap | cap-before-whitelist precedence | Execute | Verified (T2) |
 | FAIR-19 | P1: Ingress cap | fail-closed posture | Execute | Verified (T2) |
 | FAIR-20 | P1: Maps, gate & docs | §8.3 map groups, AD-005, M4 contract | Execute | Verified (T1) |
-| FAIR-21 | P1: Maps, gate & docs | AD-016/17 idx 11/12/13 | Execute | In progress (T2 idx 13) |
+| FAIR-21 | P1: Maps, gate & docs | AD-016/17 idx 11/12/13 | Execute | In progress (T2–T3 wired; T5 live pending) |
 | FAIR-22 | P1: Maps, gate & docs | spin-lock de-risk, A-FAIR-8 | Execute | Verified (T1) |
 | FAIR-23 | P1: Maps, gate & docs | D-SLRD-1 seed, post-BLK baseline | Spec | Pending |
 | FAIR-24 | P1: Maps, gate & docs | §15 fairness test = M3 gate | Spec | Pending |
-| FAIR-25 | P1: Maps, gate & docs | AD-019 deterministic conventions | Spec | Pending |
+| FAIR-25 | P1: Maps, gate & docs | AD-019 deterministic conventions | Execute | Verified (T3) |
 | FAIR-26 | P1: Maps, gate & docs | native mandate, baseline | Spec | Pending |
 | FAIR-27 | P1: Maps, gate & docs | §8.4.6 residual, A-PKT-2 TESTING.md | Spec | Pending |
 

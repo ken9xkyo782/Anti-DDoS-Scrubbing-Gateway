@@ -111,17 +111,22 @@ body only), `data-plane/tests/test_parse.c`
 FAIR-10, FAIR-11, FAIR-13, FAIR-21 (idx 11/12), FAIR-25
 
 **Done when**:
-- [ ] Ladder order per design: committed (exact, `now` before lock, version-check/refill/consume
+- [x] Ladder order per design: committed (exact, `now` before lock, version-check/refill/consume
       inside pure-ALU CS) → admit skips burst+node; else burst (rate÷nCPU) consuming
       service-then-node, no refund; else drops 11 (burst empty) / 12 (node empty);
       `fair_state` records the outcome; VIP path untouched (never enters)
-- [ ] `fair_node_config[slot]` supplies headroom; missing/structural failures → `DR_MAP_ERROR`;
+- [x] `fair_node_config[slot]` supplies headroom; missing/structural failures → `DR_MAP_ERROR`;
       all four buckets honor `test_no_refill` and lazy version reset
-- [ ] New deterministic cases: committed exact admit count (no pinning needed — global bucket);
+- [x] New deterministic cases: committed exact admit count (no pinning needed — global bucket);
       burst path admits + node dual-draw; ceiling drop 11; congestion drop 12 (burst tokens
       remain, node empty); committed=0 all-burst; committed=ceiling zero-burst; version-flip
       re-grants burst once; node headroom 0 sheds all burst (FAIR-13)
-- [ ] Gate: `make test` → **≥ 107** (T2 count intact + ≥8 new)
+- [x] Gate: `make test` → **≥ 107** (T2 count intact + ≥8 new)
+
+**Completion (2026-07-10)**: The exact committed bucket, per-CPU service burst bucket, and
+per-CPU node headroom bucket now form the `admit_clean()` ladder. Deterministic cases cover every
+planned ladder shape and verify the 11/12 attribution. `cd data-plane && make test` → **107
+passed**.
 
 **Tests**: dp-unit · **Gate**: quick
 **Commit**: `feat(fairness): exact committed bucket with burst/node admit ladder`

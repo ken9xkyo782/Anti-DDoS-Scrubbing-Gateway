@@ -313,10 +313,13 @@ static __always_inline int rl_bucket_admit(const struct rule_block *block,
 	return rl_bucket_consume(bucket, rule, pkt_len);
 }
 
-static __always_inline int admit_clean(struct pkt_meta *meta)
+static __always_inline int fair_admit_stage(struct xdp_md *ctx,
+					    struct pkt_meta *meta, __u32 slot);
+
+static __always_inline int admit_clean(struct xdp_md *ctx,
+					   struct pkt_meta *meta, __u32 slot)
 {
-	/* ARL-24: M3 fairness ladder inserts here before redirect_out(). */
-	return redirect_out(meta);
+	return fair_admit_stage(ctx, meta, slot);
 }
 
 static __always_inline int allow_rule_stage(struct xdp_md *ctx,
@@ -358,7 +361,7 @@ static __always_inline int allow_rule_stage(struct xdp_md *ctx,
 			return record_drop(meta, DR_MAP_ERROR);
 		if (!admitted)
 			return record_drop(meta, DR_RATE_LIMIT_DROP);
-		return admit_clean(meta);
+		return admit_clean(ctx, meta, slot);
 	}
 
 	return record_drop(meta, DR_NOT_ALLOWED);
