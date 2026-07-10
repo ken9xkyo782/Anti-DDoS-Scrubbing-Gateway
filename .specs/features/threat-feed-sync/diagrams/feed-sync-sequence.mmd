@@ -1,0 +1,47 @@
+%% Generated from: threat-feed-sync spec FEED-08..29 and worker/apply contracts
+%% Diagram: Threat Feed Sync — Success and Keep-Last-Active Failure Paths
+%% Note: Audit/history reads and dry-run branch are omitted for clarity.
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#eef2ff', 'primaryTextColor': '#1e293b', 'primaryBorderColor': '#6366f1', 'lineColor': '#94a3b8', 'secondaryColor': '#ecfdf5', 'tertiaryColor': '#fffbeb', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155'}}}%%
+sequenceDiagram
+    actor Admin
+    participant API as Feeds API
+    participant DB as PostgreSQL
+    participant Queue as Redis Queue
+    participant Worker as Feed Sync Worker
+    participant Feed as HTTPS Feed
+    participant Apply as xdpgw-apply
+    participant Maps as Pinned BPF Maps
+
+    Admin->>API: POST /feeds/{id}/sync
+    API->>DB: Create FeedSyncRun + AgentJob
+    DB-->>API: Commit
+    API->>Queue: Dispatch job ID after commit
+    API-->>Admin: 202 queued
+    Queue->>Worker: Deliver FEED_SYNC
+    Worker->>DB: Claim job and run
+    Worker->>Feed: Stream HTTPS GET (capped, no redirect)
+
+    alt Fetch fails, exceeds cap, or has zero valid entries
+        Feed-->>Worker: Error or unusable body
+        Worker->>DB: Mark failed and keep assertions/desired state
+        Note right of Maps: Active slot and version remain unchanged
+    else Valid or partial body
+        Feed-->>Worker: Line-list bytes
+        Worker->>DB: Lock state and reconcile assertions
+        Worker->>DB: Record overlaps, counts, desired digest
+        alt Desired digest already active
+            Worker->>DB: Mark success or partial without swap
+        else Global set requires convergence
+            Worker->>Apply: Global snapshot + expected revision
+            Apply->>Maps: Lock helper and read active slot/version
+            Apply->>Maps: Carry service maps and rebuild global maps
+            alt Build or verify fails
+                Apply-->>Worker: Nonzero without flip
+                Worker->>DB: Mark failed with active digest unchanged
+            else Verify passes
+                Apply->>Maps: Single active_config flip
+                Apply-->>Worker: New slot and node-map version
+                Worker->>DB: Mark active digest and run terminal state
+            end
+        end
+    end

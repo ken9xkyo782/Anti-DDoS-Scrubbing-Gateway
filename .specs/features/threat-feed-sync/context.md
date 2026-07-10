@@ -2,7 +2,7 @@
 
 **Spec:** `.specs/features/threat-feed-sync/spec.md` (FEED-01..40)
 **Captured:** 2026-07-10 (discuss within Specify)
-**Status:** Ready for design
+**Status:** Spec + Design approved; Tasks drafted (2026-07-10)
 
 ---
 
@@ -25,10 +25,10 @@ must be slot-aware — its problem**").
 - **Does not own:** structured/STIX feed formats, feed-driven whitelist/service-scoped lists, alert
   **delivery** (M6), blocked-port-bitmap population, feed license review (CM-07), M5 dashboards.
 
-**Execute is hard-gated** on **M4 #1 (agent-worker) and M4 #2 (double-buffer) executed** — both are
-currently Tasks-approved/drafted, not executed. The control-plane sync core (P1 fetch/validate/dedup/
-stats/overlap) needs only the worker; the P1 *Data-plane propagation* story needs the double-buffer
-helper.
+**Execute status:** M4 #1 (agent-worker) is executed. Real data-plane propagation remains hard-gated on
+M4 #2 (double-buffer), whose helper/pins are still design/tasks artifacts. The control-plane sync core
+(P1 fetch/validate/dedup/stats/overlap) can build against the executed worker; the P1 *Data-plane
+propagation* story waits for the helper.
 
 ---
 
@@ -120,15 +120,19 @@ here); an enforced interval floor prevents a mis-set tiny interval from hammerin
 
 ---
 
-## Open Questions for Design
+## Design Resolutions
 
-1. **`FEED_SYNC` ledger** — generalize `AgentJob` (polymorphic target) vs. a dedicated feed-sync queue/
-   record (A-FEED-7). Impacts idempotency keying and the reconcile sweep.
-2. **Global-deny apply channel** — the `xdpgw-apply` helper's inverse mode (rebuild-global / carry-service):
-   a flag/mode on the existing helper vs. a sibling entrypoint; how `active_config.version` is shared
-   coherently between per-service and feed swaps (D-FEED-1 trade-off).
-3. **Provenance model** — how per-source removal + manual>feed precedence + multi-source collapse coexist
-   with the `uq_blacklist_global_source_cidr` partial unique index (A-FEED-3).
-4. **Overlap detection** — SQL set-overlap (`inet && ` / GiST) of feed CIDRs against `whitelist_entry`
-   vs. in-worker computation; batch cost at feed scale.
-5. **Fetch limits** — concrete timeout / size-cap / interval-floor defaults (env-tunable, D-SLRD-1 posture).
+Resolved in approved `.specs/features/threat-feed-sync/design.md` (AD-029):
+
+1. **Ledger:** reuse/generalize `AgentJob` with an explicit `FeedSyncRun` FK and job-type lifecycle
+   adapters; keep the service FK and service transitions intact rather than introducing an unchecked
+   polymorphic UUID or a second queue.
+2. **Apply channel:** add a `GLOBAL_DENY` snapshot mode to the same `xdpgw-apply` binary, with one helper
+   lock and one shared node-global `active_config.version` sequence.
+3. **Provenance:** many-to-many `FeedBlacklistAssertion` rows point to the one distinct global
+   `BlacklistEntry`; manual promotion/demotion preserves feed assertions.
+4. **Overlap:** PostgreSQL `cidr && cidr` with a GiST `inet_ops` index on whitelist CIDRs; durable overlap
+   rows plus one bounded audit summary per run.
+5. **Limits:** 5 s connect / 10 s read inactivity / 30 s wall clock, 32 MiB decoded body, and a rejected
+   300..604800 second interval range. A bounded background network-fetch lane prevents slow upstreams
+   from consuming the worker's foreground service-apply budget.

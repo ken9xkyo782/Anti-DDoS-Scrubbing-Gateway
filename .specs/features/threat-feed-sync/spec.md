@@ -2,9 +2,9 @@
 
 **Feature:** M4 #3 — Threat intelligence feed sync
 **Context:** `.specs/features/threat-feed-sync/context.md` (D-FEED-1..3, A-FEED-1..8)
-**Status:** Draft (awaiting approval → Design)
+**Status:** **APPROVED** (2026-07-10) → Tasks
 **Depends on (Execute-gated):**
-- **agent-worker executed** (M4 #1) — provides the long-running worker, `HANDLERS` registry (this
+- **agent-worker executed** (M4 #1, **satisfied**) — provides the long-running worker, `HANDLERS` registry (this
   feature adds `JobType.feed_sync`), `process_job`/reconcile orchestration, and the periodic tick this
   feature's scheduler hooks into.
 - **double-buffer executed** (M4 #2) — provides the `xdpgw-apply` C helper, the pinned config/global-deny
@@ -236,8 +236,8 @@ counts via `GET /feeds/{id}/syncs`; dry-run and assert no entries/maps changed.
 - WHEN a feed lists a CIDR that contains/overlaps another feed's entry THEN both SHALL be kept (LPM/bloom
   handle containment); dedup is exact-match only.
 - WHEN a source is deleted while its `FEED_SYNC` is in flight THEN the job SHALL no-op safely.
-- WHEN a configured interval is below the enforced minimum THEN the system SHALL clamp it (documented
-  floor) to avoid hammering upstreams.
+- WHEN a configured interval is outside the documented minimum/maximum THEN the system SHALL reject it
+  with 422 rather than silently clamp it, avoiding unexpected schedules and upstream hammering.
 - WHEN IPv6 or malformed lines appear in an IPv4 feed THEN they SHALL be skipped and counted, never fatal.
 - WHEN two feeds are synced concurrently THEN each SHALL reconcile independently and the global map SHALL
   reflect the union (no lost update).
@@ -248,50 +248,50 @@ counts via `GET /feeds/{id}/syncs`; dry-run and assert no entries/maps changed.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| FEED-01 | P1: Feed source management | Design | Pending |
-| FEED-02 | P1: Feed source management | Design | Pending |
-| FEED-03 | P1: Feed source management | Design | Pending |
-| FEED-04 | P1: Feed source management | Design | Pending |
-| FEED-05 | P1: Feed source management | Design | Pending |
-| FEED-06 | P1: Feed source management | Design | Pending |
-| FEED-07 | P1: Feed source management | Design | Pending |
-| FEED-08 | P1: Resilient sync core | Design | Pending |
-| FEED-09 | P1: Resilient sync core | Design | Pending |
-| FEED-10 | P1: Resilient sync core | Design | Pending |
-| FEED-11 | P1: Resilient sync core | Design | Pending |
-| FEED-12 | P1: Resilient sync core | Design | Pending |
-| FEED-13 | P1: Resilient sync core | Design | Pending |
-| FEED-14 | P1: Resilient sync core | Design | Pending |
-| FEED-15 | P1: Resilient sync core | Design | Pending |
-| FEED-16 | P1: Resilient sync core | Design | Pending |
-| FEED-17 | P1: Resilient sync core | Design | Pending |
-| FEED-18 | P1: Resilient sync core | Design | Pending |
-| FEED-19 | P1: Whitelist-overlap flag | Design | Pending |
-| FEED-20 | P1: Whitelist-overlap flag | Design | Pending |
-| FEED-21 | P1: Whitelist-overlap flag | Design | Pending |
-| FEED-22 | P1: Whitelist-overlap flag | Design | Pending |
-| FEED-23 | P1: Whitelist-overlap flag | Design | Pending |
-| FEED-24 | P1: Data-plane rebuild & swap | Design | Pending |
-| FEED-25 | P1: Data-plane rebuild & swap | Design | Pending |
-| FEED-26 | P1: Data-plane rebuild & swap | Design | Pending |
-| FEED-27 | P1: Data-plane rebuild & swap | Design | Pending |
-| FEED-28 | P1: Data-plane rebuild & swap | Design | Pending |
-| FEED-29 | P1: Data-plane rebuild & swap | Design | Pending |
-| FEED-30 | P2: Scheduled sync | Design | Pending |
-| FEED-31 | P2: Scheduled sync | Design | Pending |
-| FEED-32 | P2: Scheduled sync | Design | Pending |
-| FEED-33 | P2: Scheduled sync | Design | Pending |
-| FEED-34 | P2: Scheduled sync | Design | Pending |
-| FEED-35 | P3: Observability & controls | Design | Pending |
-| FEED-36 | P3: Observability & controls | Design | Pending |
-| FEED-37 | P3: Observability & controls | Design | Pending |
-| FEED-38 | P3: Observability & controls | Design | Pending |
-| FEED-39 | P3: Observability & controls | Design | Pending |
-| FEED-40 | P3: Observability & controls | Design | Pending |
+| FEED-01 | P1: Feed source management | Tasks | In Tasks |
+| FEED-02 | P1: Feed source management | Tasks | In Tasks |
+| FEED-03 | P1: Feed source management | Tasks | In Tasks |
+| FEED-04 | P1: Feed source management | Tasks | In Tasks |
+| FEED-05 | P1: Feed source management | Tasks | In Tasks |
+| FEED-06 | P1: Feed source management | Tasks | In Tasks |
+| FEED-07 | P1: Feed source management | Tasks | In Tasks |
+| FEED-08 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-09 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-10 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-11 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-12 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-13 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-14 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-15 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-16 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-17 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-18 | P1: Resilient sync core | Tasks | In Tasks |
+| FEED-19 | P1: Whitelist-overlap flag | Tasks | In Tasks |
+| FEED-20 | P1: Whitelist-overlap flag | Tasks | In Tasks |
+| FEED-21 | P1: Whitelist-overlap flag | Tasks | In Tasks |
+| FEED-22 | P1: Whitelist-overlap flag | Tasks | In Tasks |
+| FEED-23 | P1: Whitelist-overlap flag | Tasks | In Tasks |
+| FEED-24 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
+| FEED-25 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
+| FEED-26 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
+| FEED-27 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
+| FEED-28 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
+| FEED-29 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
+| FEED-30 | P2: Scheduled sync | Tasks | In Tasks |
+| FEED-31 | P2: Scheduled sync | Tasks | In Tasks |
+| FEED-32 | P2: Scheduled sync | Tasks | In Tasks |
+| FEED-33 | P2: Scheduled sync | Tasks | In Tasks |
+| FEED-34 | P2: Scheduled sync | Tasks | In Tasks |
+| FEED-35 | P3: Observability & controls | Tasks | In Tasks |
+| FEED-36 | P3: Observability & controls | Tasks | In Tasks |
+| FEED-37 | P3: Observability & controls | Tasks | In Tasks |
+| FEED-38 | P3: Observability & controls | Tasks | In Tasks |
+| FEED-39 | P3: Observability & controls | Tasks | In Tasks |
+| FEED-40 | P3: Observability & controls | Tasks | In Tasks |
 
 **ID format:** `FEED-[NUMBER]`
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
-**Coverage:** 40 total, 0 mapped to tasks (pre-Design), 0 unmapped ⚠️
+**Coverage:** 40 total, 40 mapped to Design, 40 mapped to Tasks, 0 unmapped.
 
 > Note: the ID ordering above groups by story; the whitelist-overlap criteria (spec §"Whitelist-overlap
 > flag & alert" AC 1–4) map to FEED-19..23 and the resilient-sync-core criteria (AC 1–11) map to

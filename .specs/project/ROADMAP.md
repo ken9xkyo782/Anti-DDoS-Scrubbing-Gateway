@@ -140,13 +140,15 @@
 
 ### Features
 
-**Agent worker & job pipeline** - IN PROGRESS (spec + context + design + tasks APPROVED)
+**Agent worker & job pipeline** - VERIFIED (executed; 262 control-plane tests passed)
 - Long-running Python worker (`app.worker`, control-plane package, A-AGW-1): blocking-pop consume of `apply:jobs` + startup/periodic **DB-ledger reconcile sweep** (fulfils the M1 outbox promise A-APLY-1/APLY-27/36); all transitions via the executed version-guarded `mark_*` (no new transition logic, APLY-03)
 - Handler registry keyed by `JobType` + **applier boundary**: v1 = succeeding placeholder (**D-AGW-1** — `active` = "acknowledged by worker" until M4#2 fills the boundary with the real build/swap); config read from PostgreSQL at apply time (identity-only jobs, A-AGW-5); `JobType` stays `SERVICE_UPDATE`-only (A-AGW-4 — PRD 6.8's `RULE_UPDATE`/`LIST_UPDATE` = `SERVICE_UPDATE`+`trigger`; other types arrive with M4#2/#3, M5)
 - Reliability: idempotent by `job_id`/version (duplicate delivery = no-op), no stale-over-new under churn (first concurrent exerciser of the M1 guards), Redis/DB outage = bounded-backoff degrade (Redis down → DB-poll mode); **orphaned-`applying` auto-recovery** on startup via `mark_failed`+existing retry path (**D-AGW-2**, zero new state-machine edges); restart preserves active state; ≤5 s nominal propagation asserted with the v1 applier (A-AGW-7)
 - Spec `spec.md` (AGW-01..30); context `context.md` (D-AGW-1..2, A-AGW-1..8); `design.md` (**AD-027**) + 2 rendered diagrams
 - Design (AD-027): new `app/worker/` package (`__main__`→`Worker` runtime→loop-free `process_job`/`reconcile_once`/`recover_orphan`→`HANDLERS` registry→`handle_service_update`→injected `Applier`, v1 `PlaceholderApplier`); **crux = two txns/job** (`mark_applying` commits+releases the service FOR UPDATE lock before the applier, terminal mark re-takes it → mid-apply `bump_version→N+1` caught by executed `_superseded`); orphan recovery = 1 txn `mark_failed`+`retry(actor=None)` (system audit already supported); shared `session_scope` UoW added to `db/session.py` (mirrors `get_db` post-commit callbacks so `retry` re-dispatch fires); `Settings` gains `WORKER_*` knobs; **no new models/migration/endpoints**. redis-py async `brpop` return web-verified
-- Tasks `tasks.md` (T1–T6, all 30 reqs mapped; baseline **B=209** static, 29 unit + 180 integration): **T1** `session_scope` UoW · **T2** applier boundary+snapshot+`PlaceholderApplier` · **T3** handler registry+`SERVICE_UPDATE` handler · **T4** processor (two-txn guard, reconcile, orphan recovery, supersede-under-churn crux)+truncation fixture · **T5** `Worker` runtime+`WORKER_*` settings+`python -m app.worker` · **T6** docs `[P]`. Only T6 `[P]` (all integration serial per TESTING.md shared infra); `apply.py` byte-for-byte unmodified; no new models/migration/endpoints. Tasks APPROVED (2026-07-10)
+- Tasks `tasks.md` (T1–T6, all 30 reqs verified): `session_scope`, applier boundary/snapshot,
+  handler registry, two-transaction processor/reconcile/orphan recovery, worker runtime/settings, and
+  docs all executed; final full gate = **262 passed** (2026-07-10).
 - Requires apply-status executed (**satisfied** — M1 landed `a4b1ffd..de47b5f`); pure control-plane, executable independently of M3 fairness Execute; no new endpoints (M1 read surfaces suffice)
 
 **Double-buffer map build/swap** - IN PROGRESS (spec + context + design + tasks drafted)
@@ -156,15 +158,29 @@
 - Spec `spec.md` (DBS-01..28); context `context.md` (D-DBS-1..3, A-DBS-1..8); `design.md` (**AD-028**) + 2 rendered diagrams (`diagrams/apply-dataflow.{mmd,svg}` component/data-flow, `diagrams/build-verify-swap.{mmd,svg}` sequence)
 - Design (AD-028): `DoubleBufferApplier` (Python, no BPF) loads full-node snapshot from PG → serializes to `apply_snapshot.h` binary wire format → execs new C helper `tools/xdpgw-apply.c` (fresh-inner replacement per outer via `bpf_map_create`+install, feed-map pointer-copy carry-forward, structural `verify_slot`, single `active_config` COMMIT); loader pins the 14 config maps + shared `fair_budget.h`; dpstat gains slot/version; no CP schema/JobType change. 1 fact web-verified (userspace map-in-map inner replace); novel separate-process-install-into-pinned-outer de-risked fail-fast (3-rung fallback)
 - Tasks `tasks.md` (T1–T8, all 28 reqs mapped; dp `make test` B=91 baseline): T1 contracts+loader pins+fair-math extract (build) · T2 `xdpgw-apply` scaffold+parser+**fresh-inner de-risk**+golden fixture (92) · T3 build/verify/single-write-flip core+verdict (≥97) · T4 fail-closed rollback+version/idempotency (≥101) · T5 `main()`+privileged smoke+`applybulk` ≤5 s/scale (full) · T6 `[P]` `DoubleBufferApplier`+DI swap+settings+fake-helper integration (CP full) · T7 `[P]` dpstat slot/version (build) · T8 `[P]` docs. C-track T1→T5 serial (shared files+smoke); only T6/T7/T8 `[P]`. All 3 pre-approval checks pass
-- Requires agent-worker **executed** first (M4 #1; currently Tasks APPROVED; **Execute hard-gated on it**); reuses frozen M4 build contracts (AD-015/019/021/023/025) + pin pattern (AD-017); D-SLRD-1 loader env seed downgrades to initial-slot bootstrap
+- Requires agent-worker executed first (**satisfied**); reuses frozen M4 build contracts
+  (AD-015/019/021/023/025) + pin pattern (AD-017); D-SLRD-1 loader env seed downgrades to initial-slot
+  bootstrap
 
-**Threat intelligence feed sync** - IN PROGRESS (spec + context drafted, awaiting approval)
+**Threat intelligence feed sync** - IN PROGRESS (spec + design APPROVED; tasks drafted)
 - Authoritative writer of `source=feed`/`scope=global` `BlacklistEntry` (AD-011 deferral, M4 #2 punt): `ThreatFeedSource` + `/feeds` CRUD + `POST /feeds/{id}/sync`; `JobType.feed_sync` + handler
 - Fetch/validate/normalize/dedup **per source** (plain IPv4/CIDR line lists only — D-FEED-2); bad feed **keeps last-active** entries + data-plane version; whitelist-overlap → flag + alert, **no global removal** (AD-003); `FeedSyncRun` stats recorded
 - **In-worker due-time scheduler** (D-FEED-3) enqueues `FEED_SYNC` for due enabled sources; manual sync always available
 - **Slot-aware global-deny rebuild + atomic swap** reusing M4 #2's `xdpgw-apply` helper (inverse carry-forward: rebuild global-deny, carry service maps) — D-FEED-1
-- Spec `spec.md` (FEED-01..40); context `context.md` (D-FEED-1..3, A-FEED-1..8)
-- **Execute hard-gated** on agent-worker (M4 #1) **and** double-buffer (M4 #2) executed; reuses AD-023 global-blacklist build contract + `BlacklistEntry` (blacklist-filters VERIFIED)
+- Spec `spec.md` (FEED-01..40, APPROVED); context `context.md` (D-FEED-1..3, A-FEED-1..8);
+  `design.md` + rendered architecture/sequence diagrams (**AD-029, APPROVED**)
+- Design: run-linked generalized `AgentJob` lifecycle; bounded background fetch lane; many-to-many feed
+  assertions over one materialized global row (manual promotion/demotion); SQL/GiST whitelist overlap;
+  desired-vs-active global digest; same `xdpgw-apply` gains global mode with inverse carry-forward and a
+  shared helper lock; 32 MiB/30 s fetch bound and 300..604800 s interval range
+- Agent-worker prerequisite is satisfied; real propagation remains **Execute hard-gated** on
+  double-buffer M4 #2. Reuses AD-023 global-blacklist build contract + `BlacklistEntry`
+  (blacklist-filters VERIFIED)
+- Tasks `tasks.md` (T1–T15; all 40 requirements mapped): T1 schema/job targets · T2 parser `[P]` ·
+  T3 bounded fetcher `[P]` · T4 assertion/overlap reconcile · T5 source lifecycle/enqueue · T6 manual
+  precedence · T7 API/history · T8 typed worker lifecycle · T9 sync runner · T10 scheduler · T11
+  background fetch coordinator · T12–T14 M4 #2-gated snapshot/Python applier/C global mode · T15 docs.
+  Mandatory granularity, dependency-diagram, and test co-location checks all pass; only T2/T3 parallel.
 
 ---
 

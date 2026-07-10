@@ -1,0 +1,42 @@
+%% Generated from: control-plane/app/{api,services,worker,db} + data-plane global-deny contracts
+%% Diagram: Threat Feed Sync — Component and Data Flow
+%% Note: M5 dashboard and M6 delivery consumers are omitted for clarity.
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#eef2ff', 'primaryTextColor': '#1e293b', 'primaryBorderColor': '#6366f1', 'lineColor': '#94a3b8', 'secondaryColor': '#ecfdf5', 'tertiaryColor': '#fffbeb', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155'}}}%%
+flowchart LR
+    admin[System Admin]
+    upstream[HTTPS Threat Feed]
+
+    subgraph controlPlane [Control Plane]
+        api[Feeds API]
+        postgres[(PostgreSQL<br/>sources · runs · assertions<br/>global deny state)]
+        redis[(Redis Job Queue)]
+    end
+
+    subgraph worker [Agent Worker]
+        scheduler[Due-time Scheduler]
+        processor[Job Processor]
+        fetcher[Bounded Background<br/>Feed Fetcher]
+        reconciler[Assertion Reconciler]
+        applier[Global Deny Applier]
+    end
+
+    subgraph dataPlane [Data Plane]
+        helper[xdpgw-apply<br/>global mode]
+        maps[(Inactive Slot Maps<br/>global bloom · LPM · meta)]
+        xdp[XDP Hot Path]
+    end
+
+    admin -->|Manages and requests sync| api
+    api -->|Persists and audits| postgres
+    api -->|Post-commit job ID| redis
+    scheduler -->|Queries due sources| postgres
+    scheduler -->|Enqueues FEED_SYNC| redis
+    redis -->|Delivers job ID| processor
+    processor --> fetcher
+    fetcher -->|HTTPS GET, no redirects| upstream
+    fetcher -->|Validated CIDRs| reconciler
+    reconciler -->|Assertions, overlaps, desired digest| postgres
+    reconciler -->|Changed desired set| applier
+    applier -->|Versioned global snapshot| helper
+    helper -->|Carry services, rebuild global, verify| maps
+    helper -->|Atomic active_config flip| xdp
