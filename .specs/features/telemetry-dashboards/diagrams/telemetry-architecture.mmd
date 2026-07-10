@@ -1,0 +1,43 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+graph LR
+    subgraph DP["Data-plane (XDP hot path)"]
+        RO["redirect_out()"] -->|clean pkt+bytes| SS[("svc_stat_map<br/>PERCPU_HASH[dp_id]")]
+        RD["record_drop()"] -->|drop pkt+bytes + reason| SS
+        RD --> CM[("counter_map<br/>node-global")]
+        RD --> RB[("drop_ringbuf<br/>sampled")]
+        ACfg[("active_config<br/>slot + version")]
+    end
+    subgraph READ["C reader (dpstat)"]
+        SNAP["dpstat snapshot --json<br/>one-shot; iterate hash;<br/>sum per-CPU; bpf_xdp_query"]
+    end
+    SS --> SNAP
+    CM --> SNAP
+    ACfg --> SNAP
+    subgraph WK["Python worker — background lane"]
+        AGG["TelemetryAggregator<br/>every &le;2s:<br/>delta + reset-detect<br/>dp_id &rarr; UUID"]
+    end
+    SNAP -->|JSON via subprocess| AGG
+    RB -. P2 stream .-> AGG
+    AGG --> DB[("Postgres<br/>TelemetryCounter<br/>NodeHealthSnapshot")]
+    LIVE[("AgentJob / FeedSyncRun<br/>live health sources")]
+    subgraph API["FastAPI read surface"]
+        TSVC["GET /services/{id}/telemetry<br/>load_service_for_principal &rarr; 404"]
+        TNODE["GET /node/telemetry, /node/health<br/>require_admin"]
+    end
+    DB --> TSVC
+    DB --> TNODE
+    LIVE --> TNODE
+    subgraph SPA["React SPA (Vite + TanStack Query)"]
+        TV["Tenant<br/>ServiceTelemetryPanel"]
+        AV["Admin<br/>NodeHealthPanel"]
+    end
+    TSVC -->|poll 2s| TV
+    TNODE -->|poll 2s| AV

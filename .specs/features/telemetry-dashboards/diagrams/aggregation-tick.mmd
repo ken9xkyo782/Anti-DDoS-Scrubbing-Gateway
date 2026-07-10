@@ -1,0 +1,35 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#4f46e5','primaryTextColor':'#ffffff','primaryBorderColor':'#3730a3','lineColor':'#94a3b8','secondaryColor':'#10b981','tertiaryColor':'#f59e0b','background':'#ffffff','mainBkg':'#f8fafc','actorBkg':'#4f46e5','actorTextColor':'#ffffff','noteBkgColor':'#f1f5f9','noteBorderColor':'#cbd5e1','titleColor':'#1e293b','edgeLabelBackground':'#ffffff','textColor':'#334155'}}}%%
+sequenceDiagram
+    autonumber
+    participant T as Timer
+    participant A as TelemetryAggregator
+    participant R as TelemetryReader
+    participant D as dpstat snapshot
+    participant K as Pinned BPF maps
+    participant PG as Postgres
+    participant SPA as React SPA
+
+    loop every telemetry interval up to 2s
+        T->>A: tick
+        A->>R: request snapshot
+        R->>D: exec subprocess with timeout
+        D->>K: read svc_stat and counter and active_config
+        K-->>D: per-CPU values
+        D-->>R: JSON of active, xdp, node, services
+        R-->>A: TelemetrySnapshot or None
+
+        alt reader returned None so gateway offline
+            A->>PG: write NodeHealthSnapshot mode offline
+        else snapshot present
+            Note over A: delta equals current minus previous, reset when negative or version changed
+            A->>PG: refresh dp_id to service and tenant cache
+            Note over A: first tick seeds baseline and emits no deltas
+            A->>PG: upsert TelemetryCounter rows for service and node
+            A->>PG: upsert NodeHealthSnapshot with mode version map_error throughput
+            A->>PG: prune windows older than retention
+        end
+        Note over A: on any error log and continue, never crash worker
+    end
+
+    SPA->>PG: GET telemetry and health via API every 2s
+    PG-->>SPA: latest window with staleness flag
