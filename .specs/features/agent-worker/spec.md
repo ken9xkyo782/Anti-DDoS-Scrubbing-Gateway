@@ -331,38 +331,39 @@ fixed, assert the service reaches `active` at the same version.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| AGW-01 | P1: Consumption loop | Spec | Pending |
-| AGW-02 | P1: Consumption loop | Spec | Pending |
-| AGW-03 | P1: Consumption loop | Spec | Pending |
-| AGW-04 | P1: Consumption loop | Spec | Pending |
-| AGW-05 | P1: Consumption loop | Spec | Pending |
-| AGW-06 | P1: Consumption loop | Spec | Pending |
-| AGW-07 | P1: Handler & applier boundary | Spec | Pending |
-| AGW-08 | P1: Handler & applier boundary | Spec | Pending |
-| AGW-09 | P1: Handler & applier boundary | Spec | Pending |
-| AGW-10 | P1: Handler & applier boundary | Spec | Pending |
-| AGW-11 | P1: Handler & applier boundary | Spec | Pending |
-| AGW-12 | P1: Ledger reconcile | Spec | Pending |
-| AGW-13 | P1: Ledger reconcile | Spec | Pending |
-| AGW-14 | P1: Ledger reconcile | Spec | Pending |
-| AGW-15 | P1: Ledger reconcile | Spec | Pending |
-| AGW-16 | P1: Ledger reconcile | Spec | Pending |
-| AGW-17 | P1: Ledger reconcile | Spec | Pending |
-| AGW-18 | P1: No stale-over-new | Spec | Pending |
-| AGW-19 | P1: No stale-over-new | Spec | Pending |
-| AGW-20 | P1: No stale-over-new | Spec | Pending |
-| AGW-21 | P2: Restart & orphan recovery | Spec | Pending |
-| AGW-22 | P2: Restart & orphan recovery | Spec | Pending |
-| AGW-23 | P2: Restart & orphan recovery | Spec | Pending |
-| AGW-24 | P2: Restart & orphan recovery | Spec | Pending |
-| AGW-25 | P2: Visibility & configuration | Spec | Pending |
-| AGW-26 | P2: Visibility & configuration | Spec | Pending |
-| AGW-27 | P2: Visibility & configuration | Spec | Pending |
-| AGW-28 | P2: Visibility & configuration | Spec | Pending |
-| AGW-29 | P2: Visibility & configuration | Spec | Pending |
-| AGW-30 | P3: Retry re-dispatch | Spec | Pending |
+| AGW-01 | P1: Consumption loop | Execute | Verified |
+| AGW-02 | P1: Consumption loop | Execute | Verified |
+| AGW-03 | P1: Consumption loop | Execute | Verified |
+| AGW-04 | P1: Consumption loop | Execute | Verified |
+| AGW-05 | P1: Consumption loop | Execute | Verified |
+| AGW-06 | P1: Consumption loop | Execute | Implemented |
+| AGW-07 | P1: Handler & applier boundary | Execute | Verified |
+| AGW-08 | P1: Handler & applier boundary | Execute | Verified |
+| AGW-09 | P1: Handler & applier boundary | Execute | Verified |
+| AGW-10 | P1: Handler & applier boundary | Execute | Verified |
+| AGW-11 | P1: Handler & applier boundary | Execute | Verified |
+| AGW-12 | P1: Ledger reconcile | Execute | Verified |
+| AGW-13 | P1: Ledger reconcile | Execute | Verified |
+| AGW-14 | P1: Ledger reconcile | Execute | Implemented; manual check pending |
+| AGW-15 | P1: Ledger reconcile | Execute | Implemented |
+| AGW-16 | P1: Ledger reconcile | Execute | Verified |
+| AGW-17 | P1: Ledger reconcile | Execute | Verified |
+| AGW-18 | P1: No stale-over-new | Execute | Verified |
+| AGW-19 | P1: No stale-over-new | Execute | Verified |
+| AGW-20 | P1: No stale-over-new | Execute | Verified |
+| AGW-21 | P2: Restart & orphan recovery | Execute | Verified |
+| AGW-22 | P2: Restart & orphan recovery | Execute | Verified |
+| AGW-23 | P2: Restart & orphan recovery | Execute | Verified |
+| AGW-24 | P2: Restart & orphan recovery | Execute | Verified |
+| AGW-25 | P2: Visibility & configuration | Execute | Verified |
+| AGW-26 | P2: Visibility & configuration | Execute | Verified |
+| AGW-27 | P2: Visibility & configuration | Execute | Verified |
+| AGW-28 | P2: Visibility & configuration | Execute | Verified |
+| AGW-29 | P2: Visibility & configuration | Execute | Verified |
+| AGW-30 | P3: Retry re-dispatch | Execute | Verified |
 
-**Coverage:** 30 total, 0 mapped to tasks, 30 unmapped (pre-Design).
+**Coverage:** 30 total, 30 mapped to executed tasks. AGW-14's destructive
+Redis-outage check remains a documented manual verification.
 
 ---
 

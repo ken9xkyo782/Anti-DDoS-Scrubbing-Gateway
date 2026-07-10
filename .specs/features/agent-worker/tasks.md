@@ -3,12 +3,11 @@
 **Design**: `.specs/features/agent-worker/design.md` (AD-027)
 **Spec**: `.specs/features/agent-worker/spec.md` (AGW-01..30)
 **Context**: `.specs/features/agent-worker/context.md` (D-AGW-1..2, A-AGW-1..8)
-**Status**: **APPROVED** (2026-07-10) → Execute (T1 first). Tools: `coding-guidelines` on T1–T5,
-`docs-writer` on T6 (confirmed).
+**Status**: **EXECUTED** (2026-07-10). T1–T6 are complete; the final full gate passed with
+262 tests. Tools: `coding-guidelines` on T1–T5, `docs-writer` on T6.
 
-**Baseline** (`control-plane/`, static count — **pin exact `pytest -q` total live at Execute start**):
-**B = 209** test functions (29 unit + 180 integration). All new tests are additive; **no pre-existing
-test is removed or weakened** (silent-deletion guard on every task).
+**Baseline** (`control-plane/`, pinned at Execute start): **B = 235** tests. The final full gate has
+**262 passed**. All worker tests are additive; no pre-existing test was removed or weakened.
 
 **Gate commands** (from `.specs/codebase/TESTING.md`, run in `control-plane/`):
 - **quick** — `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
@@ -36,6 +35,20 @@ its first step; later tasks reuse it.
 
 **Tools** (no MCPs configured — STATE Preferences): Skill `coding-guidelines` on every Python code task;
 `docs-writer` on T6. Confirm at approval.
+
+## Execution Results
+
+| Task | Status | Commit | Full-gate result |
+| --- | --- | --- | --- |
+| T1 | Complete | `ef81fc4` | 238 passed |
+| T2 | Complete | `9076521` | 242 passed |
+| T3 | Complete | `c02ae7b` | 245 passed |
+| T4 | Complete | `04cb472` | 257 passed |
+| T5 | Complete | `5793edd` | 262 passed |
+| T6 | Complete | `c236fb3` | 262 passed |
+
+The Redis-outage path is implemented and its isolated manual verification is documented in
+`.specs/codebase/TESTING.md`; it was not run as part of the shared automated test gate.
 
 ---
 
@@ -76,14 +89,14 @@ post-commit callbacks (mirrors `get_db`), so the worker's `retry`/`enqueue`-regi
 **Tools**: MCP: none · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `@asynccontextmanager async def session_scope() -> AsyncIterator[AsyncSession]`: yields a session;
+- [x] `@asynccontextmanager async def session_scope() -> AsyncIterator[AsyncSession]`: yields a session;
       on success `await session.commit()` then `await run_post_commit_callbacks(session)`; on exception
       `discard_post_commit_callbacks(session)` + `await session.rollback()` + re-raise.
-- [ ] `get_db` left **unchanged** (additive only).
-- [ ] Integration tests: (a) a registered post-commit callback **runs** after a successful scope;
+- [x] `get_db` left **unchanged** (additive only).
+- [x] Integration tests: (a) a registered post-commit callback **runs** after a successful scope;
       (b) an exception inside the scope → rollback + callback **discarded** (does not run) + raised;
       (c) a committed row is visible in a fresh session.
-- [ ] Gate passes: `full` · **Test count**: ≥ B+3 (no pre-existing test removed)
+- [x] Gate passes: `full` · **Test count**: ≥ B+3 (no pre-existing test removed)
 
 **Verify**: `cd control-plane && ruff check . && mypy app/ && pytest -q tests/integration/test_db_session.py`
 **Tests**: integration · **Gate**: full
@@ -104,18 +117,18 @@ post-commit callbacks (mirrors `get_db`), so the worker's `retry`/`enqueue`-regi
 **Tools**: MCP: none · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `@dataclass(frozen=True) ServiceConfig` carries `service_id`, `version`, service fields
+- [x] `@dataclass(frozen=True) ServiceConfig` carries `service_id`, `version`, service fields
       (name, `cidr_or_ip`, mode, enabled, `vip_pps`, `vip_bps`), `plan`, `rules`, `whitelist`,
       `blacklist` (immutable snapshot — full depth per flag #2).
-- [ ] `class Applier(Protocol): async def apply(self, config: ServiceConfig) -> None` (raises on failure).
-- [ ] `PlaceholderApplier.apply` logs one structured summary line (service + rule/list counts + version)
+- [x] `class Applier(Protocol): async def apply(self, config: ServiceConfig) -> None` (raises on failure).
+- [x] `PlaceholderApplier.apply` logs one structured summary line (service + rule/list counts + version)
       and returns; **touches no bpffs/data-plane** (AGW-21 binding).
-- [ ] `async def load_service_config(db, service_id) -> ServiceConfig | None` — eager-loads children;
+- [x] `async def load_service_config(db, service_id) -> ServiceConfig | None` — eager-loads children;
       returns `None` when the service is absent.
-- [ ] Integration tests: snapshot of a seeded service with rules+lists has correct counts/version;
+- [x] Integration tests: snapshot of a seeded service with rules+lists has correct counts/version;
       empty-children service snapshots cleanly; missing service → `None`; `PlaceholderApplier` returns
       without error and logs (caplog).
-- [ ] Gate passes: `full` · **Test count**: ≥ B+7 (T1 included)
+- [x] Gate passes: `full` · **Test count**: ≥ B+7 (T1 included)
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(worker): applier boundary, ServiceConfig snapshot & placeholder applier`
 
@@ -133,14 +146,14 @@ post-commit callbacks (mirrors `get_db`), so the worker's `retry`/`enqueue`-regi
 **Tools**: MCP: none · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `Handler = Callable[[AsyncSession, AgentJob, Applier], Awaitable[None]]`;
+- [x] `Handler = Callable[[AsyncSession, AgentJob, Applier], Awaitable[None]]`;
       `HANDLERS: dict[JobType, Handler] = {JobType.service_update: handle_service_update}`.
-- [ ] `handle_service_update(db, job, applier)`: `cfg = await load_service_config(db, job.target_id)`;
+- [x] `handle_service_update(db, job, applier)`: `cfg = await load_service_config(db, job.target_id)`;
       `cfg is None` → raise (→ mark_failed "service missing"); else `await applier.apply(cfg)`.
-- [ ] `class NoHandlerError(Exception)` defined (raised by the processor, not here).
-- [ ] Integration tests: `handle_service_update` invokes a `RecordingApplier` with the target's config
+- [x] `class NoHandlerError(Exception)` defined (raised by the processor, not here).
+- [x] Integration tests: `handle_service_update` invokes a `RecordingApplier` with the target's config
       (AGW-09); missing-service handler raises; `HANDLERS[JobType.service_update]` resolves.
-- [ ] Gate passes: `full` · **Test count**: ≥ B+10
+- [x] Gate passes: `full` · **Test count**: ≥ B+10
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(worker): job-type handler registry & SERVICE_UPDATE handler`
 
@@ -161,19 +174,19 @@ auto-recovery — plus the truncation-isolation test fixture the committing test
 **Tools**: MCP: none · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `process_job(job_id, *, session_factory, applier)`: **Txn1** `session_scope` — `db.get(AgentJob)`
+- [x] `process_job(job_id, *, session_factory, applier)`: **Txn1** `session_scope` — `db.get(AgentJob)`
       None → log+skip (AGW-16); `mark_applying`; re-read `job.status`; commit. `proceed = status is
       applying` else return (AGW-17/18). **Handler** (missing type → `NoHandlerError` path). **Txn2**
       `session_scope` — success → `mark_active`; handler raised → `mark_failed(f"{type}: {e}")`
       (`logger.exception` full trace). Handler/applier exceptions → `mark_failed`; **infra** exceptions
       propagate (not converted to `mark_failed`), with a bounded terminal-mark retry (AGW-11/15/25).
-- [ ] `reconcile_once(*, session_factory, applier, include_orphans)`: process `queued` jobs
+- [x] `reconcile_once(*, session_factory, applier, include_orphans)`: process `queued` jobs
       oldest-`version`-first via `process_job`; if `include_orphans`, `recover_orphan` each `applying`
       job; return count (AGW-12/13).
-- [ ] `recover_orphan(db, job)` (inside `session_scope`): `mark_failed(job.id, "worker restarted
+- [x] `recover_orphan(db, job)` (inside `session_scope`): `mark_failed(job.id, "worker restarted
       mid-apply")` then `retry(db, service, actor=None)` — one txn, existing edges (AGW-22, D-AGW-2).
-- [ ] Truncation-isolation fixture added (real-commit tests clean up deterministically).
-- [ ] Integration tests (all AGW-cited):
+- [x] Truncation-isolation fixture added (real-commit tests clean up deterministically).
+- [x] Integration tests (all AGW-cited):
       **happy ≤5 s** enqueue→`process_job`→`active`, `active_version=N`, elapsed ≤5 s (AGW-05 part);
       **superseded-skip** claim on an already-superseded job → handler skipped (AGW-18);
       **no-handler** (monkeypatched `HANDLERS`) → `failed`, no crash (AGW-08);
@@ -187,7 +200,7 @@ auto-recovery — plus the truncation-isolation test fixture the committing test
       `bump_version→N+1` in a separate session; release → vN `mark_active` no-ops (`superseded`),
       `process_job(vN+1)` → `active_version=N+1`, exactly one advance (AGW-18/19/20);
       **duplicate delivery** `process_job(id)` twice → one advance, second no-op (AGW-17).
-- [ ] Gate passes: `full` · **Test count**: ≥ B+20
+- [x] Gate passes: `full` · **Test count**: ≥ B+20
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(worker): version-guarded job processor, ledger reconcile & orphan recovery`
 
@@ -209,26 +222,26 @@ shutdown, Redis/DB bounded-backoff degrade), the `CONTROL_PLANE_WORKER_*` settin
 **Tools**: MCP: none · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `Settings` gains `worker_poll_timeout_seconds=2.0`, `worker_reconcile_interval_seconds=15.0`,
+- [x] `Settings` gains `worker_poll_timeout_seconds=2.0`, `worker_reconcile_interval_seconds=15.0`,
       `worker_backoff_initial_seconds=0.5`, `worker_backoff_max_seconds=30.0`,
       `worker_shutdown_grace_seconds=10.0` (env `CONTROL_PLANE_WORKER_*`).
-- [ ] `Worker` (ctor injects settings/redis/session_factory/applier): `run(stop=None)` — install
+- [x] `Worker` (ctor injects settings/redis/session_factory/applier): `run(stop=None)` — install
       SIGTERM/SIGINT → stop event (AGW-23); startup `reconcile_once(include_orphans=True)` + log effective
       config once (AGW-21/26); loop `BRPOP(key, poll)` → `(key,value)`→UUID→`process_job` (bad UUID →
       log+skip); `None`→reconcile-if-due `include_orphans=False` (AGW-06/13); `RedisError` → degraded
       DB-poll on backoff, retry BRPOP, resume (AGW-14); DB `OperationalError` → bounded backoff, no work
       dropped (AGW-15); shutdown → in-flight job `wait_for(grace)`, then `close_redis_client` +
       `dispose_engine` (AGW-23).
-- [ ] `_brpop` wrapper returns `uuid.UUID | None` (isolates the verified redis-py contract).
-- [ ] `app/worker/__main__.py`: configure logging; `Worker(settings=get_settings(),
+- [x] `_brpop` wrapper returns `uuid.UUID | None` (isolates the verified redis-py contract).
+- [x] `app/worker/__main__.py`: configure logging; `Worker(settings=get_settings(),
       applier=PlaceholderApplier()).run()` under `asyncio.run` (AGW-28).
-- [ ] Unit test (`[P]`-eligible, in `tests/unit`): backoff sequence initial→max capped; `_brpop` maps
+- [x] Unit test (`[P]`-eligible, in `tests/unit`): backoff sequence initial→max capped; `_brpop` maps
       `(key,value)`→UUID and `None`→None (pure, redis stubbed).
-- [ ] Integration tests: `Worker.run(stop)` with `stop` set after one enqueue → job `active` ≤5 s
+- [x] Integration tests: `Worker.run(stop)` with `stop` set after one enqueue → job `active` ≤5 s
       (AGW-01/05); graceful shutdown exits cleanly, mid-flight job (forced stop) left `applying` and
       healed by a follow-up startup sweep (AGW-23/24); **[gated]** `WORKER_REDIS_DOWN_TEST` degrade case
       (flag #4) or documented manual check deferred to T6.
-- [ ] Gate passes: `full` · **Test count**: ≥ B+25 (unit +2, integration +3)
+- [x] Gate passes: `full` · **Test count**: ≥ B+25 (unit +2, integration +3)
 **Tests**: integration (+ unit for backoff) · **Gate**: full
 **Commit**: `feat(worker): worker runtime loop, settings knobs & python -m app.worker entrypoint`
 
@@ -247,12 +260,12 @@ appliers, gated degrade check) and `README`/run docs (`python -m app.worker`, en
 **Tools**: MCP: none · Skill: `docs-writer`
 
 **Done when**:
-- [ ] TESTING.md: worker rows added (unit `test_worker_backoff`, integration `test_worker_*`), truncation
+- [x] TESTING.md: worker rows added (unit `test_worker_backoff`, integration `test_worker_*`), truncation
       fixture + injectable-applier convention, gated Redis-down note.
-- [ ] Run docs: `python -m app.worker` command, `CONTROL_PLANE_WORKER_*` env table with defaults,
+- [x] Run docs: `python -m app.worker` command, `CONTROL_PLANE_WORKER_*` env table with defaults,
       colocation note (A-AGW-1), and the D-AGW-1 placeholder caveat.
-- [ ] No code change; `full` gate still green (docs-only).
-- [ ] Gate passes: `full` (unchanged count) · **Test count**: = T5's total
+- [x] No code change; `full` gate still green (docs-only).
+- [x] Gate passes: `full` (unchanged count) · **Test count**: = T5's total
 **Tests**: none · **Gate**: full (no-op verification)
 **Commit**: `docs(worker): worker run command, env knobs & test conventions`
 
