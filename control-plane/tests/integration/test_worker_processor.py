@@ -367,7 +367,7 @@ async def test_duplicate_process_job_is_a_no_op_after_first_delivery(
     assert applier.versions == [1]
 
 
-async def test_reconcile_once_processes_queued_jobs_by_ascending_version(
+async def test_reconcile_once_processes_queued_jobs_by_created_at_and_id(
     committed_db: async_sessionmaker[AsyncSession],
 ) -> None:
     first_service_id, first_job_id = await seed_queued_job_without_dispatch(
@@ -405,4 +405,4 @@ async def test_reconcile_once_processes_queued_jobs_by_ascending_version(
     assert first_job.status == JobStatus.succeeded
     assert second_service.active_version == 1
     assert second_job.status == JobStatus.succeeded
-    assert applier.versions == [1, 2]
+    assert applier.versions == [2, 1]

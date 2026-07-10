@@ -6,15 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import AgentJob, JobStatus, ProtectedService
+from app.db.models import AgentJob, JobStatus
 from app.db.session import session_scope
-from app.services.apply import mark_active, mark_applying, mark_failed, retry
 from app.worker.applier import Applier
+from app.worker.feed_jobs import JOB_LIFECYCLES
 from app.worker.handlers import HANDLERS, NoHandlerError
 
 logger = logging.getLogger(__name__)
 
-ORPHAN_ERROR: Final = "worker restarted mid-apply"
 TERMINAL_MARK_ATTEMPTS: Final = 3
 
 
@@ -24,23 +23,22 @@ async def process_job(
     session_factory: async_sessionmaker[AsyncSession],
     applier: Applier,
 ) -> None:
-    """Process one durable job without holding the service lock across the handler."""
+    """Process one durable job without holding a transaction across its handler."""
     async with session_scope() as db:
         job = await db.get(AgentJob, job_id)
         if job is None:
             logger.warning("Apply job missing from ledger", extra={"job_id": str(job_id)})
             return
 
-        await mark_applying(db, job_id)
-        claimed = await db.get(AgentJob, job_id, populate_existing=True)
-        proceed = claimed is not None and claimed.status == JobStatus.applying
+        lifecycle = JOB_LIFECYCLES[job.job_type]
+        proceed = await lifecycle.claim(db, job)
 
     if not proceed:
         return
 
     error: str | None = None
     try:
-        async with session_factory() as db:
+        async with session_scope() as db:
             job = await db.get(AgentJob, job_id)
             if job is None:
                 logger.warning("Apply job missing from ledger", extra={"job_id": str(job_id)})
@@ -48,7 +46,7 @@ async def process_job(
             handler = HANDLERS.get(job.job_type)
             if handler is None:
                 raise NoHandlerError(f"No handler for job type {job.job_type}")
-            await handler(db, job, applier)
+        await handler(job, applier)
     except SQLAlchemyError:
         raise
     except Exception as exc:
@@ -71,7 +69,7 @@ async def reconcile_once(
                 await db.scalars(
                     select(AgentJob.id)
                     .where(AgentJob.status == JobStatus.queued)
-                    .order_by(AgentJob.version.asc())
+                    .order_by(AgentJob.created_at.asc(), AgentJob.id.asc())
                 )
             ).all()
         )
@@ -90,7 +88,7 @@ async def reconcile_once(
                 await db.scalars(
                     select(AgentJob.id)
                     .where(AgentJob.status == JobStatus.applying)
-                    .order_by(AgentJob.version.asc())
+                    .order_by(AgentJob.created_at.asc(), AgentJob.id.asc())
                 )
             ).all()
         )
@@ -107,23 +105,23 @@ async def reconcile_once(
 
 
 async def recover_orphan(db: AsyncSession, job: AgentJob) -> None:
-    """Atomically move a startup orphan through failed back to queued work."""
-    await mark_failed(db, job.id, ORPHAN_ERROR)
-    service = await db.get(ProtectedService, job.target_id)
-    if service is None:
-        logger.warning("Orphaned job service missing", extra={"job_id": str(job.id)})
-        return
-    await retry(db, service, actor=None)
+    """Dispatch startup recovery to the durable job's target-aware lifecycle."""
+    await JOB_LIFECYCLES[job.job_type].recover(db, job)
 
 
 async def _mark_terminal(job_id: uuid.UUID, error: str | None) -> None:
     for attempt in range(TERMINAL_MARK_ATTEMPTS):
         try:
             async with session_scope() as db:
+                job = await db.get(AgentJob, job_id)
+                if job is None:
+                    logger.warning("Apply job missing from ledger", extra={"job_id": str(job_id)})
+                    return
+                lifecycle = JOB_LIFECYCLES[job.job_type]
                 if error is None:
-                    await mark_active(db, job_id)
+                    await lifecycle.succeed(db, job, None)
                 else:
-                    await mark_failed(db, job_id, error)
+                    await lifecycle.fail(db, job, error)
             return
         except OperationalError:
             if attempt + 1 == TERMINAL_MARK_ATTEMPTS:
