@@ -10,9 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.redis import close_redis_client, get_redis_client
+from app.db.models import utc_now
 from app.db.session import dispose_engine, get_session_factory
 from app.services.apply import APPLY_QUEUE_KEY
 from app.worker.applier import Applier, PlaceholderApplier
+from app.worker.feed_scheduler import enqueue_due_feed_syncs
 from app.worker.processor import process_job, reconcile_once
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,11 @@ class Worker:
 
         try:
             while not stop_event.is_set():
+                backoff = await self._schedule_due_feeds(
+                    stop_event,
+                    backoff,
+                    "startup feed scheduling",
+                )
                 inflight = asyncio.create_task(
                     reconcile_once(
                         session_factory=self.session_factory,
@@ -81,6 +88,11 @@ class Worker:
                     if not redis_degraded:
                         logger.warning("Redis unavailable; degrading to ledger reconciliation")
                     redis_degraded = True
+                    backoff = await self._schedule_due_feeds(
+                        stop_event,
+                        backoff,
+                        "degraded feed scheduling",
+                    )
                     inflight = asyncio.create_task(
                         reconcile_once(
                             session_factory=self.session_factory,
@@ -132,6 +144,11 @@ class Worker:
 
                 if asyncio.get_running_loop().time() < next_reconcile:
                     continue
+                backoff = await self._schedule_due_feeds(
+                    stop_event,
+                    backoff,
+                    "periodic feed scheduling",
+                )
                 inflight = asyncio.create_task(
                     reconcile_once(
                         session_factory=self.session_factory,
@@ -157,6 +174,18 @@ class Worker:
                 await close_redis_client()
             finally:
                 await dispose_engine()
+
+    async def _schedule_due_feeds(
+        self,
+        stop: asyncio.Event,
+        current_backoff: float | None,
+        operation: str,
+    ) -> float | None:
+        try:
+            await enqueue_due_feed_syncs(self.session_factory, utc_now())
+        except OperationalError:
+            return await self._back_off(stop, current_backoff, operation)
+        return None
 
     async def _brpop(self) -> uuid.UUID | None:
         result = await self.redis.brpop(
