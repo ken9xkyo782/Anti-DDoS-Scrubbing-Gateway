@@ -1,0 +1,35 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    participant DBA as DoubleBufferApplier (py)
+    participant AP as xdpgw-apply (C)
+    participant AC as active_config (pinned)
+    participant OUT as slotted outers (pinned)
+    DBA->>AP: exec(snapshot_path), env=node knobs
+    AP->>AC: read {active_slot=A, version=V}
+    Note over AP: target = inactive = 1 - A
+    loop each service-scoped outer
+        AP->>OUT: lookup(outer, A) -> cur inner -> get_info (meta)
+        AP->>AP: bpf_map_create(fresh inner, meta-equal)
+        AP->>AP: populate fresh inner from snapshot
+        AP->>OUT: update(outer, inactive, fresh_inner_fd) (install)
+    end
+    loop each feed-owned map (global bl bloom/lpm, bitmap, gbl_meta)
+        AP->>OUT: carry-forward A's inner/row into inactive
+    end
+    AP->>OUT: verify_slot(inactive): every enabled svc present,<br/>rule_block version/count match, inner fds installed
+    alt verify fails or any build write failed
+        AP-->>DBA: exit != 0 (stderr = reason) - NO flip
+        Note over DBA: raise -> process_job Txn2 mark_failed<br/>active_version kept, last-good slot live
+    else verify passes
+        AP->>AC: update(key 0, {active_slot=inactive, version=V+1}) single write COMMIT
+        AP-->>DBA: exit 0
+        Note over DBA: return -> process_job Txn2 mark_active
+    end

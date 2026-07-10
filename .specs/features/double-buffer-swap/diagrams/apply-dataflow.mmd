@@ -1,0 +1,33 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TD
+    subgraph worker [Agent Worker · python -m app.worker · EXECUTED boundary]
+        h[handle_service_update<br/>load_service_config -> applier.apply cfg]
+        dba[[DoubleBufferApplier<br/>NEW · replaces PlaceholderApplier at __main__ DI]]
+        h --> dba
+    end
+    pg[(PostgreSQL<br/>services · plans · rules · lists)]
+    snap[/full-node snapshot<br/>apply_snapshot.h wire format<br/>temp file/]
+    dba -->|1 read consistent snapshot<br/>all active services| pg
+    dba -->|2 serialize| snap
+    dba -->|3 exec + await exit code| helper
+
+    subgraph dp [Data-plane node · bpffs /sys/fs/bpf/xdp_gateway]
+        helper[[xdpgw-apply · NEW C helper<br/>build -> verify -> flip]]
+        pins[(pinned config maps<br/>service_map · rule_block_map · whitelist_* ·<br/>vip_config_map · star_blacklist_star · bitmap ·<br/>fair_config_map · fair_node_config · gbl_meta ·<br/>active_config)]
+        prog[XDP hot path<br/>reads active_slot -> outer slot inners]
+    end
+    snap -->|read| helper
+    env[/node knobs from env<br/>CAPACITY · FAIR_K · REF_PKT/] -->|fair budgets| helper
+    helper -->|build INACTIVE slot:<br/>fresh inners installed into outers ·<br/>carry-forward feed inners · verify| pins
+    helper -->|single active_config write = COMMIT| pins
+    prog -->|per packet: active_slot| pins
+    loader[loader.c · pins config maps at load<br/>owns map lifetime · initial seed] -.->|creates pins + slot 0/1| pins
+    dpstat[dpstat · reads active_slot/version] -.-> pins
