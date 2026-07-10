@@ -29,6 +29,9 @@ No mocking of the DB/Redis for integration tests — use the real services (PG-s
 | Auth service | `app/services/auth.py` | integration |
 | API routers | `app/api/routers/*.py` | integration (API via AsyncClient) |
 | Bootstrap CLI | `app/cli.py` | integration |
+| Worker backoff and Redis-pop helper | `app/worker/worker.py` | unit: `tests/unit/test_worker_backoff.py` |
+| Worker processor and reconciliation | `app/worker/processor.py` | integration: `tests/integration/test_worker_processor.py` |
+| Worker runtime and module entrypoint | `app/worker/worker.py`, `app/worker/__main__.py` | integration: `tests/integration/test_worker_runtime.py` |
 
 **Rule:** a task creating any layer above writes that layer's tests **in the same task** (highest type wins if it spans layers). `Tests: none` only where the matrix says none.
 
@@ -56,7 +59,41 @@ Every task's **Done when** cites the expected pass count (e.g. "N tests pass") t
 - Test files: `tests/unit/test_*.py`, `tests/integration/test_*.py`.
 - Async tests: `pytest-asyncio` in `auto` mode; fixtures yield `AsyncSession` / `redis.asyncio` clients bound to `compose.test.yml`.
 - Shared fixtures in `tests/conftest.py`: `db_session` (transaction-rolled-back), `redis_client` (flushed per test), `client` (httpx `AsyncClient` over the ASGI app), `admin_principal` / `tenant_principal` factories.
+- Worker real-commit tests use `committed_db` in
+  `tests/integration/conftest.py`, not the rollback-isolation `db_session`
+  fixture. It truncates the affected tables before and after each test so
+  `session_scope` commits remain isolated.
+- Inject `RecordingApplier`, `FailingApplier`, or `BarrierApplier` into worker
+  processor and runtime tests. These appliers make acknowledgments, failures,
+  and mid-apply coordination deterministic without touching the data plane.
 - Secrets: tests never assert on plaintext passwords; a log-capture fixture asserts **no** credential material is emitted (Success Criteria).
+
+### Redis-down worker verification
+
+The Redis-down check is deliberately isolated and manual.
+`WORKER_REDIS_DOWN_TEST` is unset, and no automated gated case verifies this path.
+Do not report it as having passed automatically. Run this procedure alone, not
+alongside integration tests:
+
+1. Stop test Redis:
+
+   ```sh
+   docker compose -f control-plane/compose.test.yml stop redis
+   ```
+
+2. Commit a normal service update while Redis is down.
+
+3. Run the worker and verify its DB-ledger reconciliation reaches `active`
+   without a failed job.
+
+4. Restart Redis:
+
+   ```sh
+   docker compose -f control-plane/compose.test.yml start redis
+   ```
+
+5. Verify the `Redis connection resumed` log, then verify a new ordinary enqueue
+   reaches `active` via BRPOP within 5 seconds.
 
 ---
 
