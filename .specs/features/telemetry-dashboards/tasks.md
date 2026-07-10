@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/telemetry-dashboards/design.md` (AD-030)
 **Spec**: `.specs/features/telemetry-dashboards/spec.md` (TEL-01..40)
-**Status**: Draft
+**Status**: Executing
 
 **Confirmed defaults carried from Design review** (the 3 flags):
 - D-030-6 — aggregation is a **worker background task**, no `TELEMETRY_AGGREGATE` `JobType`. ✅
@@ -10,6 +10,19 @@
 - D-030-3 — `svc_stat` value uses `drop_by_reason[DROP_REASON_CAP=32]`. ✅
 
 **Baselines (pin live at first Execute gate):** `B_dp` = `make test` count (≥ 91 post-blacklist; +fairness if executed by then); `B_cp` = `pytest -q` count (agent-worker landed 262 + feed-sync tests); `B_fe` = 0 (new project).
+
+**Execution status (2026-07-10):**
+
+| Task | Status | Evidence |
+| --- | --- | --- |
+| T1 | Complete | `e77b114`; 112 DP tests reported green |
+| T2 | Complete | `9b7cecb`; 112 DP tests + redirect/fairness smoke + pin lifecycle green |
+| T3 | Complete | `5684f63`; build, offline, live native snapshot, JSON, and pin lifecycle green |
+| T4 | Partial | scoped implementation/tests ready; full CP gate blocked by pre-existing feed-worker lint/type errors |
+| T6 | Partial | 6 focused unit tests green; quick CP gate blocked by the same pre-existing errors |
+| T10 | Paused | RED test fixture correction needs user approval before implementation |
+
+T3 additionally pins `active_config` with the established observability lifecycle: the approved `active{slot,version}` snapshot contract is otherwise unreadable by `dpstat`.
 
 **Tracks:** **DP** (`data-plane/`, C) · **CP** (`control-plane/app`, Python) · **FE** (`control-plane/frontend/`, React/TS). DP and CP/FE are separate dirs with separate gates → **cross-track parallel**. Within CP, only **unit**-typed tasks may be `[P]` (integration shares `compose.test.yml`). FE is a separate toolchain (Vitest, no compose.test) → the FE scaffold is `[P]`, but FE view tasks serialize on the shared project tree.
 
