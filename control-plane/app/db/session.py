@@ -1,5 +1,6 @@
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -46,6 +47,19 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with get_session_factory()() as session:
+        try:
+            yield session
+            await session.commit()
+            await run_post_commit_callbacks(session)
+        except Exception:
+            discard_post_commit_callbacks(session)
+            await session.rollback()
+            raise
+
+
+@asynccontextmanager
+async def session_scope() -> AsyncIterator[AsyncSession]:
     async with get_session_factory()() as session:
         try:
             yield session
