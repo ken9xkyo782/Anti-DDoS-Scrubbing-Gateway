@@ -1,0 +1,41 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+flowchart TD
+    subgraph api [FastAPI Control-Plane · EXECUTED · producer]
+        mut[Service/Rule/List mutations] --> disp[ApplyDispatcher.dispatch<br/>post-commit LPUSH]
+        api_retry[POST .../apply-status/retry]
+    end
+    redis[(Redis list<br/>apply:jobs · LPUSH/BRPOP)]
+    db[(PostgreSQL<br/>agent_job · protected_service)]
+    disp -->|LPUSH job_id| redis
+    api_retry --> db
+
+    subgraph worker [Agent Worker · NEW · python -m app.worker]
+        loop[Worker.run<br/>BRPOP + reconcile + signals]
+        recon[reconcile_once<br/>queued + orphaned applying]
+        proc[process_job<br/>mark_applying then handle then mark_active/failed]
+        reg{{HANDLERS registry<br/>JobType to handler}}
+        h[handle_service_update<br/>load full config at apply time]
+        applier[[Applier boundary<br/>v1 PlaceholderApplier · M4#2 DoubleBufferApplier]]
+        uow[(session_scope<br/>commit + run_post_commit_callbacks)]
+    end
+
+    redis -->|BRPOP job_id| loop
+    loop --> proc
+    loop -->|startup + periodic| recon
+    recon --> proc
+    recon -->|orphan applying| recover[recover_orphan<br/>mark_failed + retry]
+    proc --> reg --> h --> applier
+    proc -->|mark_*| db
+    recover -->|mark_failed+retry| db
+    recover -.->|post-commit re-dispatch| redis
+    proc -.->|via| uow
+    recover -.->|via| uow
+    h -->|read-only snapshot| db

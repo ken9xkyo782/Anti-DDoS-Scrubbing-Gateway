@@ -1,0 +1,37 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    participant L as Worker loop
+    participant P as process_job
+    participant AP as apply.mark_* (executed)
+    participant DB as PostgreSQL
+    participant H as handler + Applier
+    L->>P: job_id (from BRPOP or reconcile)
+    Note over P,DB: Txn 1 — claim
+    P->>DB: db.get(AgentJob) — exists? (else log+skip, AGW-16)
+    P->>AP: mark_applying(job_id)
+    AP->>DB: FOR UPDATE service+job — version ok then applying, attempts+1<br/>(superseded/terminal then no-op)
+    P->>DB: COMMIT (releases service lock) + run callbacks
+    P->>P: proceed = (job.status == applying)?
+    alt not proceed (superseded / terminal)
+        P-->>L: done (handler skipped, AGW-18)
+    else proceed
+        Note over H,DB: no lock held — a mutation may commit N+1 here
+        P->>H: handle_service_update(read full config, invoke Applier)
+        Note over P,DB: Txn 2 — finalize
+        alt Applier succeeded
+            P->>AP: mark_active(job_id)
+            AP->>DB: FOR UPDATE — version==N then active, active_version=N<br/>version moved then superseded (no stale-over-new, AGW-19)
+        else Applier raised
+            P->>AP: mark_failed(job_id, err)
+            AP->>DB: FOR UPDATE — version==N then failed (active_version kept, AGW-11)
+        end
+        P->>DB: COMMIT + run callbacks
+    end
