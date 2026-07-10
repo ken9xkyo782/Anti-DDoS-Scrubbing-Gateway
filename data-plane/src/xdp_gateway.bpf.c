@@ -130,6 +130,7 @@ static __always_inline int redirect_out(struct pkt_meta *meta)
 {
 	meta->verdict = PKT_VERDICT_REDIRECT;
 	write_test_meta(meta);
+	svc_stat_clean(meta);
 	return bpf_redirect_map(&tx_devmap, 0, XDP_DROP);
 }
 
@@ -161,10 +162,10 @@ static __always_inline int service_lookup_redirect(struct xdp_md *ctx,
 	if (!service)
 		return record_drop(meta, DR_SERVICE_MISS);
 
+	meta->service_id = service->service_id;
 	if (!service->enabled)
 		return record_drop(meta, DR_SERVICE_DISABLED);
 
-	meta->service_id = service->service_id;
 	ret = ingress_cap_stage(ctx, meta, slot);
 	if (ret != FAIR_CONTINUE)
 		return ret;
@@ -185,6 +186,7 @@ int xdp_gateway(struct xdp_md *ctx)
 	enum parse_result res;
 	int test_ret;
 
+	meta.frame_len = (__u16)(data_end - data);
 	if (test_bad_reason_enabled())
 		return record_drop(&meta, (enum drop_reason)DROP_REASON_CAP);
 	test_ret = test_whitelist_bloom_probe(&meta);

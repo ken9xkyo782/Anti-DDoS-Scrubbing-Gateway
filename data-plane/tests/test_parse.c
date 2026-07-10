@@ -19,6 +19,7 @@
 #include "pkt_meta.h"
 #include "rules.h"
 #include "service.h"
+#include "svc_stat.h"
 #include "blacklist.h"
 #include "whitelist.h"
 #include "xdp_gateway.test.skel.h"
@@ -33,6 +34,7 @@ struct test_env {
 	struct xdp_gateway_test_bpf *skel;
 	int prog_fd;
 	int counter_fd;
+	int svc_stat_fd;
 	int meta_fd;
 	int service_inner0_fd;
 	int service_inner1_fd;
@@ -90,6 +92,7 @@ struct test_env {
 static int build_default_udp_frame(struct pkt_frame *frame);
 static int set_ipv4_addrs(struct pkt_frame *frame, __u32 src_host,
 			  __u32 dst_host);
+static int clear_u32_hash_map(int fd);
 
 static int env_open(struct test_env *env)
 {
@@ -127,6 +130,7 @@ static int env_open(struct test_env *env)
 
 	env->prog_fd = bpf_program__fd(env->skel->progs.xdp_gateway);
 	env->counter_fd = bpf_map__fd(env->skel->maps.counter_map);
+	env->svc_stat_fd = bpf_map__fd(env->skel->maps.svc_stat_map);
 	env->meta_fd = bpf_map__fd(env->skel->maps.test_meta_map);
 	env->service_inner0_fd = bpf_map__fd(env->skel->maps.service_inner_0);
 	env->service_inner1_fd = bpf_map__fd(env->skel->maps.service_inner_1);
@@ -195,7 +199,8 @@ static int env_open(struct test_env *env)
 	env->sample_stats_fd = bpf_map__fd(env->skel->maps.sample_stats);
 	env->gbl_meta_fd = bpf_map__fd(env->skel->maps.gbl_meta);
 	env->bloom_stats_fd = bpf_map__fd(env->skel->maps.bloom_stats);
-	if (env->prog_fd < 0 || env->counter_fd < 0 || env->meta_fd < 0 ||
+	if (env->prog_fd < 0 || env->counter_fd < 0 || env->svc_stat_fd < 0 ||
+	    env->meta_fd < 0 ||
 	    env->service_inner0_fd < 0 || env->service_inner1_fd < 0 ||
 	    env->service_map_fd < 0 || env->rule_block0_fd < 0 ||
 	    env->rule_block1_fd < 0 || env->rule_block_map_fd < 0 ||
@@ -269,6 +274,8 @@ static int reset_observability(struct test_env *env)
 			break;
 		}
 	}
+	if (!err && clear_u32_hash_map(env->svc_stat_fd) != 0)
+		err = -1;
 
 	key = 0;
 	if (!err && bpf_map_update_elem(env->meta_fd, &key, &zero_meta, 0) != 0)
@@ -1093,6 +1100,34 @@ static int read_counter(struct test_env *env, enum drop_reason reason, __u64 *su
 	return err;
 }
 
+static int read_svc_stat(struct test_env *env, __u32 dp_id,
+			 struct svc_stat *sum)
+{
+	struct svc_stat *values;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->svc_stat_fd, &dp_id, values);
+	if (err == 0) {
+		memset(sum, 0, sizeof(*sum));
+		for (int cpu = 0; cpu < env->possible_cpus; cpu++) {
+			sum->clean_pkts += values[cpu].clean_pkts;
+			sum->clean_bytes += values[cpu].clean_bytes;
+			sum->drop_pkts += values[cpu].drop_pkts;
+			sum->drop_bytes += values[cpu].drop_bytes;
+			for (int reason = 0; reason < DROP_REASON_CAP; reason++)
+				sum->drop_by_reason[reason] +=
+					values[cpu].drop_by_reason[reason];
+		}
+	}
+
+	free(values);
+	return err;
+}
+
 static int read_sample_stat(struct test_env *env, enum sample_stat stat,
 			    __u64 *sum)
 {
@@ -1398,6 +1433,39 @@ static int expect_fd(const char *label, int fd)
 
 	fprintf(stderr, "%s: invalid fd %d\n", label, fd);
 	return -1;
+}
+
+static int expect_svc_stats_empty(struct test_env *env)
+{
+	__u32 dp_id;
+
+	if (bpf_map_get_next_key(env->svc_stat_fd, NULL, &dp_id) != 0 &&
+	    errno == ENOENT)
+		return 0;
+
+	fprintf(stderr, "svc_stat: unexpectedly contains dp_id %u\n", dp_id);
+	return -1;
+}
+
+static int expect_svc_stat(struct test_env *env, __u32 dp_id,
+			   __u64 clean_pkts, __u64 clean_bytes,
+			   __u64 drop_pkts, __u64 drop_bytes,
+			   enum drop_reason reason, __u64 reason_count)
+{
+	struct svc_stat stat;
+
+	if (read_svc_stat(env, dp_id, &stat) != 0) {
+		fprintf(stderr, "svc_stat[%u]: read failed: %s\n", dp_id,
+			strerror(errno));
+		return -1;
+	}
+	if (expect_u64("svc clean_pkts", stat.clean_pkts, clean_pkts) != 0 ||
+	    expect_u64("svc clean_bytes", stat.clean_bytes, clean_bytes) != 0 ||
+	    expect_u64("svc drop_pkts", stat.drop_pkts, drop_pkts) != 0 ||
+	    expect_u64("svc drop_bytes", stat.drop_bytes, drop_bytes) != 0)
+		return -1;
+	return expect_u64("svc drop_by_reason", stat.drop_by_reason[reason],
+			  reason_count);
 }
 
 static int expect_redirect_meta(struct test_env *env, struct pkt_meta *meta,
@@ -2699,6 +2767,8 @@ static int test_config_maps_load(void)
 	if (!err)
 		err = expect_fd("rate_limit_state", env.rate_limit_state_fd);
 	if (!err)
+		err = expect_fd("svc_stat_map", env.svc_stat_fd);
+	if (!err)
 		err = expect_fd("rl_config", env.rl_config_fd);
 	if (!err)
 		err = expect_fd("active_config", env.active_config_fd);
@@ -2839,6 +2909,8 @@ static int test_service_miss_drops(void)
 		err = expect_u32("retval", retval, XDP_DROP);
 	if (!err)
 		err = expect_counter(&env, DR_SERVICE_MISS, 1);
+	if (!err)
+		err = expect_svc_stats_empty(&env);
 
 	env_close(&env);
 	return err;
@@ -2869,6 +2941,9 @@ static int test_service_disabled_drops(void)
 		err = expect_u32("retval", retval, XDP_DROP);
 	if (!err)
 		err = expect_counter(&env, DR_SERVICE_DISABLED, 1);
+	if (!err)
+		err = expect_svc_stat(&env, 7, 0, 0, 1, frame.len,
+				      DR_SERVICE_DISABLED, 1);
 
 	env_close(&env);
 	return err;
@@ -2898,6 +2973,76 @@ static int test_enabled_service_sets_redirect_meta(void)
 		err = expect_u8("wl_state", meta.wl_state, WL_STATE_NONE);
 	if (!err)
 		err = expect_all_drop_counters_zero(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_svc_stat_clean_counts_exact(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = run_enabled_service_frame(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u16("frame_len", meta.frame_len, frame.len);
+	if (!err)
+		err = expect_svc_stat(&env, DEFAULT_SERVICE_ID, 1, frame.len,
+				      0, 0, DR_SERVICE_DISABLED, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_svc_stat_drop_counts_exact(void)
+{
+	struct rule_block block = {
+		.version = 1,
+		.rule_count = 1,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	block.rules[0] = default_udp_rule();
+	block.rules[0].flags |= RULE_F_PPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_RATE_LIMIT_DROP, 1);
+	if (!err)
+		err = expect_svc_stat(&env, DEFAULT_SERVICE_ID, 0, 0, 1,
+				      frame.len, DR_RATE_LIMIT_DROP, 1);
 
 	env_close(&env);
 	return err;
@@ -5750,6 +5895,8 @@ static int test_vlan_ipv6_drops_ipv6_counter(void)
 		err = expect_u32("retval", retval, XDP_DROP);
 	if (!err)
 		err = expect_counter(&env, DR_IPV6_UNSUPPORTED, 1);
+	if (!err)
+		err = expect_svc_stats_empty(&env);
 
 	env_close(&env);
 	return err;
@@ -5853,6 +6000,8 @@ static int test_arp_passes_without_drop_counter(void)
 		err = expect_u8("verdict", meta.verdict, PKT_VERDICT_REDIRECT);
 	if (!err)
 		err = expect_all_drop_counters_zero(&env);
+	if (!err)
+		err = expect_svc_stats_empty(&env);
 
 	env_close(&env);
 	return err;
@@ -5934,6 +6083,10 @@ int main(void)
 		{ "service disabled drops", test_service_disabled_drops },
 			{ "enabled service sets redirect meta",
 			  test_enabled_service_sets_redirect_meta },
+			{ "service stat clean counts exact",
+			  test_svc_stat_clean_counts_exact },
+			{ "service stat drop counts exact",
+			  test_svc_stat_drop_counts_exact },
 			{ "whitelist hit bypasses rules",
 			  test_whitelist_hit_bypasses_rules },
 			{ "whitelist scope does not cross service",

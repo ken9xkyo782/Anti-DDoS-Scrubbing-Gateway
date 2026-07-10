@@ -28,6 +28,8 @@ enum drop_reason {
 _Static_assert(DROP_REASON_COUNT <= DROP_REASON_CAP,
 	       "drop reason ABI exceeds counter map capacity");
 
+#include "svc_stat.h"
+
 #ifndef __BPF__
 static const char *const drop_reason_name[DROP_REASON_COUNT] = {
 	[DR_IPV6_UNSUPPORTED] = "ipv6_unsupported",
@@ -77,6 +79,7 @@ static __always_inline int record_drop(const struct pkt_meta *meta,
 
 	if (count)
 		__sync_fetch_and_add(count, 1);
+	svc_stat_drop(meta, key);
 	sample_drop(meta, key);
 
 	return XDP_DROP;

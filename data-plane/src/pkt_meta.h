@@ -24,7 +24,8 @@ struct pkt_meta {
 	__u8 bl_state;
 	/* Deliberate 32 -> 40 B growth for the fairness-stage test-hook ABI. */
 	__u8 fair_state;
-	__u8 _pad2[7];
+	__u8 _pad2[5];
+	__u16 frame_len;
 };
 
 _Static_assert(sizeof(struct pkt_meta) == 40,
