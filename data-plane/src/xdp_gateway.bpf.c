@@ -142,6 +142,7 @@ static __always_inline int service_lookup_redirect(struct xdp_md *ctx,
 	struct service_val *service;
 	void *inner;
 	__u32 slot;
+	int ret;
 
 	config = bpf_map_lookup_elem(&active_config, &config_key);
 	if (!config)
@@ -164,7 +165,9 @@ static __always_inline int service_lookup_redirect(struct xdp_md *ctx,
 		return record_drop(meta, DR_SERVICE_DISABLED);
 
 	meta->service_id = service->service_id;
-	/* WLV-24 seam A: M3#4 ingress-cost cap inserts here. */
+	ret = ingress_cap_stage(ctx, meta, slot);
+	if (ret != FAIR_CONTINUE)
+		return ret;
 	return whitelist_stage(ctx, meta, slot, service);
 }
 

@@ -455,14 +455,14 @@ for recomputing headroom on plan changes.
 | FAIR-11 | P1: Node headroom | §10.2 idx 12, committed skips | Spec | Pending |
 | FAIR-12 | P1: Node headroom | **GA-2**, A-SRL-4, D-SLRD-1 | Spec | Pending |
 | FAIR-13 | P1: Node headroom | SRL-36 oversubscription consequence | Spec | Pending |
-| FAIR-14 | P1: Ingress cap | §8.4.3, WLV-24 seam A, raw cost | Spec | Pending |
-| FAIR-15 | P1: Ingress cap | **GA-1** k×ceiling, AD-019 rodata posture | Spec | Pending |
-| FAIR-16 | P1: Ingress cap | §10.2 idx 13, early terminal | Spec | Pending |
-| FAIR-17 | P1: Ingress cap | §13/§11.1 destination-keyed | Spec | Pending |
-| FAIR-18 | P1: Ingress cap | cap-before-whitelist precedence | Spec | Pending |
-| FAIR-19 | P1: Ingress cap | fail-closed posture | Spec | Pending |
+| FAIR-14 | P1: Ingress cap | §8.4.3, WLV-24 seam A, raw cost | Execute | Verified (T2) |
+| FAIR-15 | P1: Ingress cap | **GA-1** k×ceiling, AD-019 rodata posture | Execute | Verified (T2) |
+| FAIR-16 | P1: Ingress cap | §10.2 idx 13, early terminal | Execute | Verified (T2) |
+| FAIR-17 | P1: Ingress cap | §13/§11.1 destination-keyed | Execute | Verified (T2) |
+| FAIR-18 | P1: Ingress cap | cap-before-whitelist precedence | Execute | Verified (T2) |
+| FAIR-19 | P1: Ingress cap | fail-closed posture | Execute | Verified (T2) |
 | FAIR-20 | P1: Maps, gate & docs | §8.3 map groups, AD-005, M4 contract | Execute | Verified (T1) |
-| FAIR-21 | P1: Maps, gate & docs | AD-016/17 idx 11/12/13 | Spec | Pending |
+| FAIR-21 | P1: Maps, gate & docs | AD-016/17 idx 11/12/13 | Execute | In progress (T2 idx 13) |
 | FAIR-22 | P1: Maps, gate & docs | spin-lock de-risk, A-FAIR-8 | Execute | Verified (T1) |
 | FAIR-23 | P1: Maps, gate & docs | D-SLRD-1 seed, post-BLK baseline | Spec | Pending |
 | FAIR-24 | P1: Maps, gate & docs | §15 fairness test = M3 gate | Spec | Pending |

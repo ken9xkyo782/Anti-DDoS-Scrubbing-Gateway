@@ -77,16 +77,20 @@ harness with generous `fair_config` rows so the 92-case baseline keeps every ver
 **Requirement**: FAIR-14, FAIR-15, FAIR-16, FAIR-17, FAIR-18, FAIR-19, FAIR-21 (idx 13)
 
 **Done when**:
-- [ ] Every post-service-match packet draws cap tokens regardless of eventual verdict; over-cap
+- [x] Every post-service-match packet draws cap tokens regardless of eventual verdict; over-cap
       → `record_drop(DR_INGRESS_CAP_DROP)` (idx 13) with **no** whitelist/deny/rule work
       (`wl_state/bl_state/rule_idx` all NONE, `fair_state = FAIR_CAP_DROP`)
-- [ ] Both dimensions enforced (pps and bps exhaust independently); key = service_id only;
+- [x] Both dimensions enforced (pps and bps exhaust independently); key = service_id only;
       missing `fair_config` row for a matched enabled service → `DR_MAP_ERROR`
-- [ ] Harness seeds generous budgets for all test services — baseline verdicts unchanged
-- [ ] New cases: under-cap continue; over-cap pps-dim; over-cap bps-dim; stage-progression
+- [x] Harness seeds generous budgets for all test services — baseline verdicts unchanged
+- [x] New cases: under-cap continue; over-cap pps-dim; over-cap bps-dim; stage-progression
       assert; VIP-source-over-cap drops at 13 (FAIR-18 precedence); missing-row map_error;
       version-flip resets the cap bucket
-- [ ] Gate: `make test` → **≥ 99** (92 baseline intact + ≥7 new)
+- [x] Gate: `make test` → **≥ 99** (92 baseline intact + ≥7 new)
+
+**Completion (2026-07-10)**: The destination-keyed dual PPS/BPS ingress cap now runs before the
+whitelist stage. New deterministic cases cover both dimensions, VIP precedence, stage progression,
+missing config, and version reset. `cd data-plane && make test` → **99 passed**.
 
 **Tests**: dp-unit · **Gate**: quick
 **Commit**: `feat(fairness): destination-keyed dual-dimension ingress-cost cap at seam A`

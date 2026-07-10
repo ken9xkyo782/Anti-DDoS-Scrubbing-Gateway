@@ -86,6 +86,8 @@ struct test_env {
 };
 
 static int build_default_udp_frame(struct pkt_frame *frame);
+static int set_ipv4_addrs(struct pkt_frame *frame, __u32 src_host,
+			  __u32 dst_host);
 
 static int env_open(struct test_env *env)
 {
@@ -411,6 +413,18 @@ static int clear_vip_ceiling_state(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
+static int clear_u32_hash_map(int fd)
+{
+	__u32 key;
+
+	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
+		if (bpf_map_delete_elem(fd, &key) != 0)
+			return -1;
+	}
+
+	return errno == ENOENT ? 0 : -1;
+}
+
 static int reset_rate_limit(struct test_env *env)
 {
 	struct rl_config config = {};
@@ -419,6 +433,8 @@ static int reset_rate_limit(struct test_env *env)
 	if (clear_rate_limit_state(env->rate_limit_state_fd) != 0)
 		return -1;
 	if (clear_vip_ceiling_state(env->vip_ceiling_state_fd) != 0)
+		return -1;
+	if (clear_u32_hash_map(env->service_ingress_cap_state_fd) != 0)
 		return -1;
 	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
 }
@@ -438,6 +454,8 @@ static int reset_config(struct test_env *env)
 	    clear_service_blacklist_lpm_map(env->service_blacklist_lpm1_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm0_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm1_fd) != 0 ||
+	    clear_u32_hash_map(env->fair_config0_fd) != 0 ||
+	    clear_u32_hash_map(env->fair_config1_fd) != 0 ||
 	    reset_gbl_meta_map(env->gbl_meta_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap0_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap1_fd) != 0 ||
@@ -483,6 +501,17 @@ static int rule_block_fd_for_slot(struct test_env *env, __u32 slot)
 		return env->rule_block0_fd;
 	if (slot == 1)
 		return env->rule_block1_fd;
+
+	errno = EINVAL;
+	return -1;
+}
+
+static int fair_config_fd_for_slot(struct test_env *env, __u32 slot)
+{
+	if (slot == 0)
+		return env->fair_config0_fd;
+	if (slot == 1)
+		return env->fair_config1_fd;
 
 	errno = EINVAL;
 	return -1;
@@ -583,9 +612,32 @@ static __u32 ipv4_prefix_mask(__u32 prefixlen)
 	return UINT32_MAX << (32 - prefixlen);
 }
 
-static int seed_service_flags(struct test_env *env, __u32 slot, __be32 addr,
-			      __u32 prefixlen, __u32 service_id, __u8 enabled,
-			      __u8 wl_flags)
+static struct fair_config fair_default_config(void)
+{
+	struct fair_config config = {
+		.version = 1,
+		.committed_bps = FAIR_RATE_MAX,
+		.burst_bps = FAIR_RATE_MAX,
+		.cap_bps = FAIR_RATE_MAX,
+		.cap_pps = FAIR_RATE_MAX,
+	};
+
+	return config;
+}
+
+static int seed_fair_config(struct test_env *env, __u32 slot,
+			    __u32 service_id, const struct fair_config *config)
+{
+	int fd = fair_config_fd_for_slot(env, slot);
+
+	if (fd < 0)
+		return -1;
+	return bpf_map_update_elem(fd, &service_id, config, BPF_ANY);
+}
+
+static int seed_service_raw(struct test_env *env, __u32 slot, __be32 addr,
+			    __u32 prefixlen, __u32 service_id, __u8 enabled,
+			    __u8 wl_flags)
 {
 	struct service_key key = {
 		.prefixlen = prefixlen,
@@ -602,6 +654,18 @@ static int seed_service_flags(struct test_env *env, __u32 slot, __be32 addr,
 		return -1;
 
 	return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+}
+
+static int seed_service_flags(struct test_env *env, __u32 slot, __be32 addr,
+			      __u32 prefixlen, __u32 service_id, __u8 enabled,
+			      __u8 wl_flags)
+{
+	struct fair_config config = fair_default_config();
+
+	if (seed_service_raw(env, slot, addr, prefixlen, service_id, enabled,
+			     wl_flags) != 0)
+		return -1;
+	return seed_fair_config(env, slot, service_id, &config);
 }
 
 static int seed_service(struct test_env *env, __u32 slot, __be32 addr,
@@ -1064,6 +1128,26 @@ static int read_vip_bucket_cpu0(struct test_env *env, __u32 service_id,
 		return -1;
 
 	err = bpf_map_lookup_elem(env->vip_ceiling_state_fd, &key, values);
+	if (err == 0)
+		*bucket = values[0];
+
+	free(values);
+	return err;
+}
+
+static int read_fair_cap_bucket_cpu0(struct test_env *env, __u32 service_id,
+				     struct rl_bucket *bucket)
+{
+	struct rl_bucket *values;
+	__u32 key = service_id;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->service_ingress_cap_state_fd, &key,
+				  values);
 	if (err == 0)
 		*bucket = values[0];
 
@@ -1549,6 +1633,304 @@ static int test_fair_committed_spin_lock_mutates_tokens(void)
 	}
 	if (!err)
 		err = expect_u64("committed lock tokens", bucket.tokens, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static struct fair_config fair_cap_config(__u32 version, __u64 pps,
+					  __u64 bps)
+{
+	struct fair_config config = {
+		.version = version,
+		.committed_bps = FAIR_RATE_MAX,
+		.burst_bps = FAIR_RATE_MAX,
+		.cap_pps = pps,
+		.cap_bps = bps,
+	};
+
+	return config;
+}
+
+static int setup_fair_cap_service(struct test_env *env,
+				  const struct fair_config *config)
+{
+	if (reset_maps(env) != 0 || set_rl_config(env, 1) != 0 ||
+	    seed_service(env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1) != 0 ||
+	    seed_fair_config(env, 0, DEFAULT_SERVICE_ID, config) != 0 ||
+	    seed_match_all_rule_block(env, 0, DEFAULT_SERVICE_ID) != 0)
+		return -1;
+	return set_active(env, 0, 1);
+}
+
+static int test_ingress_cap_under_cap_continues(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	struct fair_config config;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_cap_config(1, 1, frame.len);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_cap_service(&env, &config);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u8("fair_state", meta.fair_state, FAIR_NONE);
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ingress_cap_pps_exhausts_independently(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	struct rl_bucket bucket;
+	struct fair_config config;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_cap_config(1, 2, frame.len * 10);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_cap_service(&env, &config);
+	for (int i = 0; !err && i < 3; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i < 2)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i == 2)
+			err = expect_u32("pps cap retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("pps cap fair_state", meta.fair_state,
+				FAIR_CAP_DROP);
+	if (!err)
+		err = read_fair_cap_bucket_cpu0(&env, DEFAULT_SERVICE_ID, &bucket);
+	if (!err)
+		err = expect_u64("pps cap bps tokens", bucket.bps_tokens,
+				frame.len * 8);
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ingress_cap_bps_exhausts_independently(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	struct rl_bucket bucket;
+	struct fair_config config;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_cap_config(1, 10, frame.len * 2);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_cap_service(&env, &config);
+	for (int i = 0; !err && i < 3; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i < 2)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i == 2)
+			err = expect_u32("bps cap retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = read_fair_cap_bucket_cpu0(&env, DEFAULT_SERVICE_ID, &bucket);
+	if (!err)
+		err = expect_u64("bps cap pps tokens", bucket.pps_tokens, 8);
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ingress_cap_stops_before_policy_stages(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	struct fair_config config = fair_cap_config(1, 0, 0);
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_cap_service(&env, &config);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("stage cap retval", retval, XDP_DROP);
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("stage wl_state", meta.wl_state, WL_STATE_NONE);
+	if (!err)
+		err = expect_u8("stage bl_state", meta.bl_state, BL_STATE_NONE);
+	if (!err)
+		err = expect_u8("stage rule_idx", meta.rule_idx, RULE_IDX_NONE);
+	if (!err)
+		err = expect_u8("stage fair_state", meta.fair_state,
+				FAIR_CAP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ingress_cap_precedes_vip(void)
+{
+	struct vip_config vip = {
+		.version = 1,
+		.flags = VIP_F_PPS_SET,
+		.pps = 10,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	struct fair_config config;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_A, 0x0a000002) != 0)
+		return -1;
+	config = fair_cap_config(1, 1, frame.len * 2);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_cap_service(&env, &config);
+	if (!err)
+		err = seed_whitelist(&env, 0, DEFAULT_SERVICE_ID,
+				     TEST_SRC_PUB_A_NET24, 24, &vip);
+	for (int i = 0; !err && i < 2; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i == 0)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i == 0)
+			err = expect_u8("VIP wl_state", meta.wl_state,
+					WL_STATE_HIT_ADMIT);
+		if (!err && i == 1)
+			err = expect_u32("VIP cap retval", retval, XDP_DROP);
+	}
+	if (!err)
+		err = read_meta(&env, &meta);
+	if (!err)
+		err = expect_u8("VIP cap wl_state", meta.wl_state, WL_STATE_NONE);
+	if (!err)
+		err = expect_u8("VIP cap fair_state", meta.fair_state,
+				FAIR_CAP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ingress_cap_missing_config_fails_closed(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service_raw(&env, 0, DEFAULT_DST, 32,
+				       DEFAULT_SERVICE_ID, 1, 0);
+	if (!err)
+		err = seed_match_all_rule_block(&env, 0, DEFAULT_SERVICE_ID);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("missing cap config retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MAP_ERROR, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_ingress_cap_version_flip_resets_bucket(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	struct fair_config config;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	config = fair_cap_config(1, 1, frame.len * 2);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = setup_fair_cap_service(&env, &config);
+	for (int i = 0; !err && i < 2; i++) {
+		err = run_frame_current_maps(&env, &frame, &retval);
+		if (!err && i == 0)
+			err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+		if (!err && i == 1)
+			err = expect_u32("pre-flip cap retval", retval, XDP_DROP);
+	}
+	config.version = 2;
+	if (!err)
+		err = seed_fair_config(&env, 0, DEFAULT_SERVICE_ID, &config);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_counter(&env, DR_INGRESS_CAP_DROP, 1);
 
 	env_close(&env);
 	return err;
@@ -4826,6 +5208,19 @@ int main(void)
 			{ "config maps load", test_config_maps_load },
 			{ "fair committed spin lock mutates tokens",
 			  test_fair_committed_spin_lock_mutates_tokens },
+			{ "ingress cap under limit continues",
+			  test_ingress_cap_under_cap_continues },
+			{ "ingress cap PPS exhausts independently",
+			  test_ingress_cap_pps_exhausts_independently },
+			{ "ingress cap BPS exhausts independently",
+			  test_ingress_cap_bps_exhausts_independently },
+			{ "ingress cap stops before policy stages",
+			  test_ingress_cap_stops_before_policy_stages },
+			{ "ingress cap precedes VIP", test_ingress_cap_precedes_vip },
+			{ "ingress cap missing config fails closed",
+			  test_ingress_cap_missing_config_fails_closed },
+			{ "ingress cap version flip resets bucket",
+			  test_ingress_cap_version_flip_resets_bucket },
 			{ "whitelist bloom round trip",
 			  test_whitelist_bloom_round_trip },
 			{ "drop reason ABI exposes 16 slots",
