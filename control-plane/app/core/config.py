@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str | None = None
     node_clean_capacity_gbps: Decimal = Field(default=Decimal("40"), gt=0)
 
+    worker_poll_timeout_seconds: float = Field(default=2.0, gt=0)
+    worker_reconcile_interval_seconds: float = Field(default=15.0, gt=0)
+    worker_backoff_initial_seconds: float = Field(default=0.5, gt=0)
+    worker_backoff_max_seconds: float = Field(default=30.0, gt=0)
+    worker_shutdown_grace_seconds: float = Field(default=10.0, gt=0)
+
 
 @lru_cache
 def get_settings() -> Settings:
