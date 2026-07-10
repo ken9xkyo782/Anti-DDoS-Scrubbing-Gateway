@@ -9,8 +9,10 @@ async def _truncate_tables(session_factory: async_sessionmaker[AsyncSession]) ->
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE TABLE audit_events, agent_job, blacklist_entry, whitelist_entry, "
-                "allow_rule, service_plan, protected_service, allocated_cidr, users, tenants "
+                "TRUNCATE TABLE audit_events, global_deny_state, feed_sync_overlap, "
+                "feed_blacklist_assertion, agent_job, feed_sync_run, threat_feed_source, "
+                "blacklist_entry, whitelist_entry, allow_rule, service_plan, protected_service, "
+                "allocated_cidr, users, tenants "
                 "RESTART IDENTITY CASCADE"
             )
         )

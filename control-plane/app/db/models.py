@@ -70,6 +70,8 @@ class JobStatus(StrEnum):
 
 class JobType(StrEnum):
     service_update = "SERVICE_UPDATE"
+    feed_sync = "FEED_SYNC"
+    global_deny_apply = "GLOBAL_DENY_APPLY"
 
 
 class ChangeTrigger(StrEnum):
@@ -80,6 +82,23 @@ class ChangeTrigger(StrEnum):
     blacklist = "blacklist"
     enable = "enable"
     disable = "disable"
+    feed_manual = "feed_manual"
+    feed_schedule = "feed_schedule"
+    feed_delete = "feed_delete"
+    feed_dry_run = "feed_dry_run"
+    global_deny_retry = "global_deny_retry"
+
+
+class FeedFormat(StrEnum):
+    line_list = "line_list"
+
+
+class FeedSyncStatus(StrEnum):
+    queued = "queued"
+    running = "running"
+    success = "success"
+    partial = "partial"
+    failed = "failed"
 
 
 class ServiceMode(StrEnum):
@@ -153,6 +172,18 @@ job_type_enum = SAEnum(
 change_trigger_enum = SAEnum(
     ChangeTrigger,
     name="change_trigger",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+feed_format_enum = SAEnum(
+    FeedFormat,
+    name="feed_format",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+feed_sync_status_enum = SAEnum(
+    FeedSyncStatus,
+    name="feed_sync_status",
     native_enum=False,
     values_callable=lambda values: [value.value for value in values],
 )
@@ -490,6 +521,12 @@ class WhitelistEntry(Base):
     __tablename__ = "whitelist_entry"
     __table_args__ = (
         UniqueConstraint("service_id", "source_cidr", name="uq_whitelist_service_source_cidr"),
+        Index(
+            "ix_whitelist_entry_source_cidr_gist",
+            "source_cidr",
+            postgresql_using="gist",
+            postgresql_ops={"source_cidr": "inet_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -552,17 +589,192 @@ class BlacklistEntry(Base):
     creator: Mapped[User | None] = relationship()
 
 
+class ThreatFeedSource(TimestampMixin, Base):
+    __tablename__ = "threat_feed_source"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_threat_feed_source_name"),
+        CheckConstraint(
+            "sync_interval_seconds >= 300 AND sync_interval_seconds <= 604800",
+            name="ck_threat_feed_source_sync_interval",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    format: Mapped[FeedFormat] = mapped_column(
+        feed_format_enum,
+        default=FeedFormat.line_list,
+        nullable=False,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sync_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    credential_env_var: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sync_sequence: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    last_status: Mapped[FeedSyncStatus | None] = mapped_column(feed_sync_status_enum, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    sync_runs: Mapped[list["FeedSyncRun"]] = relationship(passive_deletes=True)
+    assertions: Mapped[list["FeedBlacklistAssertion"]] = relationship(passive_deletes=True)
+
+
+class FeedSyncRun(Base):
+    __tablename__ = "feed_sync_run"
+    __table_args__ = (
+        UniqueConstraint("feed_source_id", "sequence", name="uq_feed_sync_run_source_sequence"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    feed_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("threat_feed_source.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    trigger: Mapped[ChangeTrigger] = mapped_column(change_trigger_enum, nullable=False)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[FeedSyncStatus] = mapped_column(
+        feed_sync_status_enum,
+        default=FeedSyncStatus.queued,
+        nullable=False,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fetched_lines: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    valid: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    duplicates: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    removed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    skipped_invalid: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    overlap_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    global_changed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    desired_revision: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    node_map_version: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    source: Mapped[ThreatFeedSource] = relationship(back_populates="sync_runs")
+    overlaps: Mapped[list["FeedSyncOverlap"]] = relationship(passive_deletes=True)
+
+
+class FeedBlacklistAssertion(Base):
+    __tablename__ = "feed_blacklist_assertion"
+
+    feed_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("threat_feed_source.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    blacklist_entry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("blacklist_entry.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    source: Mapped[ThreatFeedSource] = relationship(back_populates="assertions")
+    blacklist_entry: Mapped[BlacklistEntry] = relationship()
+
+
+Index("ix_feed_blacklist_assertion_blacklist_entry_id", FeedBlacklistAssertion.blacklist_entry_id)
+
+
+class FeedSyncOverlap(Base):
+    __tablename__ = "feed_sync_overlap"
+    __table_args__ = (
+        UniqueConstraint(
+            "feed_sync_run_id",
+            "feed_source_cidr",
+            "whitelist_entry_id",
+            name="uq_feed_sync_overlap_run_cidr_whitelist",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    feed_sync_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("feed_sync_run.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feed_source_cidr: Mapped[str] = mapped_column(CIDR, nullable=False)
+    whitelist_entry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("whitelist_entry.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    service_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    run: Mapped[FeedSyncRun] = relationship(back_populates="overlaps")
+    whitelist_entry: Mapped[WhitelistEntry] = relationship()
+
+
+class GlobalDenyState(Base):
+    __tablename__ = "global_deny_state"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_global_deny_state_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    desired_revision: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    active_revision: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    desired_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    active_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    apply_status: Mapped[ApplyStatus] = mapped_column(
+        apply_status_enum,
+        default=ApplyStatus.pending,
+        nullable=False,
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_node_map_version: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        nullable=False,
+    )
+
+
 class AgentJob(Base):
     __tablename__ = "agent_job"
     __table_args__ = (
-        UniqueConstraint(
-            "target_type",
-            "target_id",
-            "version",
-            name="agent_job_target_version_unique",
+        CheckConstraint(
+            "(job_type = 'SERVICE_UPDATE' AND target_type = 'service' "
+            "AND target_id IS NOT NULL AND feed_sync_run_id IS NULL) OR "
+            "(job_type = 'FEED_SYNC' AND target_type = 'feed_sync_run' "
+            "AND target_id IS NULL AND feed_sync_run_id IS NOT NULL) OR "
+            "(job_type = 'GLOBAL_DENY_APPLY' AND target_type = 'global_deny' "
+            "AND target_id IS NULL AND feed_sync_run_id IS NULL)",
+            name="ck_agent_job_target_shape",
         ),
         Index("ix_agent_job_status", "status"),
         Index("ix_agent_job_target", "target_type", "target_id"),
+        Index(
+            "uq_agent_job_service_target_version",
+            "target_id",
+            "version",
+            unique=True,
+            postgresql_where=text("job_type = 'SERVICE_UPDATE'"),
+        ),
+        Index(
+            "uq_agent_job_feed_sync_run",
+            "feed_sync_run_id",
+            unique=True,
+            postgresql_where=text("job_type = 'FEED_SYNC'"),
+        ),
+        Index(
+            "uq_agent_job_global_deny_revision",
+            "version",
+            unique=True,
+            postgresql_where=text("job_type = 'GLOBAL_DENY_APPLY'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -570,7 +782,12 @@ class AgentJob(Base):
     target_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("protected_service.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    feed_sync_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("feed_sync_run.id", ondelete="CASCADE"),
+        nullable=True,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     job_type: Mapped[JobType] = mapped_column(
@@ -596,6 +813,7 @@ class AgentJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     service: Mapped[ProtectedService] = relationship()
+    feed_sync_run: Mapped[FeedSyncRun | None] = relationship()
 
 
 Index(

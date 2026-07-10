@@ -20,20 +20,7 @@ async def create_service(db_session: AsyncSession) -> ProtectedService:
     return service
 
 
-async def test_agent_job_table_constraint_and_indexes_exist(db_session: AsyncSession) -> None:
-    constraint_name = (
-        await db_session.execute(
-            text(
-                """
-                SELECT conname
-                FROM pg_constraint
-                JOIN pg_class ON pg_class.oid = pg_constraint.conrelid
-                WHERE pg_class.relname = 'agent_job'
-                  AND conname = 'agent_job_target_version_unique'
-                """
-            )
-        )
-    ).scalar_one()
+async def test_agent_job_indexes_exist(db_session: AsyncSession) -> None:
     indexes = (
         await db_session.execute(
             text(
@@ -42,15 +29,22 @@ async def test_agent_job_table_constraint_and_indexes_exist(db_session: AsyncSes
                 FROM pg_indexes
                 WHERE schemaname = 'public'
                   AND tablename = 'agent_job'
-                  AND indexname IN ('ix_agent_job_status', 'ix_agent_job_target')
+                  AND indexname IN (
+                      'ix_agent_job_status',
+                      'ix_agent_job_target',
+                      'uq_agent_job_service_target_version'
+                  )
                 ORDER BY indexname
                 """
             )
         )
     ).scalars()
 
-    assert constraint_name == "agent_job_target_version_unique"
-    assert list(indexes) == ["ix_agent_job_status", "ix_agent_job_target"]
+    assert list(indexes) == [
+        "ix_agent_job_status",
+        "ix_agent_job_target",
+        "uq_agent_job_service_target_version",
+    ]
 
 
 async def test_agent_job_target_version_is_unique(db_session: AsyncSession) -> None:
@@ -79,7 +73,7 @@ async def test_agent_job_target_version_is_unique(db_session: AsyncSession) -> N
     with pytest.raises(IntegrityError) as exc_info:
         await db_session.flush()
 
-    assert "agent_job_target_version_unique" in str(exc_info.value)
+    assert "uq_agent_job_service_target_version" in str(exc_info.value)
 
 
 async def test_delete_service_cascades_agent_jobs(db_session: AsyncSession) -> None:

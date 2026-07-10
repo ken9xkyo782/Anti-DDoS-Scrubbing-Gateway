@@ -7,7 +7,7 @@ from typing import Final
 from fastapi import HTTPException, status
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -266,7 +266,8 @@ async def _insert_or_get_job(
             created_at=utc_now(),
         )
         .on_conflict_do_nothing(
-            constraint="agent_job_target_version_unique",
+            index_elements=[AgentJob.target_id, AgentJob.version],
+            index_where=text("job_type = 'SERVICE_UPDATE'"),
         )
         .returning(AgentJob.id)
     )
