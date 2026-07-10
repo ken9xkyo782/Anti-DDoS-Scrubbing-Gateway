@@ -73,6 +73,59 @@ second; the future worker must convert any control-plane unit before writing the
 are unmatchable in v1 and drop with `not_allowed`, even when a service has a match-all `any` rule.
 Sustained `not_allowed` from tunnel traffic is expected behavior, not a loader or map-seeding failure.
 
+## Fairness and bandwidth reservation
+
+`src/fairness.h` defines the M4 map-build contract for clean-traffic fairness. When the demo
+loader seeds `SERVICE_DEST`, it writes a `fair_config` row for that service and a
+`fair_node_config` row for both slots. These values are already in bytes per second; the data
+plane only consumes the precomputed budgets.
+
+The loader accepts these optional fairness seed variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XDPGW_FAIR_COMMITTED_BPS` | `12500000000` B/s (100 Gbps) | Per-service exact committed rate. |
+| `XDPGW_FAIR_CEILING_BPS` | `12500000000` B/s (100 Gbps) | Per-service clean ceiling; burst is `ceiling - committed`. |
+| `XDPGW_NODE_CLEAN_CAPACITY_BPS` | `5000000000` B/s (40 Gbps) | Node clean-capacity input for burst headroom. |
+| `XDPGW_FAIR_K` | `3` | Multiplier for the raw ingress-cost cap. |
+| `XDPGW_FAIR_REF_PKT` | `512` bytes | Reference packet size used to derive the cap PPS budget. |
+
+The loader rejects `committed > ceiling`, `K=0`, and `REF_PKT=0`. It derives the dual ingress cap
+as `cap_bps = min(FAIR_RATE_MAX, K * ceiling_bps)` and
+`cap_pps = cap_bps / REF_PKT`, using overflow-safe multiplication. Every emitted fairness rate is
+clamped to `FAIR_RATE_MAX = 16000000000` B/s (128 Gbps), which keeps refill arithmetic inside its
+supported range.
+
+For clean non-VIP traffic, the ladder first consumes the service's global, spin-locked committed
+bucket. That bucket is exact across CPUs; a successful committed admit bypasses the remaining
+buckets. If it is empty, the packet consumes the service's per-CPU burst bucket, then the shared
+per-CPU node-headroom bucket. An empty service bucket drops `service_ceiling_drop`; an empty node
+bucket drops `congestion_drop`. The burst draw is deliberately service-then-node: a node miss does
+not refund the service-burst token.
+
+The raw ingress cap runs immediately after enabled-service lookup, before whitelist, deny, or rule
+lookups. It is destination-service keyed and enforces both PPS and byte budgets; an over-cap packet
+drops `ingress_cap_drop`. Therefore VIP traffic remains subject to the ingress cap. A VIP packet
+that passes the cap and its own VIP ceiling redirects from the whitelist stage and never enters the
+clean-traffic ladder.
+
+Node headroom is `max(0, node_clean_capacity - sum(committed))`. If commitments exceed the node
+capacity, headroom is zero: committed traffic still uses its exact bucket, while burst traffic sheds
+as `congestion_drop` once it reaches the node bucket. The default seed has equal committed and
+ceiling rates, so its burst rate is zero and the zero default headroom is harmless.
+
+The TDD name `service_agg_rate_state` is realized by two maps: `svc_committed_state` holds the
+exact global committed state, and `svc_burst_state` holds the per-CPU service-burst state.
+`node_burst_state` is the shared per-CPU node-headroom state, and
+`service_ingress_cap_state` holds the per-CPU dual cap state. These fairness maps are not part of
+the loader's pinned observability-map interface.
+
+This mechanism guarantees committed clean bandwidth per service, not unlimited classification
+capacity. A PPS flood beyond a node's physical classification capacity is bounded by the ingress
+cap but can still contend for CPU. That residual single-node limitation requires capacity planning
+and HA/scale-out; it does not change the committed-bandwidth guarantee or imply absolute
+availability under an extreme flood.
+
 ## Whitelist and VIP ceiling
 
 `src/whitelist.h` is the M4 map-build contract for scoped whitelist and VIP ceiling config. A

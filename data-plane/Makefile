@@ -58,7 +58,7 @@ $(TEST_SKEL): $(TEST_BPF_OBJ)
 
 loader: $(LOADER)
 
-$(LOADER): $(LOADER_SRC) $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SKEL) | $(BUILD_DIR)
+$(LOADER): $(LOADER_SRC) $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 dpstat: $(DPSTAT)
@@ -69,8 +69,9 @@ $(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_
 test: $(TEST_BIN)
 	$(TEST_BIN)
 
-smoke: loader
+smoke: loader dpstat
 	$(TEST_DIR)/smoke_redirect.sh
+	$(TEST_DIR)/smoke_fairness.sh
 
 $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz

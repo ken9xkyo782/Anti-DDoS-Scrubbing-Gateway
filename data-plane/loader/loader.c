@@ -19,6 +19,7 @@
 #include "service.h"
 #include "blacklist.h"
 #include "whitelist.h"
+#include "fairness.h"
 #include "xdp_gateway.skel.h"
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
@@ -30,6 +31,11 @@
 #define DEFAULT_SAMPLE_RATE_PER_SEC 256
 #define DEFAULT_SAMPLE_BURST 64
 #define DEFAULT_SEED_VIP_PPS 1000
+#define DEFAULT_FAIR_COMMITTED_BPS 12500000000ULL
+#define DEFAULT_FAIR_CEILING_BPS 12500000000ULL
+#define DEFAULT_NODE_CLEAN_CAPACITY_BPS 5000000000ULL
+#define DEFAULT_FAIR_K 3ULL
+#define DEFAULT_FAIR_REF_PKT 512ULL
 
 struct wl_seed {
 	int enabled;
@@ -47,6 +53,11 @@ struct deny_seed {
 	__u16 blocked_port;
 	__u8 gbl_flags;
 	__u8 sbl_flags;
+};
+
+struct fair_seed {
+	struct fair_config config;
+	__u64 node_clean_capacity_bps;
 };
 
 static volatile sig_atomic_t exiting;
@@ -99,6 +110,8 @@ static void print_usage(const char *prog)
 		"       optional: XDPGW_SEED_WL_CIDR=<src-cidr> [XDPGW_SEED_VIP_PPS=N] [XDPGW_SEED_VIP_BPS=N]\n");
 	fprintf(stderr,
 		"       optional: XDPGW_SEED_GBL_CIDR=<src-cidr> XDPGW_SEED_SBL_CIDR=<src-cidr> XDPGW_SEED_BLOCKED_PORT=<u16>\n");
+	fprintf(stderr,
+		"       optional: XDPGW_FAIR_COMMITTED_BPS=N XDPGW_FAIR_CEILING_BPS=N XDPGW_NODE_CLEAN_CAPACITY_BPS=N XDPGW_FAIR_K=N XDPGW_FAIR_REF_PKT=N\n");
 }
 
 static int create_pin_dir(void)
@@ -303,6 +316,65 @@ static int parse_u16_env(const char *name, __u16 *value, int *is_set)
 
 	*value = (__u16)parsed;
 	*is_set = 1;
+	return 0;
+}
+
+static __u64 clamp_fair_rate(__u64 value)
+{
+	return value > FAIR_RATE_MAX ? FAIR_RATE_MAX : value;
+}
+
+static __u64 fair_rate_product(__u64 left, __u64 right)
+{
+	if (left == 0 || right == 0)
+		return 0;
+	if (left > FAIR_RATE_MAX / right)
+		return FAIR_RATE_MAX;
+	return left * right;
+}
+
+static int prepare_fair_seed(struct fair_seed *seed)
+{
+	__u64 committed_bps = DEFAULT_FAIR_COMMITTED_BPS;
+	__u64 ceiling_bps = DEFAULT_FAIR_CEILING_BPS;
+	__u64 capacity_bps = DEFAULT_NODE_CLEAN_CAPACITY_BPS;
+	__u64 k = DEFAULT_FAIR_K;
+	__u64 ref_pkt = DEFAULT_FAIR_REF_PKT;
+	int is_set;
+
+	if (parse_u64_env("XDPGW_FAIR_COMMITTED_BPS", &committed_bps,
+			  &is_set) != 0 ||
+	    parse_u64_env("XDPGW_FAIR_CEILING_BPS", &ceiling_bps,
+			  &is_set) != 0 ||
+	    parse_u64_env("XDPGW_NODE_CLEAN_CAPACITY_BPS", &capacity_bps,
+			  &is_set) != 0 ||
+	    parse_u64_env("XDPGW_FAIR_K", &k, &is_set) != 0 ||
+	    parse_u64_env("XDPGW_FAIR_REF_PKT", &ref_pkt, &is_set) != 0)
+		return -1;
+
+	if (committed_bps > ceiling_bps) {
+		fprintf(stderr,
+			"XDPGW_FAIR_COMMITTED_BPS must not exceed XDPGW_FAIR_CEILING_BPS\n");
+		return -1;
+	}
+	if (k == 0) {
+		fprintf(stderr, "XDPGW_FAIR_K must be greater than zero\n");
+		return -1;
+	}
+	if (ref_pkt == 0) {
+		fprintf(stderr, "XDPGW_FAIR_REF_PKT must be greater than zero\n");
+		return -1;
+	}
+
+	memset(seed, 0, sizeof(*seed));
+	committed_bps = clamp_fair_rate(committed_bps);
+	ceiling_bps = clamp_fair_rate(ceiling_bps);
+	seed->config.version = 1;
+	seed->config.committed_bps = committed_bps;
+	seed->config.burst_bps = ceiling_bps - committed_bps;
+	seed->config.cap_bps = fair_rate_product(ceiling_bps, k);
+	seed->config.cap_pps = seed->config.cap_bps / ref_pkt;
+	seed->node_clean_capacity_bps = clamp_fair_rate(capacity_bps);
 	return 0;
 }
 
@@ -710,8 +782,72 @@ static int seed_blocked_port_from_env(struct xdp_gateway_bpf *skel,
 	return 0;
 }
 
+static int seed_fair_config_slot(struct xdp_gateway_bpf *skel, __u32 slot,
+				 __u32 service_id, const struct fair_config *config)
+{
+	int fd = slot == 0 ? bpf_map__fd(skel->maps.fair_config_0) :
+				  bpf_map__fd(skel->maps.fair_config_1);
+
+	if (fd < 0 ||
+	    bpf_map_update_elem(fd, &service_id, config, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed fair_config_%u: %s\n", slot,
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int seed_fair_node_config(struct xdp_gateway_bpf *skel,
+				 const struct fair_seed *seed, __u64 committed_bps)
+{
+	struct fair_node_config node = {
+		.version = seed->config.version,
+		.headroom_bps = seed->node_clean_capacity_bps >
+					 committed_bps ?
+			seed->node_clean_capacity_bps - committed_bps : 0,
+	};
+	__u32 slot;
+	int node_fd = bpf_map__fd(skel->maps.fair_node_config);
+
+	if (node_fd < 0) {
+		fprintf(stderr, "failed to resolve fair_node_config\n");
+		return -1;
+	}
+	for (slot = 0; slot < SERVICE_SLOTS; slot++) {
+		if (bpf_map_update_elem(node_fd, &slot, &node, BPF_ANY) != 0) {
+			fprintf(stderr, "failed to seed fair_node_config[%u]: %s\n",
+				slot, strerror(errno));
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static int seed_fairness_for_service(struct xdp_gateway_bpf *skel,
+				     __u32 service_id, const struct fair_seed *seed)
+{
+	__u64 headroom_bps = seed->node_clean_capacity_bps >
+				      seed->config.committed_bps ?
+		seed->node_clean_capacity_bps - seed->config.committed_bps : 0;
+
+	if (seed_fair_config_slot(skel, 0, service_id, &seed->config) != 0 ||
+	    seed_fair_config_slot(skel, 1, service_id, &seed->config) != 0 ||
+	    seed_fair_node_config(skel, seed, seed->config.committed_bps) != 0)
+		return -1;
+
+	printf("seeded fair_config_0/1 service_id=%u committed=%llu burst=%llu cap_bps=%llu cap_pps=%llu headroom=%llu\n",
+	       service_id, (unsigned long long)seed->config.committed_bps,
+	       (unsigned long long)seed->config.burst_bps,
+	       (unsigned long long)seed->config.cap_bps,
+	       (unsigned long long)seed->config.cap_pps,
+	       (unsigned long long)headroom_bps);
+	return 0;
+}
+
 static int seed_service_from_env(struct xdp_gateway_bpf *skel,
-				 const struct deny_seed *deny_seed)
+				 const struct deny_seed *deny_seed,
+				 const struct fair_seed *fair_seed)
 {
 	const char *service_dest = getenv("SERVICE_DEST");
 	const char *wl_cidr = getenv("XDPGW_SEED_WL_CIDR");
@@ -762,6 +898,8 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 	       service_dest, val.wl_flags, val.bl_flags);
 	if (seed_match_all_rule_blocks(skel, val.service_id) != 0)
 		return -1;
+	if (seed_fairness_for_service(skel, val.service_id, fair_seed) != 0)
+		return -1;
 	if (seed_whitelist_from_env(skel, val.service_id, &wl_seed) != 0)
 		return -1;
 	return seed_service_blacklist_from_env(skel, val.service_id, deny_seed);
@@ -773,6 +911,7 @@ int main(int argc, char **argv)
 	const char *out_ifname = arg_or_env(argc, argv, 2, "OUT_IFACE");
 	struct xdp_gateway_bpf *skel = NULL;
 	struct deny_seed deny_seed;
+	struct fair_seed fair_seed;
 	int ifindex;
 	int out_ifindex;
 	int prog_fd;
@@ -785,7 +924,8 @@ int main(int argc, char **argv)
 		return 2;
 	}
 
-	if (prepare_deny_seed(&deny_seed) != 0)
+	if (prepare_deny_seed(&deny_seed) != 0 ||
+	    prepare_fair_seed(&fair_seed) != 0)
 		return 1;
 
 	ifindex = if_nametoindex(ifname);
@@ -847,9 +987,10 @@ int main(int argc, char **argv)
 	    seed_active_config(skel) != 0 ||
 	    seed_sample_config(skel) != 0 ||
 	    seed_gbl_meta_zero(skel) != 0 ||
+	    seed_fair_node_config(skel, &fair_seed, 0) != 0 ||
 	    seed_global_blacklist_from_env(skel, &deny_seed) != 0 ||
 	    seed_blocked_port_from_env(skel, &deny_seed) != 0 ||
-	    seed_service_from_env(skel, &deny_seed) != 0) {
+	    seed_service_from_env(skel, &deny_seed, &fair_seed) != 0) {
 		err = 1;
 		goto cleanup;
 	}

@@ -144,6 +144,27 @@ exact VIP ceiling counts; in deterministic mode, VIP `pps` and `bps` values are 
 budgets, just like rule quotas. VIP overflow is terminal: assert `DR_VIP_CEILING_DROP` at index 14 and
 verify overflow packets don't fall through to the rule stage.
 
+### Fairness-stage conventions
+
+`seed_service()` supplies a generous `fair_config` row for normal enabled-service cases. Fairness
+tests that need constrained budgets overwrite that row with `seed_fair_config()` and seed the
+active slot's `fair_node_config` with `seed_fair_node_config()`. Use the lower-level service-only
+setup only to prove the required missing-fairness-row `map_error` failure case.
+
+Set `rl_config.test_no_refill=1` for every exact fairness quota. Committed-bucket assertions do
+not depend on CPU pinning because `svc_committed_state` is global and spin-locked. Burst, node
+headroom, and ingress-cap assertions use the CPU-pinned runner and the same no-refill setting,
+because those buckets are per-CPU. When testing a burst miss at the node, assert the
+service-then-node order: the service burst token is consumed first and is not refunded when the
+node has no headroom.
+
+The deterministic fairness milestone uses two enabled destination services. Interleave service A's
+flood with service B's committed traffic, then repeat B's traffic in a fresh no-A-flood control
+setup and assert equal B admission counts. Cover A's three terminal conditions independently:
+ingress-cap exhaustion (`ingress_cap_drop`), service-ceiling exhaustion
+(`service_ceiling_drop`), and node-headroom exhaustion (`congestion_drop`). This is a dp-unit
+scenario; the live smoke remains a constrained single-service transition check.
+
 ### Deny-stage conventions
 
 Deny-stage tests seed services first, then use the blacklist helpers to populate slotted global
