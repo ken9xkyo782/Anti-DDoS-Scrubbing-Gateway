@@ -23,6 +23,7 @@
 #include "xdp_gateway.skel.h"
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
+#define ACTIVE_CONFIG_PIN_PATH PIN_DIR "/active_config"
 #define COUNTER_PIN_PATH PIN_DIR "/counter_map"
 #define SVC_STAT_PIN_PATH PIN_DIR "/svc_stat_map"
 #define RINGBUF_PIN_PATH PIN_DIR "/drop_ringbuf"
@@ -151,7 +152,8 @@ static int set_pin_path(struct bpf_map *map, const char *path)
 
 static int set_observability_pin_paths(struct xdp_gateway_bpf *skel)
 {
-	if (set_pin_path(skel->maps.counter_map, COUNTER_PIN_PATH) != 0 ||
+	if (set_pin_path(skel->maps.active_config, ACTIVE_CONFIG_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.counter_map, COUNTER_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.svc_stat_map, SVC_STAT_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.drop_ringbuf, RINGBUF_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.sample_config, SAMPLE_CONFIG_PIN_PATH) != 0 ||
@@ -184,6 +186,7 @@ static void unpin_map(struct bpf_map *map, const char *name)
 
 static void unpin_observability_maps(struct xdp_gateway_bpf *skel)
 {
+	unpin_map(skel->maps.active_config, "active_config");
 	unpin_map(skel->maps.counter_map, "counter_map");
 	unpin_map(skel->maps.svc_stat_map, "svc_stat_map");
 	unpin_map(skel->maps.drop_ringbuf, "drop_ringbuf");
@@ -194,6 +197,8 @@ static void unpin_observability_maps(struct xdp_gateway_bpf *skel)
 
 static int pin_observability_maps(struct xdp_gateway_bpf *skel)
 {
+	if (pin_map(skel->maps.active_config, "active_config") != 0)
+		return -1;
 	if (pin_map(skel->maps.counter_map, "counter_map") != 0)
 		return -1;
 	if (pin_map(skel->maps.svc_stat_map, "svc_stat_map") != 0)
