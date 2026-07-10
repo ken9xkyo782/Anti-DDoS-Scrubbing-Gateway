@@ -158,9 +158,13 @@
 - Tasks `tasks.md` (T1–T8, all 28 reqs mapped; dp `make test` B=91 baseline): T1 contracts+loader pins+fair-math extract (build) · T2 `xdpgw-apply` scaffold+parser+**fresh-inner de-risk**+golden fixture (92) · T3 build/verify/single-write-flip core+verdict (≥97) · T4 fail-closed rollback+version/idempotency (≥101) · T5 `main()`+privileged smoke+`applybulk` ≤5 s/scale (full) · T6 `[P]` `DoubleBufferApplier`+DI swap+settings+fake-helper integration (CP full) · T7 `[P]` dpstat slot/version (build) · T8 `[P]` docs. C-track T1→T5 serial (shared files+smoke); only T6/T7/T8 `[P]`. All 3 pre-approval checks pass
 - Requires agent-worker **executed** first (M4 #1; currently Tasks APPROVED; **Execute hard-gated on it**); reuses frozen M4 build contracts (AD-015/019/021/023/025) + pin pattern (AD-017); D-SLRD-1 loader env seed downgrades to initial-slot bootstrap
 
-**Threat intelligence feed sync** - PLANNED
-- Fetch/validate/normalize/dedup per source; whitelist-overlap flag + alert (no global removal)
-- Bad new feed keeps last-active version; sync stats recorded
+**Threat intelligence feed sync** - IN PROGRESS (spec + context drafted, awaiting approval)
+- Authoritative writer of `source=feed`/`scope=global` `BlacklistEntry` (AD-011 deferral, M4 #2 punt): `ThreatFeedSource` + `/feeds` CRUD + `POST /feeds/{id}/sync`; `JobType.feed_sync` + handler
+- Fetch/validate/normalize/dedup **per source** (plain IPv4/CIDR line lists only — D-FEED-2); bad feed **keeps last-active** entries + data-plane version; whitelist-overlap → flag + alert, **no global removal** (AD-003); `FeedSyncRun` stats recorded
+- **In-worker due-time scheduler** (D-FEED-3) enqueues `FEED_SYNC` for due enabled sources; manual sync always available
+- **Slot-aware global-deny rebuild + atomic swap** reusing M4 #2's `xdpgw-apply` helper (inverse carry-forward: rebuild global-deny, carry service maps) — D-FEED-1
+- Spec `spec.md` (FEED-01..40); context `context.md` (D-FEED-1..3, A-FEED-1..8)
+- **Execute hard-gated** on agent-worker (M4 #1) **and** double-buffer (M4 #2) executed; reuses AD-023 global-blacklist build contract + `BlacklistEntry` (blacklist-filters VERIFIED)
 
 ---
 
