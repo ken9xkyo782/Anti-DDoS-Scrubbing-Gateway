@@ -140,9 +140,12 @@
 
 ### Features
 
-**Agent worker & job pipeline** - PLANNED
-- Jobs: `SERVICE_UPDATE`, `RULE_UPDATE`, `LIST_UPDATE`, `FEED_SYNC`, `MAP_REBUILD`, `ACTIVE_SLOT_SWAP`, `TELEMETRY_AGGREGATE`
-- Idempotent by `job_id`/version; no stale-over-new swap; worker restart preserves active state
+**Agent worker & job pipeline** - IN PROGRESS (spec APPROVED + context complete)
+- Long-running Python worker (`app.worker`, control-plane package, A-AGW-1): blocking-pop consume of `apply:jobs` + startup/periodic **DB-ledger reconcile sweep** (fulfils the M1 outbox promise A-APLY-1/APLY-27/36); all transitions via the executed version-guarded `mark_*` (no new transition logic, APLY-03)
+- Handler registry keyed by `JobType` + **applier boundary**: v1 = succeeding placeholder (**D-AGW-1** — `active` = "acknowledged by worker" until M4#2 fills the boundary with the real build/swap); config read from PostgreSQL at apply time (identity-only jobs, A-AGW-5); `JobType` stays `SERVICE_UPDATE`-only (A-AGW-4 — PRD 6.8's `RULE_UPDATE`/`LIST_UPDATE` = `SERVICE_UPDATE`+`trigger`; other types arrive with M4#2/#3, M5)
+- Reliability: idempotent by `job_id`/version (duplicate delivery = no-op), no stale-over-new under churn (first concurrent exerciser of the M1 guards), Redis/DB outage = bounded-backoff degrade (Redis down → DB-poll mode); **orphaned-`applying` auto-recovery** on startup via `mark_failed`+existing retry path (**D-AGW-2**, zero new state-machine edges); restart preserves active state; ≤5 s nominal propagation asserted with the v1 applier (A-AGW-7)
+- Spec `spec.md` (AGW-01..30); context `context.md` (D-AGW-1..2, A-AGW-1..8)
+- Requires apply-status executed (**satisfied** — M1 landed `a4b1ffd..de47b5f`); pure control-plane, executable independently of M3 fairness Execute; no new endpoints (M1 read surfaces suffice)
 
 **Double-buffer map build/swap** - PLANNED
 - Build full inactive slot, verify, then single `active_slot` write; rollback = flip back
