@@ -388,6 +388,12 @@ class ProtectedService(TimestampMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dp_id: Mapped[int] = mapped_column(
+        Integer,
+        unique=True,
+        nullable=False,
+        server_default=text("nextval('service_dp_id_seq')"),
+    )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="RESTRICT"),

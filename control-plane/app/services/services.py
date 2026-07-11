@@ -82,7 +82,9 @@ async def create_service(
     if conflict is not None:
         raise _overlap_error(conflict)
 
+    dp_id = (await db.execute(select(func.nextval("service_dp_id_seq")))).scalar_one()
     service = ProtectedService(
+        dp_id=dp_id,
         tenant_id=tenant_id,
         name=name,
         cidr_or_ip=str(cidr_or_ip),
