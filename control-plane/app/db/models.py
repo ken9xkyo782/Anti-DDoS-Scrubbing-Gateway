@@ -127,6 +127,18 @@ class OveragePolicy(StrEnum):
     capped = "capped"
 
 
+class TelemetryScope(StrEnum):
+    service = "service"
+    node = "node"
+
+
+class XdpMode(StrEnum):
+    native = "native"
+    generic = "generic"
+    offline = "offline"
+    unknown = "unknown"
+
+
 role_enum = SAEnum(
     Role,
     name="role",
@@ -214,6 +226,18 @@ blacklist_source_enum = SAEnum(
 overage_policy_enum = SAEnum(
     OveragePolicy,
     name="overage_policy",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+telemetry_scope_enum = SAEnum(
+    TelemetryScope,
+    name="telemetry_scope",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+xdp_mode_enum = SAEnum(
+    XdpMode,
+    name="xdp_mode",
     native_enum=False,
     values_callable=lambda values: [value.value for value in values],
 )
@@ -841,3 +865,64 @@ Index(
     unique=True,
     postgresql_where=text("scope = 'global'"),
 )
+
+
+class TelemetryCounter(Base):
+    __tablename__ = "telemetry_counter"
+    __table_args__ = (
+        Index(
+            "ix_telemetry_counter_scope_service_window_start",
+            "scope",
+            "service_id",
+            text("window_start DESC"),
+        ),
+        Index(
+            "ix_telemetry_counter_scope_window_start",
+            "scope",
+            text("window_start DESC"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope: Mapped[TelemetryScope] = mapped_column(telemetry_scope_enum, nullable=False)
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_service.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    dp_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    clean_pkts: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    clean_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    drop_pkts: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    drop_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    drop_by_reason: Mapped[dict[str, int]] = mapped_column(JSONB, default=dict, nullable=False)
+    pps: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    bps: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    top_dst_ports: Mapped[list[dict[str, int]] | None] = mapped_column(JSONB, nullable=True)
+    top_src: Mapped[list[dict[str, int | str]] | None] = mapped_column(JSONB, nullable=True)
+    is_baseline: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    service: Mapped[ProtectedService | None] = relationship()
+
+
+class NodeHealthSnapshot(Base):
+    __tablename__ = "node_health_snapshot"
+    __table_args__ = (Index("ix_node_health_snapshot_captured_at", text("captured_at DESC")),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    xdp_mode: Mapped[XdpMode] = mapped_column(xdp_mode_enum, nullable=False)
+    active_slot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    map_version: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    map_error_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    node_clean_bps: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    node_capacity_bps: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    bloom_stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
