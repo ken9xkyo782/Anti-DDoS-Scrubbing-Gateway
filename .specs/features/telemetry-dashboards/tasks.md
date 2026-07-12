@@ -19,7 +19,7 @@
 | T2 | Complete | `9b7cecb`; 112 DP tests + redirect/fairness smoke + pin lifecycle green |
 | T3 | Complete | `5684f63`; build, offline, live native snapshot, JSON, and pin lifecycle green |
 | T4 | Complete | `bfe4376`; full CP gate: 392 passed |
-| T5 | In progress | staged model/migration/test work exists, but no final gate or commit |
+| T5 | Partial | `7ca62db` contains model/migration/base test work, but no final gate ran and index assertions remain unstaged |
 | T6 | Complete | `7f879c8`; quick CP gate: 97 passed, 295 deselected |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
 
