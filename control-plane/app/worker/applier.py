@@ -1,10 +1,16 @@
+import asyncio
+import ipaddress
 import logging
+import os
+import struct
+import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
@@ -17,6 +23,24 @@ from app.db.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+APPLY_SNAPSHOT_MAGIC = b"XDPGWAP1"
+APPLY_SNAPSHOT_SCHEMA_VERSION = 1
+_GBPS = 1_000_000_000
+_WL_F_ACTIVE = 1 << 0
+_WL_F_HAS_BROAD = 1 << 1
+_VIP_F_PPS_SET = 1 << 0
+_VIP_F_BPS_SET = 1 << 1
+_RULE_F_ENABLED = 1 << 0
+_RULE_F_PPS_SET = 1 << 1
+_RULE_F_BPS_SET = 1 << 2
+_BLOOM_PREFIX = 24
+_PROTOCOL_NUMBERS = {
+    "any": 0,
+    "icmp": 1,
+    "tcp": 6,
+    "udp": 17,
+}
 
 
 @dataclass(frozen=True)
@@ -55,6 +79,75 @@ class PlaceholderApplier:
         )
 
 
+class ApplyError(RuntimeError):
+    """The external apply helper did not complete a swap."""
+
+
+class DoubleBufferApplier:
+    def __init__(
+        self,
+        *,
+        session_factory: async_sessionmaker[AsyncSession],
+        apply_bin: str,
+        timeout_seconds: float,
+    ) -> None:
+        self._session_factory = session_factory
+        self._apply_bin = apply_bin
+        self._timeout = timeout_seconds
+
+    async def apply(self, config: ServiceConfig) -> None:
+        started = time.monotonic()
+        async with self._session_factory() as db:
+            await db.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+            node = await load_node_config(db)
+
+        snapshot_fd, snapshot_path = tempfile.mkstemp(prefix="xdpgw-apply-", suffix=".bin")
+        try:
+            os.fchmod(snapshot_fd, 0o600)
+            with os.fdopen(snapshot_fd, "wb") as snapshot:
+                snapshot.write(serialize_node_snapshot(node))
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    self._apply_bin,
+                    snapshot_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except OSError as exc:
+                raise ApplyError(f"unable to start xdpgw-apply: {exc}") from exc
+
+            try:
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=self._timeout)
+            except TimeoutError as exc:
+                process.kill()
+                _, stderr = await process.communicate()
+                detail = _stderr_text(stderr)
+                message = "xdpgw-apply timed out"
+                if detail:
+                    message = f"{message}: {detail}"
+                raise ApplyError(message) from exc
+
+            if process.returncode != 0:
+                detail = _stderr_text(stderr)
+                if not detail:
+                    detail = f"exit status {process.returncode}"
+                raise ApplyError(detail)
+        finally:
+            os.unlink(snapshot_path)
+
+        logger.info(
+            "double-buffer apply completed",
+            extra={
+                "service_id": str(config.service_id),
+                "version": config.version,
+                "service_count": len(node),
+                "verify_result": "passed",
+                "duration_ms": int((time.monotonic() - started) * 1_000),
+            },
+        )
+
+
 async def load_service_config(
     db: AsyncSession,
     service_id: uuid.UUID,
@@ -78,6 +171,80 @@ async def load_service_config(
     if service is None:
         return None
 
+    return _service_config(service)
+
+
+async def load_node_config(db: AsyncSession) -> tuple[ServiceConfig, ...]:
+    """Load one consistent, enabled-service snapshot for a node apply."""
+    services = list(
+        (
+            await db.execute(
+                select(ProtectedService)
+                .options(
+                    selectinload(ProtectedService.plan),
+                    selectinload(ProtectedService.rules),
+                    selectinload(ProtectedService.whitelist_entries),
+                    selectinload(ProtectedService.blacklist_entries),
+                )
+                .where(ProtectedService.enabled.is_(True))
+                .order_by(ProtectedService.dp_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return tuple(_service_config(service) for service in services)
+
+
+def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
+    """Encode the explicit v1 apply_snapshot.h wire format."""
+    payload = bytearray()
+    payload.extend(APPLY_SNAPSHOT_MAGIC)
+    payload.extend(struct.pack("<II", APPLY_SNAPSHOT_SCHEMA_VERSION, len(node)))
+    for service in node:
+        dst_prefixlen, dst_addr = _cidr_parts(service.cidr_or_ip)
+        whitelist = tuple(_cidr_parts(entry.source_cidr) for entry in service.whitelist)
+        blacklist = tuple(_cidr_parts(entry.source_cidr) for entry in service.blacklist)
+        vip_flags = _vip_flags(service)
+        wl_flags = _list_flags(whitelist, active=bool(whitelist))
+        bl_flags = 0
+        committed_bps, ceiling_bps = _plan_rates(service.plan)
+
+        payload.extend(
+            struct.pack(
+                "<I4sIBBBQQQQBH",
+                dst_prefixlen,
+                dst_addr,
+                service.dp_id,
+                int(service.enabled),
+                wl_flags,
+                bl_flags,
+                committed_bps,
+                ceiling_bps,
+                service.vip_pps or 0,
+                service.vip_bps or 0,
+                vip_flags,
+                len(service.rules),
+            )
+        )
+        for rule in service.rules:
+            payload.extend(
+                struct.pack(
+                    "<HHHHBB",
+                    rule.src_port_lo or 0,
+                    rule.src_port_hi if rule.src_port_hi is not None else 65_535,
+                    rule.dst_port_lo or 0,
+                    rule.dst_port_hi if rule.dst_port_hi is not None else 65_535,
+                    _PROTOCOL_NUMBERS[rule.protocol.value],
+                    _rule_flags(rule),
+                )
+            )
+        _append_source_list(payload, whitelist)
+        _append_source_list(payload, blacklist)
+    return bytes(payload)
+
+
+def _service_config(service: ProtectedService) -> ServiceConfig:
     return ServiceConfig(
         service_id=service.id,
         dp_id=service.dp_id,
@@ -89,7 +256,54 @@ async def load_service_config(
         vip_pps=service.vip_pps,
         vip_bps=service.vip_bps,
         plan=service.plan,
-        rules=tuple(service.rules),
-        whitelist=tuple(service.whitelist_entries),
-        blacklist=tuple(service.blacklist_entries),
+        rules=tuple(sorted(service.rules, key=lambda rule: rule.priority)),
+        whitelist=tuple(sorted(service.whitelist_entries, key=lambda entry: entry.source_cidr)),
+        blacklist=tuple(sorted(service.blacklist_entries, key=lambda entry: entry.source_cidr)),
     )
+
+
+def _cidr_parts(cidr: str) -> tuple[int, bytes]:
+    network = ipaddress.ip_network(cidr, strict=False)
+    if network.version != 4:
+        raise ValueError(f"apply snapshots require IPv4 CIDRs: {cidr}")
+    return network.prefixlen, network.network_address.packed
+
+
+def _plan_rates(plan: ServicePlan | None) -> tuple[int, int]:
+    if plan is None:
+        return 0, 0
+    return (
+        int(plan.committed_clean_gbps * _GBPS),
+        int(plan.ceiling_clean_gbps * _GBPS),
+    )
+
+
+def _vip_flags(service: ServiceConfig) -> int:
+    return (_VIP_F_PPS_SET if service.vip_pps is not None else 0) | (
+        _VIP_F_BPS_SET if service.vip_bps is not None else 0
+    )
+
+
+def _rule_flags(rule: AllowRule) -> int:
+    return (
+        (_RULE_F_ENABLED if rule.enabled else 0)
+        | (_RULE_F_PPS_SET if rule.pps is not None else 0)
+        | (_RULE_F_BPS_SET if rule.bps is not None else 0)
+    )
+
+
+def _list_flags(entries: tuple[tuple[int, bytes], ...], *, active: bool) -> int:
+    if not active:
+        return 0
+    has_broad_entry = any(prefix < _BLOOM_PREFIX for prefix, _ in entries)
+    return _WL_F_ACTIVE | (_WL_F_HAS_BROAD if has_broad_entry else 0)
+
+
+def _append_source_list(payload: bytearray, entries: tuple[tuple[int, bytes], ...]) -> None:
+    payload.extend(struct.pack("<I", len(entries)))
+    for prefixlen, address in entries:
+        payload.extend(struct.pack("<I4s", prefixlen, address))
+
+
+def _stderr_text(stderr: bytes) -> str:
+    return stderr.decode(errors="replace").strip()

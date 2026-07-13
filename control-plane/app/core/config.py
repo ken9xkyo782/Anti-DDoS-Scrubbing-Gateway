@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     worker_backoff_initial_seconds: float = Field(default=0.5, gt=0)
     worker_backoff_max_seconds: float = Field(default=30.0, gt=0)
     worker_shutdown_grace_seconds: float = Field(default=10.0, gt=0)
+    worker_apply_binary_path: str = "../data-plane/build/xdpgw-apply"
+    worker_apply_timeout_seconds: float = Field(default=5.0, gt=0)
 
     feed_fetch_connect_timeout_seconds: float = Field(default=5.0, gt=0)
     feed_fetch_read_timeout_seconds: float = Field(default=10.0, gt=0)
