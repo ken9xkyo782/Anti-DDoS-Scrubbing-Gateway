@@ -20,7 +20,9 @@
  */
 #define _GNU_SOURCE
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +34,7 @@
 
 #include "apply_snapshot.h"
 #include "blacklist.h"
+#include "fair_budget.h"
 #include "fairness.h"
 #include "rules.h"
 #include "service.h"
@@ -44,6 +47,10 @@
 #define APPLY_MAX_BYTES (64u * 1024u * 1024u)
 #define APPLY_MAX_SERVICES 65536u
 #define APPLY_MAX_LIST_ENTRIES (1u << 20) /* per-service whitelist / sbl cap */
+#define APPLY_CONFIG_VERSION 1U
+#define APPLY_DEFAULT_NODE_CLEAN_CAPACITY_BPS 5000000000ULL
+#define APPLY_DEFAULT_FAIR_K 3ULL
+#define APPLY_DEFAULT_FAIR_REF_PKT 512ULL
 
 /* In-memory decode of the wire snapshot. Mirrors apply_snapshot.h field for
  * field; T3 maps these into the BPF map values. Addresses are stored as __be32
@@ -86,6 +93,43 @@ struct node_cfg {
 	uint32_t schema_version;
 	uint32_t service_count;
 	struct cfg_service *services;
+};
+
+/* All config-map fds required by the in-process swap core. The T5 CLI opens
+ * these pins; dp-unit builds the same bundle from skeleton fds. */
+struct apply_fds {
+	int active_config_fd;
+	int service_map_fd;
+	int rule_block_map_fd;
+	int whitelist_bloom_fd;
+	int whitelist_lpm_fd;
+	int vip_config_map_fd;
+	int global_blacklist_bloom_fd;
+	int global_blacklist_lpm_fd;
+	int service_blacklist_bloom_fd;
+	int service_blacklist_lpm_fd;
+	int udp_blocked_port_bitmap_fd;
+	int fair_config_map_fd;
+	int fair_node_config_fd;
+	int gbl_meta_fd;
+	uint32_t active_slot;
+	uint32_t inactive_slot;
+	uint32_t version;
+	const struct node_cfg *node;
+	uint64_t node_capacity_bps;
+	uint64_t sum_committed_bps;
+};
+
+enum apply_service_outer {
+	APPLY_SERVICE_MAP,
+	APPLY_RULE_BLOCK_MAP,
+	APPLY_WHITELIST_BLOOM,
+	APPLY_WHITELIST_LPM,
+	APPLY_VIP_CONFIG_MAP,
+	APPLY_SERVICE_BLACKLIST_BLOOM,
+	APPLY_SERVICE_BLACKLIST_LPM,
+	APPLY_FAIR_CONFIG_MAP,
+	APPLY_SERVICE_OUTER_COUNT,
 };
 
 /* Bounds-checked little-endian byte reader over a fixed buffer (fail-closed). */
@@ -386,6 +430,431 @@ static inline int create_inner_like(int outer_fd, uint32_t src_slot)
 	return fresh;
 }
 
+static inline int apply_inner_fd(int outer_fd, uint32_t slot)
+{
+	uint32_t inner_id = 0;
+
+	if (bpf_map_lookup_elem(outer_fd, &slot, &inner_id) != 0)
+		return -1;
+	return bpf_map_get_fd_by_id(inner_id);
+}
+
+static inline int apply_read_active(struct apply_fds *fds)
+{
+	struct active_config active;
+	uint32_t zero = 0;
+
+	if (bpf_map_lookup_elem(fds->active_config_fd, &zero, &active) != 0) {
+		fprintf(stderr, "xdpgw-apply: read active_config: %s\n",
+			strerror(errno));
+		return -1;
+	}
+	if (active.active_slot >= SERVICE_SLOTS) {
+		fprintf(stderr, "xdpgw-apply: invalid active slot %u\n",
+			active.active_slot);
+		return -1;
+	}
+
+	fds->active_slot = active.active_slot;
+	fds->inactive_slot = 1 - active.active_slot;
+	fds->version = active.version;
+	return 0;
+}
+
+static inline int apply_parse_u64_env(const char *name, uint64_t *value)
+{
+	const char *text = getenv(name);
+	char *end;
+	unsigned long long parsed;
+
+	if (!text || text[0] == '\0')
+		return 0;
+
+	errno = 0;
+	parsed = strtoull(text, &end, 10);
+	if (errno || end == text || *end != '\0') {
+		fprintf(stderr, "xdpgw-apply: invalid %s=%s\n", name, text);
+		return -1;
+	}
+	*value = parsed;
+	return 0;
+}
+
+static inline int apply_node_knobs(uint64_t *capacity, uint64_t *k,
+				   uint64_t *ref_pkt)
+{
+	*capacity = APPLY_DEFAULT_NODE_CLEAN_CAPACITY_BPS;
+	*k = APPLY_DEFAULT_FAIR_K;
+	*ref_pkt = APPLY_DEFAULT_FAIR_REF_PKT;
+
+	if (apply_parse_u64_env("XDPGW_NODE_CLEAN_CAPACITY_BPS", capacity) != 0 ||
+	    apply_parse_u64_env("XDPGW_FAIR_K", k) != 0 ||
+	    apply_parse_u64_env("XDPGW_FAIR_REF_PKT", ref_pkt) != 0)
+		return -1;
+	if (*k == 0 || *ref_pkt == 0) {
+		fprintf(stderr, "xdpgw-apply: fair K and reference packet must be non-zero\n");
+		return -1;
+	}
+	*capacity = clamp_fair_rate(*capacity);
+	return 0;
+}
+
+static inline int apply_install_inner(int outer_fd, uint32_t slot, int inner_fd)
+{
+	if (bpf_map_update_elem(outer_fd, &slot, &inner_fd, BPF_ANY) != 0) {
+		fprintf(stderr, "xdpgw-apply: install inactive inner: %s\n",
+			strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
+static inline int apply_write_service(int service_fd, int rule_fd, int wl_bloom_fd,
+					     int wl_lpm_fd, int vip_fd,
+					     int sbl_bloom_fd, int sbl_lpm_fd,
+					     int fair_fd,
+					     const struct cfg_service *service,
+					     uint64_t k, uint64_t ref_pkt,
+					     uint64_t *sum_committed)
+{
+	struct service_key service_key = {
+		.prefixlen = service->dst_prefixlen,
+		.addr = service->dst_addr,
+	};
+	struct service_val service_val = {
+		.service_id = service->dp_id,
+		.enabled = service->enabled,
+		.wl_flags = service->wl_flags,
+		.bl_flags = service->bl_flags,
+	};
+	struct rule_block block = {
+		.version = APPLY_CONFIG_VERSION,
+		.rule_count = service->rule_count,
+	};
+	struct fair_budget budget;
+	struct fair_config fair_config = {};
+	uint32_t service_id = service->dp_id;
+	uint16_t i;
+
+	if (service->dst_prefixlen > 32 || service->dp_id == 0 ||
+	    service->enabled > 1 || service->rule_count > RULE_MAX ||
+	    service->committed_bps > service->ceiling_bps) {
+		fprintf(stderr, "xdpgw-apply: invalid service %u configuration\n",
+			service->dp_id);
+		return -1;
+	}
+
+	for (i = 0; i < service->rule_count; i++) {
+		block.rules[i].src_lo = service->rules[i].src_lo;
+		block.rules[i].src_hi = service->rules[i].src_hi;
+		block.rules[i].dst_lo = service->rules[i].dst_lo;
+		block.rules[i].dst_hi = service->rules[i].dst_hi;
+		block.rules[i].proto = service->rules[i].proto;
+		block.rules[i].flags = service->rules[i].flags;
+	}
+	if (bpf_map_update_elem(service_fd, &service_key, &service_val,
+				BPF_ANY) != 0 ||
+	    bpf_map_update_elem(rule_fd, &service_id, &block, BPF_ANY) != 0) {
+		fprintf(stderr, "xdpgw-apply: write service %u: %s\n",
+			service_id, strerror(errno));
+		return -1;
+	}
+
+	for (i = 0; i < service->wl_count; i++) {
+		const struct cfg_source *source = &service->wl[i];
+		struct wl_lpm_key lpm_key = {
+			.prefixlen = 32 + source->prefixlen,
+			.service_id = htonl(service_id),
+			.src = source->addr,
+		};
+		__u8 present = 1;
+
+		if (source->prefixlen > 32) {
+			fprintf(stderr, "xdpgw-apply: invalid whitelist prefix\n");
+			return -1;
+		}
+		if (source->prefixlen >= WL_BLOOM_PREFIX) {
+			struct wl_bloom_key bloom_key = {
+				.service_id = htonl(service_id),
+				.src24 = htonl(ntohl(source->addr) & WL_SRC24_MASK),
+			};
+
+			if (bpf_map_update_elem(wl_bloom_fd, NULL, &bloom_key,
+						BPF_ANY) != 0)
+				return -1;
+		}
+		if (bpf_map_update_elem(wl_lpm_fd, &lpm_key, &present, BPF_ANY) != 0)
+			return -1;
+	}
+
+	if (service->wl_flags & WL_F_ACTIVE) {
+		struct vip_config vip_config = {
+			.version = APPLY_CONFIG_VERSION,
+			.flags = service->vip_flags,
+			.pps = service->vip_pps,
+			.bps = service->vip_bps,
+		};
+
+		if (bpf_map_update_elem(vip_fd, &service_id, &vip_config,
+					BPF_ANY) != 0)
+			return -1;
+	}
+
+	for (i = 0; i < service->sbl_count; i++) {
+		const struct cfg_source *source = &service->sbl[i];
+		struct sbl_lpm_key lpm_key = {
+			.prefixlen = 32 + source->prefixlen,
+			.service_id = htonl(service_id),
+			.src = source->addr,
+		};
+		__u8 present = 1;
+
+		if (source->prefixlen > 32) {
+			fprintf(stderr, "xdpgw-apply: invalid service blacklist prefix\n");
+			return -1;
+		}
+		if (source->prefixlen >= SBL_BLOOM_PREFIX) {
+			struct sbl_bloom_key bloom_key = {
+				.service_id = htonl(service_id),
+				.src24 = htonl(ntohl(source->addr) & BL_SRC24_MASK),
+			};
+
+			if (bpf_map_update_elem(sbl_bloom_fd, NULL, &bloom_key,
+						BPF_ANY) != 0)
+				return -1;
+		}
+		if (bpf_map_update_elem(sbl_lpm_fd, &lpm_key, &present, BPF_ANY) != 0)
+			return -1;
+	}
+
+	budget = fair_budget(service->committed_bps, service->ceiling_bps, k,
+				     ref_pkt);
+	fair_config.version = APPLY_CONFIG_VERSION;
+	fair_config.committed_bps = budget.committed_bps;
+	fair_config.burst_bps = budget.burst_bps;
+	fair_config.cap_bps = budget.cap_bps;
+	fair_config.cap_pps = budget.cap_pps;
+	if (bpf_map_update_elem(fair_fd, &service_id, &fair_config, BPF_ANY) != 0)
+		return -1;
+
+	if (UINT64_MAX - *sum_committed < budget.committed_bps)
+		*sum_committed = UINT64_MAX;
+	else
+		*sum_committed += budget.committed_bps;
+	return 0;
+}
+
+/* Build fresh service-scoped inners from one snapshot. Only the inactive slot
+ * is changed; active_config is read once here and remains untouched. */
+static inline int build_inactive_slot(struct apply_fds *fds,
+					      const struct node_cfg *node)
+{
+	int outers[APPLY_SERVICE_OUTER_COUNT];
+	int fresh[APPLY_SERVICE_OUTER_COUNT];
+	struct fair_node_config fair_node_config;
+	uint64_t capacity;
+	uint64_t k;
+	uint64_t ref_pkt;
+	uint64_t sum_committed = 0;
+	uint32_t i;
+	int err = -1;
+
+	if (!fds || !node ||
+	    node->schema_version != APPLY_SNAPSHOT_SCHEMA_VERSION ||
+	    (node->service_count && !node->services)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (apply_read_active(fds) != 0 ||
+	    apply_node_knobs(&capacity, &k, &ref_pkt) != 0)
+		return -1;
+
+	outers[APPLY_SERVICE_MAP] = fds->service_map_fd;
+	outers[APPLY_RULE_BLOCK_MAP] = fds->rule_block_map_fd;
+	outers[APPLY_WHITELIST_BLOOM] = fds->whitelist_bloom_fd;
+	outers[APPLY_WHITELIST_LPM] = fds->whitelist_lpm_fd;
+	outers[APPLY_VIP_CONFIG_MAP] = fds->vip_config_map_fd;
+	outers[APPLY_SERVICE_BLACKLIST_BLOOM] = fds->service_blacklist_bloom_fd;
+	outers[APPLY_SERVICE_BLACKLIST_LPM] = fds->service_blacklist_lpm_fd;
+	outers[APPLY_FAIR_CONFIG_MAP] = fds->fair_config_map_fd;
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++)
+		fresh[i] = -1;
+
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		fresh[i] = create_inner_like(outers[i], fds->active_slot);
+		if (fresh[i] < 0)
+			goto out;
+	}
+
+	for (i = 0; i < node->service_count; i++) {
+		if (apply_write_service(fresh[APPLY_SERVICE_MAP],
+					fresh[APPLY_RULE_BLOCK_MAP],
+					fresh[APPLY_WHITELIST_BLOOM],
+					fresh[APPLY_WHITELIST_LPM],
+					fresh[APPLY_VIP_CONFIG_MAP],
+					fresh[APPLY_SERVICE_BLACKLIST_BLOOM],
+					fresh[APPLY_SERVICE_BLACKLIST_LPM],
+					fresh[APPLY_FAIR_CONFIG_MAP],
+					&node->services[i], k, ref_pkt,
+					&sum_committed) != 0)
+			goto out;
+	}
+
+	fair_node_config.version = APPLY_CONFIG_VERSION;
+	fair_node_config._pad = 0;
+	fair_node_config.headroom_bps = node_headroom(capacity, sum_committed);
+	if (bpf_map_update_elem(fds->fair_node_config_fd, &fds->inactive_slot,
+				&fair_node_config, BPF_ANY) != 0) {
+		fprintf(stderr, "xdpgw-apply: write fair_node_config: %s\n",
+			strerror(errno));
+		goto out;
+	}
+
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		if (apply_install_inner(outers[i], fds->inactive_slot, fresh[i]) != 0)
+			goto out;
+	}
+
+	fds->node = node;
+	fds->node_capacity_bps = capacity;
+	fds->sum_committed_bps = sum_committed;
+	err = 0;
+out:
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		if (fresh[i] >= 0)
+			close(fresh[i]);
+	}
+	return err;
+}
+
+static inline int apply_copy_outer_inner(int outer_fd, uint32_t active_slot,
+						 uint32_t inactive_slot)
+{
+	int inner_fd = apply_inner_fd(outer_fd, active_slot);
+	int err;
+
+	if (inner_fd < 0)
+		return -1;
+	err = apply_install_inner(outer_fd, inactive_slot, inner_fd);
+	close(inner_fd);
+	return err;
+}
+
+/* Feed-owned maps are immutable to a service apply: reinstall active inners by
+ * fd and copy gbl_meta, avoiding any blacklist rebuild. */
+static inline int carry_forward_feed(struct apply_fds *fds)
+{
+	struct gbl_meta meta;
+
+	if (!fds)
+		return -1;
+	if (apply_copy_outer_inner(fds->global_blacklist_bloom_fd,
+				   fds->active_slot, fds->inactive_slot) != 0 ||
+	    apply_copy_outer_inner(fds->global_blacklist_lpm_fd,
+				   fds->active_slot, fds->inactive_slot) != 0 ||
+	    apply_copy_outer_inner(fds->udp_blocked_port_bitmap_fd,
+				   fds->active_slot, fds->inactive_slot) != 0)
+		return -1;
+	if (bpf_map_lookup_elem(fds->gbl_meta_fd, &fds->active_slot, &meta) != 0 ||
+	    bpf_map_update_elem(fds->gbl_meta_fd, &fds->inactive_slot, &meta,
+				BPF_ANY) != 0)
+		return -1;
+	return 0;
+}
+
+/* Structural read-back of the inactive candidate. This must remain side-effect
+ * free so a mismatch aborts before commit. */
+static inline int verify_slot(struct apply_fds *fds)
+{
+	int outers[APPLY_SERVICE_OUTER_COUNT];
+	int inners[APPLY_SERVICE_OUTER_COUNT];
+	struct fair_node_config node_config;
+	struct gbl_meta active_meta;
+	struct gbl_meta inactive_meta;
+	uint32_t i;
+	int err = -1;
+
+	if (!fds || !fds->node)
+		return -1;
+	outers[APPLY_SERVICE_MAP] = fds->service_map_fd;
+	outers[APPLY_RULE_BLOCK_MAP] = fds->rule_block_map_fd;
+	outers[APPLY_WHITELIST_BLOOM] = fds->whitelist_bloom_fd;
+	outers[APPLY_WHITELIST_LPM] = fds->whitelist_lpm_fd;
+	outers[APPLY_VIP_CONFIG_MAP] = fds->vip_config_map_fd;
+	outers[APPLY_SERVICE_BLACKLIST_BLOOM] = fds->service_blacklist_bloom_fd;
+	outers[APPLY_SERVICE_BLACKLIST_LPM] = fds->service_blacklist_lpm_fd;
+	outers[APPLY_FAIR_CONFIG_MAP] = fds->fair_config_map_fd;
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++)
+		inners[i] = -1;
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		inners[i] = apply_inner_fd(outers[i], fds->inactive_slot);
+		if (inners[i] < 0)
+			goto out;
+	}
+
+	for (i = 0; i < fds->node->service_count; i++) {
+		const struct cfg_service *service = &fds->node->services[i];
+		struct service_key key = {
+			.prefixlen = service->dst_prefixlen,
+			.addr = service->dst_addr,
+		};
+		struct service_val value;
+		struct rule_block block;
+
+		if (!service->enabled)
+			continue;
+		if (bpf_map_lookup_elem(inners[APPLY_SERVICE_MAP], &key, &value) != 0 ||
+		    value.service_id != service->dp_id || !value.enabled ||
+		    value.wl_flags != service->wl_flags ||
+		    value.bl_flags != service->bl_flags ||
+		    bpf_map_lookup_elem(inners[APPLY_RULE_BLOCK_MAP], &service->dp_id,
+					&block) != 0 ||
+		    block.version != APPLY_CONFIG_VERSION ||
+		    block.rule_count != service->rule_count)
+			goto out;
+	}
+
+	if (bpf_map_lookup_elem(fds->fair_node_config_fd, &fds->inactive_slot,
+				&node_config) != 0 ||
+	    node_config.version != APPLY_CONFIG_VERSION ||
+	    node_config.headroom_bps != node_headroom(fds->node_capacity_bps,
+						       fds->sum_committed_bps) ||
+	    bpf_map_lookup_elem(fds->gbl_meta_fd, &fds->active_slot,
+				&active_meta) != 0 ||
+	    bpf_map_lookup_elem(fds->gbl_meta_fd, &fds->inactive_slot,
+				&inactive_meta) != 0 ||
+	    active_meta.flags != inactive_meta.flags)
+		goto out;
+
+	err = 0;
+out:
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		if (inners[i] >= 0)
+			close(inners[i]);
+	}
+	return err;
+}
+
+/* The sole active_config mutation in the core: publish the fully verified
+ * inactive slot and advance the node-global version together. */
+static inline int commit(struct apply_fds *fds)
+{
+	struct active_config active;
+	uint32_t zero = 0;
+
+	if (!fds)
+		return -1;
+	active.active_slot = fds->inactive_slot;
+	active.version = fds->version + 1;
+	if (bpf_map_update_elem(fds->active_config_fd, &zero, &active,
+				BPF_ANY) != 0) {
+		fprintf(stderr, "xdpgw-apply: commit active_config: %s\n",
+			strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
 #ifndef XDPGW_APPLY_NO_MAIN
 int main(int argc, char **argv)
 {
@@ -400,12 +869,11 @@ int main(int argc, char **argv)
 		return 1;
 
 	/*
-	 * T3–T5: open pinned config maps, build_inactive_slot(), verify_slot(),
-	 * commit(). Until then the helper only proves the snapshot decodes; it
-	 * must not report success, so it exits non-zero (fail-closed).
+	 * T3 provides the fd-taking build/verify/commit core above. T5 opens the
+	 * pinned maps and invokes it; until then this CLI must remain fail-closed.
 	 */
 	fprintf(stderr,
-		"xdpgw-apply: parsed %u service(s) (schema v%u); build/swap not yet implemented (T3)\n",
+		"xdpgw-apply: parsed %u service(s) (schema v%u); pin-open CLI not yet implemented (T5)\n",
 		node.service_count, node.schema_version);
 	free_node_cfg(&node);
 	return 3;

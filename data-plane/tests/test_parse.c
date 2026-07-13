@@ -6035,6 +6035,409 @@ static int pin_to_cpu0(void)
 	return 0;
 }
 
+static struct cfg_service apply_cfg_service(__u32 dst_host, __u32 dp_id,
+					    __u8 enabled)
+{
+	struct cfg_service service = {
+		.dst_prefixlen = 32,
+		.dst_addr = htonl(dst_host),
+		.dp_id = dp_id,
+		.enabled = enabled,
+		.committed_bps = 1000000000ULL,
+		.ceiling_bps = 1000000000ULL,
+	};
+
+	return service;
+}
+
+static void apply_cfg_match_all(struct cfg_service *service)
+{
+	service->rule_count = 1;
+	service->rules[0] = (struct cfg_rule){
+		.src_lo = 0,
+		.src_hi = UINT16_MAX,
+		.dst_lo = 0,
+		.dst_hi = UINT16_MAX,
+		.proto = RULE_PROTO_ANY,
+		.flags = RULE_F_ENABLED,
+	};
+}
+
+static struct apply_fds apply_fds_for_env(struct test_env *env)
+{
+	return (struct apply_fds){
+		.active_config_fd = env->active_config_fd,
+		.service_map_fd = env->service_map_fd,
+		.rule_block_map_fd = env->rule_block_map_fd,
+		.whitelist_bloom_fd = env->whitelist_bloom_fd,
+		.whitelist_lpm_fd = env->whitelist_lpm_fd,
+		.vip_config_map_fd = env->vip_config_map_fd,
+		.global_blacklist_bloom_fd = env->global_blacklist_bloom_fd,
+		.global_blacklist_lpm_fd = env->global_blacklist_lpm_fd,
+		.service_blacklist_bloom_fd = env->service_blacklist_bloom_fd,
+		.service_blacklist_lpm_fd = env->service_blacklist_lpm_fd,
+		.udp_blocked_port_bitmap_fd = env->blocked_port_bitmap_fd,
+		.fair_config_map_fd = env->fair_config_map_fd,
+		.fair_node_config_fd = env->fair_node_config_fd,
+		.gbl_meta_fd = env->gbl_meta_fd,
+	};
+}
+
+static int apply_cfg_core(struct apply_fds *fds, const struct node_cfg *node)
+{
+	if (build_inactive_slot(fds, node) != 0 ||
+	    carry_forward_feed(fds) != 0 || verify_slot(fds) != 0 ||
+	    commit(fds) != 0)
+		return -1;
+	return 0;
+}
+
+static int apply_inner_fd_for_test(int outer_fd, __u32 slot)
+{
+	__u32 inner_id = 0;
+
+	if (bpf_map_lookup_elem(outer_fd, &slot, &inner_id) != 0)
+		return -1;
+	return bpf_map_get_fd_by_id(inner_id);
+}
+
+static int test_apply_swap_adds_allow_rule(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct active_config active;
+	struct pkt_frame frame;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 zero = 0;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = set_active(&env, 0, 7);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("pre-swap retval", retval, XDP_DROP);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_cfg_core(&fds, &node);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 1);
+	if (!err && bpf_map_lookup_elem(env.active_config_fd, &zero, &active) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u32("active slot", active.active_slot, 1);
+	if (!err)
+		err = expect_u32("active version", active.version, 8);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_swap_adds_service_and_preserves_existing(void)
+{
+	struct cfg_service services[2] = {
+		apply_cfg_service(0x0a000002, DEFAULT_SERVICE_ID, 1),
+		apply_cfg_service(0x0a000003, 77, 1),
+	};
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 2,
+		.services = services,
+	};
+	struct pkt_frame existing;
+	struct pkt_frame added;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&existing) != 0 ||
+	    build_default_udp_frame(&added) != 0 ||
+	    set_ipv4_addrs(&added, TEST_SRC_PUB_A, 0x0a000003) != 0)
+		return -1;
+	apply_cfg_match_all(&services[0]);
+	apply_cfg_match_all(&services[1]);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &existing, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &added, &retval);
+	if (!err)
+		err = expect_u32("new service pre-swap", retval, XDP_DROP);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_cfg_core(&fds, &node);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &existing, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &added, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, 77, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_swap_disables_service(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 0);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_cfg_core(&fds, &node);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("disabled service retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_DISABLED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_swap_removes_service(void)
+{
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_cfg_core(&fds, &node);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("removed service retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_SERVICE_MISS, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_swap_carries_global_blacklist(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 before_id = 0;
+	__u32 after_id = 0;
+	__u32 slot0 = 0;
+	__u32 slot1 = 1;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_C, 0x0a000002) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, TEST_SRC_PUB_C, 32);
+	if (!err &&
+	    bpf_map_lookup_elem(env.global_blacklist_lpm_fd, &slot0, &before_id) !=
+		0)
+		err = -1;
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_cfg_core(&fds, &node);
+	}
+	if (!err &&
+	    bpf_map_lookup_elem(env.global_blacklist_lpm_fd, &slot1, &after_id) !=
+		0)
+		err = -1;
+	if (!err)
+		err = expect_u32("carried global LPM id", after_id, before_id);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("carried global blacklist retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_verify_rejects_structural_mismatches(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct service_key service_key = {
+		.prefixlen = 32,
+		.addr = DEFAULT_DST,
+	};
+	struct rule_block block;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 inactive = 1;
+	int service_fd = -1;
+	int rule_fd = -1;
+	int err;
+
+	apply_cfg_match_all(&service);
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = build_inactive_slot(&fds, &node);
+	}
+	if (!err)
+		err = carry_forward_feed(&fds);
+	if (!err)
+		err = verify_slot(&fds);
+	if (!err && (service_fd =
+		     apply_inner_fd_for_test(env.service_map_fd, inactive)) < 0) {
+		err = -1;
+	}
+	if (!err && bpf_map_delete_elem(service_fd, &service_key) != 0)
+		err = -1;
+	if (!err && verify_slot(&fds) == 0)
+		err = -1;
+	if (service_fd >= 0)
+		close(service_fd);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = build_inactive_slot(&fds, &node);
+	}
+	if (!err)
+		err = carry_forward_feed(&fds);
+	if (!err && (rule_fd =
+		     apply_inner_fd_for_test(env.rule_block_map_fd, inactive)) < 0) {
+		err = -1;
+	}
+	if (!err && bpf_map_lookup_elem(rule_fd, &service.dp_id, &block) != 0)
+		err = -1;
+	if (!err) {
+		block.version++;
+		if (bpf_map_update_elem(rule_fd, &service.dp_id, &block, BPF_ANY) != 0)
+			err = -1;
+	}
+	if (!err && verify_slot(&fds) == 0)
+		err = -1;
+	if (rule_fd >= 0)
+		close(rule_fd);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = build_inactive_slot(&fds, &node);
+	}
+	if (!err)
+		err = carry_forward_feed(&fds);
+	if (!err &&
+	    bpf_map_delete_elem(env.whitelist_lpm_fd, &inactive) != 0)
+		err = -1;
+	if (!err && verify_slot(&fds) == 0)
+		err = -1;
+
+	env_close(&env);
+	return err;
+}
+
 /*
  * DBS-09 de-risk: prove the one novel composition xdpgw-apply stands on —
  * create a fresh inner meta-equal to the live slot-0 inner via create_inner_like,
@@ -6122,6 +6525,15 @@ int main(void)
 			{ "config maps load", test_config_maps_load },
 		{ "apply fresh inner install round-trips",
 		  test_apply_fresh_inner_install },
+		{ "apply swap adds allow rule", test_apply_swap_adds_allow_rule },
+		{ "apply swap adds service and preserves existing",
+		  test_apply_swap_adds_service_and_preserves_existing },
+		{ "apply swap disables service", test_apply_swap_disables_service },
+		{ "apply swap removes service", test_apply_swap_removes_service },
+		{ "apply swap carries global blacklist",
+		  test_apply_swap_carries_global_blacklist },
+		{ "apply verify rejects structural mismatches",
+		  test_apply_verify_rejects_structural_mismatches },
 			{ "fair committed spin lock mutates tokens",
 			  test_fair_committed_spin_lock_mutates_tokens },
 			{ "ingress cap under limit continues",
