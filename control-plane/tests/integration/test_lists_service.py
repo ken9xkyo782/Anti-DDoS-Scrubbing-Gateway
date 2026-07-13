@@ -2,22 +2,32 @@ from ipaddress import IPv4Network
 
 import pytest
 from fastapi import HTTPException
+from redis.asyncio import Redis
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import (
+    AgentJob,
     AuditEvent,
     BlacklistEntry,
     BlacklistScope,
     BlacklistSource,
+    FeedBlacklistAssertion,
+    GlobalDenyState,
+    JobType,
     Role,
     Tenant,
+    ThreatFeedSource,
     User,
     WhitelistEntry,
+    utc_now,
 )
+from app.db.session import run_post_commit_callbacks
 from app.services import allocations as allocation_service
+from app.services import feed_reconcile
 from app.services import lists as list_service
 from app.services import services as service_service
+from app.services.apply import APPLY_QUEUE_KEY
 
 pytestmark = pytest.mark.integration
 
@@ -72,6 +82,50 @@ async def create_service(
         cidr_or_ip=IPv4Network("203.0.113.10/32"),
         actor=actor,
     )
+
+
+async def seed_feed_entry(
+    db_session: AsyncSession,
+    *,
+    source_cidr: str,
+    source_count: int = 1,
+) -> tuple[BlacklistEntry, list[ThreatFeedSource]]:
+    entry = BlacklistEntry(
+        scope=BlacklistScope.global_,
+        source=BlacklistSource.feed,
+        source_cidr=source_cidr,
+    )
+    sources = [
+        ThreatFeedSource(
+            name=f"feed-list-{source_cidr}-{index}",
+            url=f"https://feeds.example.test/{source_cidr}/{index}",
+            sync_interval_seconds=300,
+        )
+        for index in range(source_count)
+    ]
+    db_session.add_all([entry, *sources])
+    await db_session.flush()
+    now = utc_now()
+    db_session.add_all(
+        [
+            FeedBlacklistAssertion(
+                feed_source_id=source.id,
+                blacklist_entry_id=entry.id,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+            for source in sources
+        ]
+    )
+    await db_session.flush()
+    return entry, sources
+
+
+async def materialize_state(db_session: AsyncSession) -> GlobalDenyState:
+    await feed_reconcile.materialize_global_union(db_session)
+    state = await db_session.get(GlobalDenyState, 1)
+    assert state is not None
+    return state
 
 
 async def test_add_whitelist_accepts_external_ipv4_bumps_and_audits(
@@ -217,6 +271,204 @@ async def test_add_global_blacklist_has_manual_source_and_no_version_bump(
     assert entry.service_id is None
     assert entry.source == BlacklistSource.manual
     assert service.service.version == 1
+
+
+async def test_add_global_manual_promotes_feed_entry_and_preserves_assertions(
+    db_session: AsyncSession,
+) -> None:
+    admin = await create_admin(db_session, "global-promote-admin")
+    feed_entry, sources = await seed_feed_entry(
+        db_session,
+        source_cidr="185.1.0.0/16",
+        source_count=2,
+    )
+    state = await materialize_state(db_session)
+    desired_revision = state.desired_revision
+
+    entry = await list_service.add_blacklist(
+        db_session,
+        scope=BlacklistScope.global_,
+        service_id=None,
+        source_cidr="185.1.0.0/16",
+        actor=admin,
+    )
+
+    assertions = list(
+        (
+            await db_session.scalars(
+                select(FeedBlacklistAssertion).where(
+                    FeedBlacklistAssertion.blacklist_entry_id == feed_entry.id
+                )
+            )
+        ).all()
+    )
+    state = await db_session.get(GlobalDenyState, 1)
+    assert entry.id == feed_entry.id
+    assert entry.source == BlacklistSource.manual
+    assert entry.created_by == admin.id
+    assert {assertion.feed_source_id for assertion in assertions} == {
+        source.id for source in sources
+    }
+    assert state is not None
+    assert state.desired_revision == desired_revision
+    assert (
+        await db_session.scalar(
+            select(func.count(AgentJob.id)).where(AgentJob.job_type == JobType.global_deny_apply)
+        )
+    ) == 0
+
+
+async def test_remove_global_manual_demotes_to_feed_when_assertions_remain(
+    db_session: AsyncSession,
+) -> None:
+    admin = await create_admin(db_session, "global-demote-admin")
+    entry, sources = await seed_feed_entry(
+        db_session,
+        source_cidr="185.2.0.0/16",
+        source_count=2,
+    )
+    entry.source = BlacklistSource.manual
+    entry.created_by = admin.id
+    state = await materialize_state(db_session)
+    desired_revision = state.desired_revision
+
+    await list_service.remove_blacklist(
+        db_session,
+        scope=BlacklistScope.global_,
+        service_id=None,
+        source_cidr="185.2.0.0/16",
+        actor=admin,
+    )
+
+    demoted = await db_session.get(BlacklistEntry, entry.id)
+    assertions = list(
+        (
+            await db_session.scalars(
+                select(FeedBlacklistAssertion).where(
+                    FeedBlacklistAssertion.blacklist_entry_id == entry.id
+                )
+            )
+        ).all()
+    )
+    state = await db_session.get(GlobalDenyState, 1)
+    assert demoted is not None
+    assert demoted.source == BlacklistSource.feed
+    assert {assertion.feed_source_id for assertion in assertions} == {
+        source.id for source in sources
+    }
+    assert state is not None
+    assert state.desired_revision == desired_revision
+    assert (
+        await db_session.scalar(
+            select(func.count(AgentJob.id)).where(AgentJob.job_type == JobType.global_deny_apply)
+        )
+    ) == 0
+
+
+async def test_remove_global_manual_without_assertions_deletes_and_queues_convergence(
+    db_session: AsyncSession,
+) -> None:
+    admin = await create_admin(db_session, "global-remove-admin")
+    entry = BlacklistEntry(
+        scope=BlacklistScope.global_,
+        source=BlacklistSource.manual,
+        source_cidr="185.3.0.0/16",
+        created_by=admin.id,
+    )
+    db_session.add(entry)
+    await db_session.flush()
+    state = await materialize_state(db_session)
+    desired_revision = state.desired_revision
+
+    await list_service.remove_blacklist(
+        db_session,
+        scope=BlacklistScope.global_,
+        service_id=None,
+        source_cidr="185.3.0.0/16",
+        actor=admin,
+    )
+
+    state = await db_session.get(GlobalDenyState, 1)
+    job = (
+        await db_session.scalars(
+            select(AgentJob).where(AgentJob.job_type == JobType.global_deny_apply)
+        )
+    ).one()
+    assert await db_session.get(BlacklistEntry, entry.id) is None
+    assert state is not None
+    assert state.desired_revision == desired_revision + 1
+    assert job.version == state.desired_revision
+
+
+async def test_remove_global_feed_only_entry_conflicts_without_mutating_state(
+    db_session: AsyncSession,
+) -> None:
+    admin = await create_admin(db_session, "global-feed-only-admin")
+    entry, sources = await seed_feed_entry(db_session, source_cidr="185.4.0.0/16")
+    state = await materialize_state(db_session)
+    desired_revision = state.desired_revision
+    desired_digest = state.desired_digest
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_service.remove_blacklist(
+            db_session,
+            scope=BlacklistScope.global_,
+            service_id=None,
+            source_cidr="185.4.0.0/16",
+            actor=admin,
+        )
+
+    persisted = await db_session.get(BlacklistEntry, entry.id)
+    assertions = list(
+        (
+            await db_session.scalars(
+                select(FeedBlacklistAssertion).where(
+                    FeedBlacklistAssertion.blacklist_entry_id == entry.id
+                )
+            )
+        ).all()
+    )
+    state = await db_session.get(GlobalDenyState, 1)
+    assert exc_info.value.status_code == 409
+    assert persisted is not None
+    assert persisted.source == BlacklistSource.feed
+    assert [assertion.feed_source_id for assertion in assertions] == [sources[0].id]
+    assert state is not None
+    assert (state.desired_revision, state.desired_digest) == (desired_revision, desired_digest)
+    assert (
+        await db_session.scalar(
+            select(func.count(AgentJob.id)).where(AgentJob.job_type == JobType.global_deny_apply)
+        )
+    ) == 0
+
+
+async def test_add_global_manual_dispatches_one_convergence_job_after_commit(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+) -> None:
+    async with committed_db() as db:
+        admin = await create_admin(db, "global-convergence-admin")
+        entry = await list_service.add_blacklist(
+            db,
+            scope=BlacklistScope.global_,
+            service_id=None,
+            source_cidr="185.5.0.0/16",
+            actor=admin,
+        )
+        state = await db.get(GlobalDenyState, 1)
+        job = (
+            await db.scalars(select(AgentJob).where(AgentJob.job_type == JobType.global_deny_apply))
+        ).one()
+
+        assert state is not None
+        assert state.desired_revision == 1
+        assert job.version == state.desired_revision
+        assert await redis_client.lrange(APPLY_QUEUE_KEY, 0, -1) == []
+        await db.commit()
+        await run_post_commit_callbacks(db)
+
+    assert entry.source == BlacklistSource.manual
+    assert await redis_client.lrange(APPLY_QUEUE_KEY, 0, -1) == [str(job.id)]
 
 
 async def test_list_and_remove_service_lists_are_scoped(db_session: AsyncSession) -> None:

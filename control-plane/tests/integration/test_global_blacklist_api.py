@@ -12,7 +12,17 @@ from app.core.config import get_settings
 from app.core.deps import get_session_store
 from app.core.security import hash_password
 from app.core.sessions import RedisSessionStore
-from app.db.models import BlacklistEntry, Role, Tenant, User
+from app.db.models import (
+    BlacklistEntry,
+    BlacklistScope,
+    BlacklistSource,
+    FeedBlacklistAssertion,
+    Role,
+    Tenant,
+    ThreatFeedSource,
+    User,
+    utc_now,
+)
 from app.db.session import get_db
 
 pytestmark = pytest.mark.integration
@@ -67,6 +77,32 @@ async def authenticate(client: AsyncClient, store: RedisSessionStore, user: User
     client.cookies.set(get_settings().session_cookie_name, sid)
 
 
+async def seed_feed_entry(db_session: AsyncSession, source_cidr: str) -> BlacklistEntry:
+    source = ThreatFeedSource(
+        name=f"api-feed-{source_cidr}",
+        url=f"https://feeds.example.test/{source_cidr}",
+        sync_interval_seconds=300,
+    )
+    entry = BlacklistEntry(
+        scope=BlacklistScope.global_,
+        source=BlacklistSource.feed,
+        source_cidr=source_cidr,
+    )
+    db_session.add_all([source, entry])
+    await db_session.flush()
+    now = utc_now()
+    db_session.add(
+        FeedBlacklistAssertion(
+            feed_source_id=source.id,
+            blacklist_entry_id=entry.id,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+    )
+    await db_session.flush()
+    return entry
+
+
 async def test_admin_add_global_blacklist_returns_manual_source(
     db_session: AsyncSession,
     redis_client: Redis,
@@ -115,6 +151,61 @@ async def test_admin_deletes_global_blacklist_entry(
 
     assert deleted.status_code == 204
     assert (await db_session.execute(select(func.count(BlacklistEntry.id)))).scalar_one() == 0
+
+
+async def test_admin_post_promotes_feed_entry_without_replacing_it(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "global-api-promote-admin")
+    feed_entry = await seed_feed_entry(db_session, "185.6.0.0/16")
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        response = await client.post("/blacklist", json={"source_cidr": "185.6.0.0/16"})
+
+    assertions = list(
+        (
+            await db_session.scalars(
+                select(FeedBlacklistAssertion).where(
+                    FeedBlacklistAssertion.blacklist_entry_id == feed_entry.id
+                )
+            )
+        ).all()
+    )
+    assert response.status_code == 201
+    assert response.json()["id"] == str(feed_entry.id)
+    assert response.json()["source"] == "manual"
+    assert len(assertions) == 1
+
+
+async def test_admin_delete_rejects_feed_only_entry_without_removing_assertion(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "global-api-feed-only-admin")
+    feed_entry = await seed_feed_entry(db_session, "185.7.0.0/16")
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        response = await client.delete("/blacklist", params={"source_cidr": "185.7.0.0/16"})
+
+    assertions = list(
+        (
+            await db_session.scalars(
+                select(FeedBlacklistAssertion).where(
+                    FeedBlacklistAssertion.blacklist_entry_id == feed_entry.id
+                )
+            )
+        ).all()
+    )
+    persisted = await db_session.get(BlacklistEntry, feed_entry.id)
+    assert response.status_code == 409
+    assert persisted is not None
+    assert persisted.source == BlacklistSource.feed
+    assert len(assertions) == 1
 
 
 async def test_tenant_user_global_blacklist_endpoints_are_403_no_side_effect(

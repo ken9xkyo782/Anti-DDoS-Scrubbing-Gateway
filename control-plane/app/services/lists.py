@@ -12,6 +12,7 @@ from app.db.models import (
     BlacklistScope,
     BlacklistSource,
     ChangeTrigger,
+    FeedBlacklistAssertion,
     ProtectedService,
     Role,
     User,
@@ -19,7 +20,9 @@ from app.db.models import (
 )
 from app.services.apply import enqueue_service_update
 from app.services.audit import record_event
+from app.services.feed_reconcile import materialize_global_union
 from app.services.services import bump_version
+from app.worker.feed_scheduler import _enqueue_global_convergence
 
 
 async def add_whitelist(
@@ -127,18 +130,41 @@ async def add_blacklist(
     else:
         _require_admin_actor(actor)
 
-    entry = BlacklistEntry(
-        service_id=service.id if service is not None else None,
-        scope=scope,
-        source=BlacklistSource.manual,
-        source_cidr=str(source),
-        created_by=actor.id if actor is not None else None,
-    )
-    db.add(entry)
-    try:
-        await db.flush()
-    except IntegrityError as exc:
-        _raise_integrity_error(exc)
+    if scope == BlacklistScope.global_:
+        entry = await _global_blacklist_entry_for_update(db, source)
+        if entry is None:
+            entry = BlacklistEntry(
+                service_id=None,
+                scope=scope,
+                source=BlacklistSource.manual,
+                source_cidr=str(source),
+                created_by=actor.id if actor is not None else None,
+            )
+            db.add(entry)
+            try:
+                await db.flush()
+            except IntegrityError as exc:
+                _raise_integrity_error(exc)
+        elif entry.source == BlacklistSource.feed:
+            entry.source = BlacklistSource.manual
+            entry.created_by = actor.id if actor is not None else None
+            await db.flush()
+        else:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="List entry exists")
+        await _materialize_global_deny_and_enqueue(db)
+    else:
+        entry = BlacklistEntry(
+            service_id=service.id if service is not None else None,
+            scope=scope,
+            source=BlacklistSource.manual,
+            source_cidr=str(source),
+            created_by=actor.id if actor is not None else None,
+        )
+        db.add(entry)
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            _raise_integrity_error(exc)
     if service is not None:
         service = await bump_version(db, service.id)
         await enqueue_service_update(db, service, actor, ChangeTrigger.blacklist)
@@ -179,8 +205,22 @@ async def remove_blacklist(
         _require_admin_actor(actor)
 
     entry = await _require_blacklist_entry(db, scope=scope, service_id=service_id, source=source)
-    await db.delete(entry)
-    await db.flush()
+    if scope == BlacklistScope.global_:
+        if entry.source == BlacklistSource.feed:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Feed-managed blacklist entry cannot be deleted manually",
+            )
+        if await _has_feed_assertions(db, entry.id):
+            entry.source = BlacklistSource.feed
+            entry.created_by = None
+        else:
+            await db.delete(entry)
+        await db.flush()
+        await _materialize_global_deny_and_enqueue(db)
+    else:
+        await db.delete(entry)
+        await db.flush()
     if service is not None:
         service = await bump_version(db, service.id)
         await enqueue_service_update(db, service, actor, ChangeTrigger.blacklist)
@@ -278,6 +318,43 @@ async def _require_blacklist_entry(
             detail="Blacklist entry not found",
         )
     return entry
+
+
+async def _global_blacklist_entry_for_update(
+    db: AsyncSession,
+    source: IPv4Network,
+) -> BlacklistEntry | None:
+    return (
+        (
+            await db.execute(
+                select(BlacklistEntry)
+                .where(
+                    BlacklistEntry.scope == BlacklistScope.global_,
+                    BlacklistEntry.service_id.is_(None),
+                    BlacklistEntry.source_cidr == str(source),
+                )
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .one_or_none()
+    )
+
+
+async def _has_feed_assertions(db: AsyncSession, entry_id: uuid.UUID) -> bool:
+    return (
+        await db.execute(
+            select(FeedBlacklistAssertion.feed_source_id)
+            .where(FeedBlacklistAssertion.blacklist_entry_id == entry_id)
+            .limit(1)
+        )
+    ).scalar_one_or_none() is not None
+
+
+async def _materialize_global_deny_and_enqueue(db: AsyncSession) -> None:
+    materialized = await materialize_global_union(db)
+    if materialized.changed:
+        await _enqueue_global_convergence(db)
 
 
 def _parse_source(value: str) -> IPv4Network:
