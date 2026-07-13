@@ -26,7 +26,8 @@ APPLY_SRC := $(TOOLS_DIR)/xdpgw-apply.c
 APPLY := $(BUILD_DIR)/xdpgw-apply
 TEST_SNAPSHOT_SRC := $(TEST_DIR)/test_snapshot.c
 TEST_SNAPSHOT_BIN := $(BUILD_DIR)/test_snapshot
-APPLY_GOLDEN := $(TEST_DIR)/fixtures/apply_snapshot_golden.bin
+APPLY_SERVICE_GOLDEN := $(TEST_DIR)/fixtures/apply_snapshot_golden.bin
+APPLY_GLOBAL_GOLDEN := $(TEST_DIR)/fixtures/global_deny_snapshot_golden.bin
 APPLY_HDRS := $(SRC_DIR)/apply_snapshot.h $(SRC_DIR)/service.h $(SRC_DIR)/rules.h \
 	$(SRC_DIR)/whitelist.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/fairness.h
 
@@ -74,7 +75,7 @@ $(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 apply: $(APPLY) $(TEST_SNAPSHOT_BIN)
-	$(TEST_SNAPSHOT_BIN) $(APPLY_GOLDEN)
+	$(TEST_SNAPSHOT_BIN) $(APPLY_SERVICE_GOLDEN) $(APPLY_GLOBAL_GOLDEN)
 
 $(APPLY): $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
@@ -85,8 +86,9 @@ $(TEST_SNAPSHOT_BIN): $(TEST_SNAPSHOT_SRC) $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_
 applybulk: loader dpstat apply
 	$(TEST_DIR)/apply_bulk.sh
 
-test: $(TEST_BIN)
+test: $(TEST_BIN) $(TEST_SNAPSHOT_BIN)
 	$(TEST_BIN)
+	$(TEST_SNAPSHOT_BIN) $(APPLY_SERVICE_GOLDEN) $(APPLY_GLOBAL_GOLDEN)
 
 smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_redirect.sh

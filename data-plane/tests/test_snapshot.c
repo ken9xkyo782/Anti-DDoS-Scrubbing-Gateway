@@ -2,21 +2,21 @@
 /*
  * Parse-only self-test for the apply_snapshot wire format (DBS-10).
  *
- * Binds the committed golden fixture to the C parser: decodes
- * tests/fixtures/apply_snapshot_golden.bin with xdpgw-apply's parse_snapshot
- * and asserts every field. The Python serializer (M4 #2 T6
- * serialize_node_snapshot) must emit byte-identical output for the same node,
- * so this fixture is the single artifact both sides round-trip through. Exits
- * non-zero on any mismatch. Run by `make apply`.
+ * Binds the committed golden fixtures to the C parser: decodes the service and
+ * global-deny contracts with xdpgw-apply's parse_snapshot and asserts every
+ * field. Exits non-zero on any mismatch. Run by `make apply`.
  */
 #define XDPGW_APPLY_NO_MAIN
 #include "../tools/xdpgw-apply.c"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-static int check_golden(const char *path)
+static int check_service_golden(const char *path)
 {
 	struct node_cfg node;
 	int err = -1;
@@ -36,6 +36,8 @@ static int check_golden(const char *path)
 
 	CHECK(node.schema_version == APPLY_SNAPSHOT_SCHEMA_VERSION,
 	      "schema_version");
+	CHECK(node.snapshot_kind == APPLY_SNAPSHOT_KIND_SERVICE_FULL,
+	      "service snapshot_kind");
 	CHECK(node.service_count == 2, "service_count");
 
 	const struct cfg_service *a = &node.services[0];
@@ -87,14 +89,193 @@ out:
 	return err;
 }
 
+static int write_all(int fd, const uint8_t *data, size_t len)
+{
+	while (len > 0) {
+		ssize_t written = write(fd, data, len);
+
+		if (written <= 0)
+			return -1;
+		data += written;
+		len -= (size_t)written;
+	}
+	return 0;
+}
+
+static int read_file(const char *path, uint8_t **data_out, size_t *len_out)
+{
+	FILE *f;
+	long size;
+	uint8_t *data;
+
+	*data_out = NULL;
+	*len_out = 0;
+	f = fopen(path, "rb");
+	if (!f)
+		return -1;
+	if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 ||
+	    fseek(f, 0, SEEK_SET) != 0) {
+		fclose(f);
+		return -1;
+	}
+	data = malloc((size_t)size);
+	if (!data) {
+		fclose(f);
+		return -1;
+	}
+	if (fread(data, 1, (size_t)size, f) != (size_t)size) {
+		free(data);
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+	*data_out = data;
+	*len_out = (size_t)size;
+	return 0;
+}
+
+static int check_rejected(const char *name, const uint8_t *data, size_t len)
+{
+	char path[] = "/tmp/xdpgw-snapshot-XXXXXX";
+	struct node_cfg node;
+	int fd;
+	int err = -1;
+
+	fd = mkstemp(path);
+	if (fd < 0)
+		return -1;
+	if (write_all(fd, data, len) != 0) {
+		close(fd);
+		unlink(path);
+		return -1;
+	}
+	if (close(fd) != 0) {
+		unlink(path);
+		return -1;
+	}
+	if (parse_snapshot(path, &node) == 0) {
+		fprintf(stderr, "test_snapshot: accepted %s\n", name);
+		free_node_cfg(&node);
+		goto out;
+	}
+	err = 0;
+out:
+	unlink(path);
+	return err;
+}
+
+static int check_global_golden(const char *path)
+{
+	struct node_cfg node;
+	uint8_t *data = NULL;
+	size_t len = 0;
+	int err = -1;
+
+	if (parse_snapshot(path, &node) != 0) {
+		fprintf(stderr, "test_snapshot: parse failed for %s\n", path);
+		return -1;
+	}
+
+#define CHECK(cond, msg)                                            \
+	do {                                                        \
+		if (!(cond)) {                                      \
+			fprintf(stderr, "test_snapshot: %s\n", msg); \
+			goto out;                                  \
+		}                                                  \
+	} while (0)
+
+	CHECK(node.schema_version == APPLY_SNAPSHOT_SCHEMA_VERSION,
+	      "global schema_version");
+	CHECK(node.snapshot_kind == APPLY_SNAPSHOT_KIND_GLOBAL_DENY,
+	      "global snapshot_kind");
+	CHECK(node.global_revision == 42, "global revision");
+	CHECK(node.global_count == 3, "global entry count");
+	CHECK(node.global_entries[0].prefixlen == 16,
+	      "global entry 0 prefixlen");
+	CHECK(node.global_entries[0].addr == inet_addr("45.45.0.0"),
+	      "global entry 0 addr");
+	CHECK(node.global_entries[1].prefixlen == 24,
+	      "global entry 1 prefixlen");
+	CHECK(node.global_entries[1].addr == inet_addr("192.0.2.0"),
+	      "global entry 1 addr");
+	CHECK(node.global_entries[2].prefixlen == 32,
+	      "global entry 2 prefixlen");
+	CHECK(node.global_entries[2].addr == inet_addr("203.0.113.5"),
+	      "global entry 2 addr");
+
+	CHECK(read_file(path, &data, &len) == 0, "read global fixture");
+	CHECK(len == APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE +
+		  3 * APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE,
+	      "global fixture size");
+
+	data[12] = 0xff;
+	CHECK(check_rejected("unknown kind", data, len) == 0,
+	      "reject unknown kind");
+	data[12] = APPLY_SNAPSHOT_KIND_GLOBAL_DENY;
+
+	data[8] = APPLY_SNAPSHOT_SCHEMA_VERSION + 1;
+	CHECK(check_rejected("unknown version", data, len) == 0,
+	      "reject unknown version");
+	data[8] = APPLY_SNAPSHOT_SCHEMA_VERSION;
+
+	CHECK(check_rejected("truncation", data, len - 1) == 0,
+	      "reject truncation");
+
+	data[APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE] = 33;
+	CHECK(check_rejected("invalid prefix", data, len) == 0,
+	      "reject invalid prefix");
+	data[APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE] = 16;
+
+	memcpy(data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE +
+		       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE,
+	       data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE,
+	       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE);
+	CHECK(check_rejected("duplicate entries", data, len) == 0,
+	      "reject duplicate entries");
+	memcpy(data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE +
+		       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE,
+	       "\x18\x00\x00\x00\xc0\x00\x02\x00",
+	       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE);
+
+	memcpy(data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE,
+	       data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE +
+		       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE,
+	       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE);
+	memcpy(data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE +
+		       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE,
+	       "\x10\x00\x00\x00\x2d\x2d\x00\x00",
+	       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE);
+	CHECK(check_rejected("unsorted entries", data, len) == 0,
+	      "reject unsorted entries");
+	memcpy(data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE,
+	       "\x10\x00\x00\x00\x2d\x2d\x00\x00",
+	       APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE);
+
+	memcpy(data + APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE - 4,
+	       "\x01\x00\x10\x00", 4);
+	CHECK(check_rejected("count above limit", data, len) == 0,
+	      "reject count above limit");
+
+	err = 0;
+#undef CHECK
+out:
+	free(data);
+	free_node_cfg(&node);
+	return err;
+}
+
 int main(int argc, char **argv)
 {
-	const char *path = argc > 1 ? argv[1]
-				    : "tests/fixtures/apply_snapshot_golden.bin";
+	const char *service_path = argc > 1 ? argv[1]
+					    : "tests/fixtures/apply_snapshot_golden.bin";
+	const char *global_path = argc > 2 ? argv[2]
+					   : "tests/fixtures/global_deny_snapshot_golden.bin";
 
-	if (check_golden(path) != 0)
+	if (check_service_golden(service_path) != 0 ||
+	    check_global_golden(global_path) != 0)
 		return 1;
 
-	printf("test_snapshot: %s parsed OK\n", path);
+	printf("test_snapshot: %s and %s parsed OK\n", service_path,
+	       global_path);
 	return 0;
 }

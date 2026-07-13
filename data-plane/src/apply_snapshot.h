@@ -11,10 +11,24 @@
  */
 #define APPLY_SNAPSHOT_MAGIC "XDPGWAP1"
 #define APPLY_SNAPSHOT_MAGIC_SIZE 8U
-#define APPLY_SNAPSHOT_SCHEMA_VERSION 1U
+#define APPLY_SNAPSHOT_SCHEMA_VERSION 2U
 
-/* magic[8], schema_version: le32, service_count: le32 */
+/* magic[8], schema_version: le32, snapshot_kind: le32 */
 #define APPLY_SNAPSHOT_HEADER_SIZE 16U
+
+#define APPLY_SNAPSHOT_KIND_SERVICE_FULL 1U
+#define APPLY_SNAPSHOT_KIND_GLOBAL_DENY 2U
+
+/* SERVICE_FULL: common header, service_count: le32, repeated service records. */
+#define APPLY_SNAPSHOT_SERVICE_HEADER_SIZE 20U
+
+/*
+ * GLOBAL_DENY: common header, desired_revision: le64, entry_count: le32,
+ * then sorted canonical IPv4 CIDRs. Entries sort by prefixlen, then address.
+ */
+#define APPLY_SNAPSHOT_GLOBAL_HEADER_SIZE 28U
+#define APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE 8U
+#define APPLY_SNAPSHOT_GLOBAL_DENY_MAX_ENTRIES 1048576U
 
 /*
  * Repeated service record, in order:

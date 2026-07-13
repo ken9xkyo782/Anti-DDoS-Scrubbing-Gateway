@@ -110,8 +110,12 @@ struct cfg_service {
 
 struct node_cfg {
 	uint32_t schema_version;
+	uint32_t snapshot_kind;
 	uint32_t service_count;
 	struct cfg_service *services;
+	uint64_t global_revision;
+	uint32_t global_count;
+	struct cfg_source *global_entries;
 };
 
 /* All config-map fds required by the in-process swap core. The T5 CLI opens
@@ -238,20 +242,17 @@ static inline int rd_be32(struct rdcur *c, uint32_t *v)
 
 static inline void free_node_cfg(struct node_cfg *node)
 {
-	if (!node || !node->services) {
-		if (node) {
-			node->services = NULL;
-			node->service_count = 0;
-		}
+	if (!node)
 		return;
+	if (node->services) {
+		for (uint32_t i = 0; i < node->service_count; i++) {
+			free(node->services[i].wl);
+			free(node->services[i].sbl);
+		}
+		free(node->services);
 	}
-	for (uint32_t i = 0; i < node->service_count; i++) {
-		free(node->services[i].wl);
-		free(node->services[i].sbl);
-	}
-	free(node->services);
-	node->services = NULL;
-	node->service_count = 0;
+	free(node->global_entries);
+	memset(node, 0, sizeof(*node));
 }
 
 static inline int parse_source_list(struct rdcur *c, uint32_t *count_out,
@@ -330,12 +331,64 @@ static inline int parse_service(struct rdcur *c, struct cfg_service *svc)
 	return 0;
 }
 
+static inline int global_entry_valid(const struct cfg_source *entry)
+{
+	uint32_t addr;
+	uint32_t mask;
+
+	if (entry->prefixlen > 32)
+		return 0;
+	addr = ntohl(entry->addr);
+	mask = entry->prefixlen ? UINT32_MAX << (32 - entry->prefixlen) : 0;
+	return (addr & ~mask) == 0;
+}
+
+static inline int global_entries_sorted(const struct cfg_source *previous,
+					const struct cfg_source *current)
+{
+	if (previous->prefixlen != current->prefixlen)
+		return previous->prefixlen < current->prefixlen;
+	return memcmp(&previous->addr, &current->addr, sizeof(current->addr)) < 0;
+}
+
+static inline int parse_global_deny(struct rdcur *c, struct node_cfg *node)
+{
+	struct cfg_source *entries = NULL;
+	uint64_t revision = 0;
+	uint32_t count = 0;
+
+	if (rd_u64le(c, &revision) != 0 || rd_u32le(c, &count) != 0 ||
+	    count > APPLY_SNAPSHOT_GLOBAL_DENY_MAX_ENTRIES ||
+	    count > (size_t)(c->end - c->p) / APPLY_SNAPSHOT_GLOBAL_ENTRY_SIZE)
+		return -1;
+	if (count > 0) {
+		entries = calloc(count, sizeof(*entries));
+		if (!entries)
+			return -1;
+	}
+
+	for (uint32_t i = 0; i < count; i++) {
+		if (rd_u32le(c, &entries[i].prefixlen) != 0 ||
+		    rd_be32(c, &entries[i].addr) != 0 ||
+		    !global_entry_valid(&entries[i]) ||
+		    (i > 0 && !global_entries_sorted(&entries[i - 1], &entries[i]))) {
+			free(entries);
+			return -1;
+		}
+	}
+
+	node->global_revision = revision;
+	node->global_count = count;
+	node->global_entries = entries;
+	return 0;
+}
+
 /*
  * parse_snapshot — decode the wire snapshot at `path` into `out`.
- * Fail-closed: rejects a bad magic, an unknown schema_version, an out-of-bounds
- * count, or any truncation before returning success. On failure `out` is left
- * empty and any partial allocation is released; on success the caller owns the
- * result and must free_node_cfg() it.
+ * Fail-closed: rejects a bad magic, schema, kind, count, truncation, or global
+ * CIDR ordering/canonicality violation before returning success. On failure
+ * `out` is left empty and any partial allocation is released; on success the
+ * caller owns the result and must free_node_cfg() it.
  */
 static inline int parse_snapshot(const char *path, struct node_cfg *out)
 {
@@ -345,6 +398,7 @@ static inline int parse_snapshot(const char *path, struct node_cfg *out)
 	long size;
 	size_t got;
 	uint32_t schema = 0;
+	uint32_t kind = 0;
 	uint32_t count = 0;
 	FILE *f;
 
@@ -400,37 +454,60 @@ static inline int parse_snapshot(const char *path, struct node_cfg *out)
 		free(buf);
 		return -1;
 	}
-	if (rd_u32le(&c, &count) != 0 || count > APPLY_MAX_SERVICES) {
-		fprintf(stderr, "xdpgw-apply: %s service_count %u out of range\n",
-			path, count);
-		free(buf);
-		return -1;
-	}
-
 	out->schema_version = schema;
-	if (count > 0) {
-		out->services = calloc(count, sizeof(*out->services));
-		if (!out->services) {
-			free(buf);
-			return -1;
-		}
+	if (rd_u32le(&c, &kind) != 0) {
+		fprintf(stderr, "xdpgw-apply: %s missing snapshot kind\n", path);
+		goto fail;
 	}
-
-	for (uint32_t i = 0; i < count; i++) {
-		if (parse_service(&c, &out->services[i]) != 0) {
+	out->snapshot_kind = kind;
+	switch (kind) {
+	case APPLY_SNAPSHOT_KIND_SERVICE_FULL:
+		if (rd_u32le(&c, &count) != 0 || count > APPLY_MAX_SERVICES) {
 			fprintf(stderr,
-				"xdpgw-apply: %s truncated/invalid at service %u\n",
-				path, i);
-			out->service_count = i; /* free what we built */
-			free_node_cfg(out);
-			free(buf);
-			return -1;
+				"xdpgw-apply: %s service_count %u out of range\n",
+				path, count);
+			goto fail;
 		}
-		out->service_count = i + 1;
+		if (count > 0) {
+			out->services = calloc(count, sizeof(*out->services));
+			if (!out->services)
+				goto fail;
+		}
+		for (uint32_t i = 0; i < count; i++) {
+			out->service_count = i + 1; /* release partial service on failure */
+			if (parse_service(&c, &out->services[i]) != 0) {
+				fprintf(stderr,
+					"xdpgw-apply: %s truncated/invalid at service %u\n",
+					path, i);
+				goto fail;
+			}
+		}
+		break;
+	case APPLY_SNAPSHOT_KIND_GLOBAL_DENY:
+		if (parse_global_deny(&c, out) != 0) {
+			fprintf(stderr,
+				"xdpgw-apply: %s truncated/invalid global deny snapshot\n",
+				path);
+			goto fail;
+		}
+		break;
+	default:
+		fprintf(stderr, "xdpgw-apply: %s snapshot kind %u unsupported\n",
+			path, kind);
+		goto fail;
+	}
+	if (c.p != c.end) {
+		fprintf(stderr, "xdpgw-apply: %s has trailing snapshot bytes\n", path);
+		goto fail;
 	}
 
 	free(buf);
 	return 0;
+
+fail:
+	free_node_cfg(out);
+	free(buf);
+	return -1;
 }
 
 /*
@@ -1066,6 +1143,12 @@ int main(int argc, char **argv)
 
 	if (parse_snapshot(argv[1], &node) != 0) {
 		fprintf(stderr, "xdpgw-apply: failed to parse snapshot %s\n", argv[1]);
+		return 1;
+	}
+	if (node.snapshot_kind != APPLY_SNAPSHOT_KIND_SERVICE_FULL) {
+		fprintf(stderr,
+			"xdpgw-apply: GLOBAL_DENY map apply is not implemented\n");
+		free_node_cfg(&node);
 		return 1;
 	}
 	if (open_apply_pins(&fds) != 0)
