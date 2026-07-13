@@ -2,7 +2,9 @@
 
 **Feature:** M4 #3 — Threat intelligence feed sync
 **Context:** `.specs/features/threat-feed-sync/context.md` (D-FEED-1..3, A-FEED-1..8)
-**Status:** **APPROVED** (2026-07-10) → Tasks
+**Status:** **VERIFIED** (2026-07-13) — all 40 requirements Verified; control-plane full gate (435
+passed) and data-plane build/quick/full/scale gates green. See
+`.specs/features/threat-feed-sync/tasks.md` Execution Results.
 **Depends on (Execute-gated):**
 - **agent-worker executed** (M4 #1, **satisfied**) — provides the long-running worker, `HANDLERS` registry (this
   feature adds `JobType.feed_sync`), `process_job`/reconcile orchestration, and the periodic tick this
@@ -248,46 +250,46 @@ counts via `GET /feeds/{id}/syncs`; dry-run and assert no entries/maps changed.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| FEED-01 | P1: Feed source management | Tasks | In Tasks |
-| FEED-02 | P1: Feed source management | Tasks | In Tasks |
-| FEED-03 | P1: Feed source management | Tasks | In Tasks |
-| FEED-04 | P1: Feed source management | Tasks | In Tasks |
-| FEED-05 | P1: Feed source management | Tasks | In Tasks |
-| FEED-06 | P1: Feed source management | Tasks | In Tasks |
-| FEED-07 | P1: Feed source management | Tasks | In Tasks |
-| FEED-08 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-09 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-10 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-11 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-12 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-13 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-14 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-15 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-16 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-17 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-18 | P1: Resilient sync core | Tasks | In Tasks |
-| FEED-19 | P1: Whitelist-overlap flag | Tasks | In Tasks |
-| FEED-20 | P1: Whitelist-overlap flag | Tasks | In Tasks |
-| FEED-21 | P1: Whitelist-overlap flag | Tasks | In Tasks |
-| FEED-22 | P1: Whitelist-overlap flag | Tasks | In Tasks |
-| FEED-23 | P1: Whitelist-overlap flag | Tasks | In Tasks |
-| FEED-24 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
-| FEED-25 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
-| FEED-26 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
-| FEED-27 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
-| FEED-28 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
-| FEED-29 | P1: Data-plane rebuild & swap | Tasks | In Tasks |
-| FEED-30 | P2: Scheduled sync | Tasks | In Tasks |
-| FEED-31 | P2: Scheduled sync | Tasks | In Tasks |
-| FEED-32 | P2: Scheduled sync | Tasks | In Tasks |
-| FEED-33 | P2: Scheduled sync | Tasks | In Tasks |
-| FEED-34 | P2: Scheduled sync | Tasks | In Tasks |
-| FEED-35 | P3: Observability & controls | Tasks | In Tasks |
-| FEED-36 | P3: Observability & controls | Tasks | In Tasks |
-| FEED-37 | P3: Observability & controls | Tasks | In Tasks |
-| FEED-38 | P3: Observability & controls | Tasks | In Tasks |
-| FEED-39 | P3: Observability & controls | Tasks | In Tasks |
-| FEED-40 | P3: Observability & controls | Tasks | In Tasks |
+| FEED-01 | P1: Feed source management | Execute | Verified |
+| FEED-02 | P1: Feed source management | Execute | Verified |
+| FEED-03 | P1: Feed source management | Execute | Verified |
+| FEED-04 | P1: Feed source management | Execute | Verified |
+| FEED-05 | P1: Feed source management | Execute | Verified |
+| FEED-06 | P1: Feed source management | Execute | Verified |
+| FEED-07 | P1: Feed source management | Execute | Verified |
+| FEED-08 | P1: Resilient sync core | Execute | Verified |
+| FEED-09 | P1: Resilient sync core | Execute | Verified |
+| FEED-10 | P1: Resilient sync core | Execute | Verified |
+| FEED-11 | P1: Resilient sync core | Execute | Verified |
+| FEED-12 | P1: Resilient sync core | Execute | Verified |
+| FEED-13 | P1: Resilient sync core | Execute | Verified |
+| FEED-14 | P1: Resilient sync core | Execute | Verified |
+| FEED-15 | P1: Resilient sync core | Execute | Verified |
+| FEED-16 | P1: Resilient sync core | Execute | Verified |
+| FEED-17 | P1: Resilient sync core | Execute | Verified |
+| FEED-18 | P1: Resilient sync core | Execute | Verified |
+| FEED-19 | P1: Whitelist-overlap flag | Execute | Verified |
+| FEED-20 | P1: Whitelist-overlap flag | Execute | Verified |
+| FEED-21 | P1: Whitelist-overlap flag | Execute | Verified |
+| FEED-22 | P1: Whitelist-overlap flag | Execute | Verified |
+| FEED-23 | P1: Whitelist-overlap flag | Execute | Verified |
+| FEED-24 | P1: Data-plane rebuild & swap | Execute | Verified |
+| FEED-25 | P1: Data-plane rebuild & swap | Execute | Verified |
+| FEED-26 | P1: Data-plane rebuild & swap | Execute | Verified |
+| FEED-27 | P1: Data-plane rebuild & swap | Execute | Verified |
+| FEED-28 | P1: Data-plane rebuild & swap | Execute | Verified |
+| FEED-29 | P1: Data-plane rebuild & swap | Execute | Verified |
+| FEED-30 | P2: Scheduled sync | Execute | Verified |
+| FEED-31 | P2: Scheduled sync | Execute | Verified |
+| FEED-32 | P2: Scheduled sync | Execute | Verified |
+| FEED-33 | P2: Scheduled sync | Execute | Verified |
+| FEED-34 | P2: Scheduled sync | Execute | Verified |
+| FEED-35 | P3: Observability & controls | Execute | Verified |
+| FEED-36 | P3: Observability & controls | Execute | Verified |
+| FEED-37 | P3: Observability & controls | Execute | Verified |
+| FEED-38 | P3: Observability & controls | Execute | Verified |
+| FEED-39 | P3: Observability & controls | Execute | Verified |
+| FEED-40 | P3: Observability & controls | Execute | Verified |
 
 **ID format:** `FEED-[NUMBER]`
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified

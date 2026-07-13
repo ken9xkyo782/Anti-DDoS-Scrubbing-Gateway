@@ -95,6 +95,29 @@ alongside integration tests:
 5. Verify the `Redis connection resumed` log, then verify a new ordinary enqueue
    reaches `active` via BRPOP within 5 seconds.
 
+### Threat feed sync conventions
+
+- **Parser** (`test_feed_parser.py`, unit): table-driven `parametrize` over the
+  accept/reject grammar (BOM, comments, `/32` promotion, `/0` and host-bit
+  rejects, IPv6 reject, dedup) asserting the `ParseResult` counts and the
+  `success`/`partial`/`failed` outcome. Pure logic, no I/O.
+- **Fetcher** (`test_feed_fetch.py`, unit): drive `httpx.MockTransport` for
+  redirect/non-2xx/oversize-`Content-Length`/streamed-overflow paths and a
+  deterministic slow stream for the wall-clock timeout. A log-capture assertion
+  proves the credential name, value, bearer header, and body never appear in
+  errors or logs.
+- **Feed worker** (`test_feed_reconcile.py`, `test_feeds_service.py`,
+  `test_worker_feed_jobs.py`, `test_feed_sync_runner.py`, `test_feed_scheduler.py`,
+  `test_feed_coordinator.py`, `test_global_deny_applier.py`, integration): use the
+  `committed_db` fixture (not the rollback `db_session`) because the runner uses
+  short `session_scope` transactions. Inject a recording/failing global-applier
+  double so the fetch → parse → reconcile → apply path is exercised without the
+  BPF helper. Cover success, partial, each keep-last failure, dry-run, no-op,
+  duplicate delivery, applier failure, orphan recovery, and convergence retry.
+- **Non-parallel:** all feed integration suites share the single `compose.test.yml`
+  Postgres + Redis, so they run serially with the other integration suites — never
+  fan out concurrent integration runs.
+
 ---
 
 ## Data-plane (C/XDP)
@@ -242,19 +265,29 @@ untouched; two applies of one snapshot bump `version` V→V+1→V+2 with identic
 injected through `apply_test_set_fault()`, compiled only under `-DXDPGW_APPLY_TEST`; the helper binary
 has no runtime switch that can force a production apply to fail.
 
-The wire format is the `apply_snapshot.h` v1 contract (magic `XDPGWAP1`, `schema_version`, per-service
-record with service-level VIP and the `dp_id` surrogate). `make apply` runs `build/test_snapshot`
-against the committed `tests/fixtures/apply_snapshot_golden.bin`; the control-plane
-`serialize_node_snapshot` must emit byte-identical output for the matching node, so the fixture binds the
-C parser and the Python serializer. Bump `schema_version` in the header and regenerate the fixture
-(`tests/fixtures/gen_apply_snapshot_golden.py`) together on any layout change — readers reject an unknown
-version before touching a map.
+The wire format is the `apply_snapshot.h` **v2** contract (magic `XDPGWAP1`, `schema_version`, a
+`SERVICE_FULL | GLOBAL_DENY` kind, then either the per-service records — service-level VIP and the
+`dp_id` surrogate — or the sorted global-deny `{prefixlen, address_be32}` entries with the desired
+revision). `make apply` runs `build/test_snapshot` against **both** committed fixtures
+(`tests/fixtures/apply_snapshot_golden.bin` and `global_deny_snapshot_golden.bin`); the control-plane
+`serialize_node_snapshot` and `serialize_global_snapshot` must emit byte-identical output, so the
+fixtures bind the C parser and the Python serializers. Bump `schema_version` in the header and regenerate
+the fixtures together on any layout change — readers reject an unknown kind or version before touching a
+map.
 
-`sudo make applybulk` is the scale gate: it loads the skeleton, generates a 1000-service snapshot, runs
-one apply, and asserts the build/verify/flip completes in under 5 s, that `active_config` flips exactly
-once (slot 0→1, version 1→2), and that the feed-owned `global_blacklist_bloom`/`_lpm` and
-`udp_blocked_port_bitmap` inner ids are carried forward rather than rebuilt. It is not part of
-`make test`; run it when the apply path or the slotted config-map set changes.
+**Global-deny apply** (`GLOBAL_DENY` mode) is the inverse carry-forward: dp-unit cases rebuild the
+feed-owned `global_blacklist_bloom`/`_lpm` and `gbl_meta` from the snapshot while pointer-carrying every
+service-scoped outer, `fair_node_config`, and `udp_blocked_port_bitmap`, then replay a
+`BPF_PROG_TEST_RUN` packet to confirm a listed source reaches `blacklist_drop` and unrelated verdicts are
+unchanged. Cover the `/24` bloom expansion, the `GBL_F_HAS_BROAD` broad-prefix escape, the empty-snapshot
+meta clear, build/verify failures that preserve the live slot, and service↔global alternation.
+
+`sudo make applybulk` (service) and `sudo make globalapplyscale` (global) are the scale gates.
+`applybulk` asserts a 1000-service build/verify/flip in under 5 s with a single `active_config` flip and
+carried-forward feed maps. `globalapplyscale` loads **1,048,576** distinct entries and rejects
+**1,048,577** before the flip. `sudo make globalapplysmoke` drives a fake feed snapshot through the real
+helper to a `blacklist_drop` XDP verdict. None are part of `make test`; run them when the apply path or
+the slotted config-map set changes.
 
 ### Data-plane Corpus
 
@@ -263,6 +296,6 @@ malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, singl
 VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits,
 whitelist scoped-match and VIP ceiling cases, blacklist amp-port, bogon, bitmap, global/service
 bloom-to-LPM, bloom false-positive, sampling budget, and `xdpgw-apply` build/verify/flip, fresh-inner,
-and fail-closed rollback cases. The current quick suite has **122**
-tests. Each verdict task states the expected passing test count to prevent silent deletions or skipped
-coverage.
+fail-closed rollback, and `GLOBAL_DENY` inverse-carry-forward/alternation cases. The current quick suite
+has **130** tests plus the `build/test_snapshot` service+global golden self-tests. Each verdict task
+states the expected passing test count to prevent silent deletions or skipped coverage.

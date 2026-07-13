@@ -61,3 +61,98 @@ Exit `0` means the config was built, verified, and swapped into the XDP hot path
 `active`. A non-zero exit or a timeout raises `ApplyError` and fails the job, leaving the last-good active
 slot live. An `active` state now means the config actually reached the data plane — not merely that the
 worker acknowledged the job.
+
+## Threat feed sync
+
+Admins manage threat-intelligence feeds through the admin-only `/feeds` API
+(`POST/GET/PUT/DELETE /feeds`, `POST /feeds/{id}/sync`, `GET /feeds/{id}/syncs`).
+A feed is the authoritative writer of `source=feed`, `scope=global` blacklist
+entries. Feed and manual assertions share one materialized global-deny row per
+CIDR; adding a manual entry over a feed row promotes it (feed assertions are
+preserved), and removing a manual entry demotes it back to a feed row while any
+feed still asserts the CIDR.
+
+### Feed format (plain IPv4/CIDR line list)
+
+Feeds are fetched as plain-text line lists. The parser is UTF-8 (an optional BOM
+is accepted) and, per line:
+
+- accepts a bare IPv4 address (normalized to `/32`) or a strict, canonical IPv4
+  CIDR;
+- ignores blank lines, surrounding whitespace, and `#` or `;` comments
+  (full-line or inline);
+- **rejects** invalid UTF-8 (whole feed fails), IPv6, `0.0.0.0/0`, malformed
+  values, and CIDRs with host bits set. Other reserved/bogon ranges are **not**
+  rejected — a feed may legitimately assert bogons.
+
+Exact duplicate CIDRs collapse; a containing and a contained CIDR both remain.
+A run records physical line count, valid-distinct, invalid, and duplicate counts.
+A response with **zero** valid CIDRs is a `failed` run (an empty `200` is a
+failure); a response mixing valid and invalid lines is a `partial` run that
+applies the valid subset.
+
+### Fetch limits (credential-safe)
+
+The fetcher uses TLS verification, does **not** follow redirects, ignores
+ambient proxy/env config, and streams the decoded body against a hard size cap.
+Oversized `Content-Length` fails before any body is read; runaway streams abort
+at the cap. All limits are positive-bounded settings:
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `CONTROL_PLANE_FEED_FETCH_CONNECT_TIMEOUT_SECONDS` | `5.0` | TCP/TLS connect timeout. |
+| `CONTROL_PLANE_FEED_FETCH_READ_TIMEOUT_SECONDS` | `10.0` | Read-inactivity timeout. |
+| `CONTROL_PLANE_FEED_FETCH_WRITE_TIMEOUT_SECONDS` | `5.0` | Write timeout. |
+| `CONTROL_PLANE_FEED_FETCH_POOL_TIMEOUT_SECONDS` | `5.0` | Connection-pool acquire timeout. |
+| `CONTROL_PLANE_FEED_FETCH_WALL_TIMEOUT_SECONDS` | `30.0` | Whole-fetch wall-clock cap. |
+| `CONTROL_PLANE_FEED_FETCH_MAX_DECODED_BODY_BYTES` | `33554432` | 32 MiB decoded-body cap. |
+
+The sync interval per source is validated to `300..604800` seconds (5 minutes to
+7 days).
+
+### Credentials by environment reference
+
+A source never stores a secret. It stores an optional `credential_env_var` — an
+uppercase environment-variable **name** (regex `^[A-Z][A-Z0-9_]{0,127}$`). At
+fetch time the worker resolves that variable and sends `Authorization: Bearer
+<value>`; a missing variable fails the run before the request. The name and value
+never appear in API responses, audit metadata, run errors, or logs — responses
+expose only `has_credential`. Error strings are scrubbed of bearer tokens, URL
+userinfo, and `key=value`/`key: value` secrets.
+
+### Disabled, manual, dry-run
+
+- **Disabled** sources are skipped by the scheduler and keep their existing
+  assertions; a manual sync is still allowed while disabled.
+- **Manual** sync (`POST /feeds/{id}/sync`) enqueues immediately and returns
+  `202` with run and job status.
+- **Dry run** (`POST /feeds/{id}/sync?dry_run=true`) fetches, parses, and reports
+  fetch/parse/overlap stats but mutates **no** assertion, blacklist, desired
+  state, or data-plane state.
+
+### Scheduling
+
+An in-worker due-time scheduler enqueues each enabled, non-deleted source whose
+`next_sync_at <= now`, one job at a time — a source already queued or running is
+never double-enqueued. On terminal success/partial/failure the next run is
+scheduled at `finished_at + sync_interval`. Creating/re-enabling a source, or
+changing its URL or credential, makes it due immediately; an interval-only change
+recomputes the due time. Persisted due sources are caught up on worker startup.
+
+### Whitelist overlap (flag, never remove)
+
+Reconciliation records every feed CIDR that overlaps a whitelist entry as a
+`FeedSyncOverlap` row and writes one bounded, credential-free `feed.sync.overlap`
+audit summary. Overlaps are **flagged, never removed** — the global-deny set is
+authoritative and the whitelist still takes precedence in the data-plane pipeline.
+
+### Deletion and failure recovery
+
+Deleting a source records a dangerous-action audit, hides it behind a tombstone,
+removes only its own assertions, and enqueues a convergence run so the global-deny
+set and data plane catch up. Per-source isolation is strict: a fetch/timeout/
+oversize/non-2xx/zero-valid failure keeps the **last good** assertions and the
+current desired/active data-plane version, and never affects another source. A
+worker restart mid-apply re-queues the same feed run within its attempt budget
+(bounded orphan recovery), and a desired-vs-active global digest divergence is
+retried by a `GLOBAL_DENY_APPLY` convergence job without re-fetching the feed.

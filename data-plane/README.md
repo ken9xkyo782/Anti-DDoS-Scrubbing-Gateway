@@ -245,6 +245,53 @@ Inspect the live slot and version with `sudo ./build/dpstat active_config`. Buil
 snapshot parse self-test with `make apply`; exercise the full privileged flow with `sudo make applybulk`
 (1000-service build/verify/flip under a 5 s budget) and the apply smoke inside `sudo make smoke`.
 
+### Global-deny mode
+
+The same binary has two modes, distinguished by the snapshot `kind`
+(`SERVICE_FULL` or `GLOBAL_DENY`; `apply_snapshot.h` schema **v2**). The threat
+feed worker serializes a `GLOBAL_DENY` snapshot — the sorted, deduplicated union
+of manual and feed global-deny CIDRs plus the desired revision — and runs the
+helper the same way:
+
+```bash
+sudo ./build/xdpgw-apply <global-deny-snapshot-path>
+```
+
+Global mode is the **inverse carry-forward** of service mode. It rebuilds only
+the feed-owned global-deny maps (`global_blacklist_bloom`/`_lpm` with the AD-023
+`/24` bloom expansion and `GBL_F_HAS_BROAD` escape, plus a coherent inactive
+`gbl_meta`) into the inactive slot from the snapshot, and **pointer-carries every
+service-scoped outer** (`service_map`, `rule_block_map`, `whitelist_*`,
+`vip_config_map`, `service_blacklist_*`, `fair_config_map`), `fair_node_config`,
+and `udp_blocked_port_bitmap` unchanged — so a global-deny apply never disturbs
+service, rule, whitelist, service-blacklist, fairness, or bitmap behavior.
+
+**Shared lock.** Both modes acquire one exclusive `flock` on the pin directory
+before fresh-reading `active_config`, and hold it through verify and commit, so a
+service apply and a global-deny apply can never race on the slot.
+
+**No-flip rollback and version semantics.** The helper structurally verifies the
+inactive slot (carried inner IDs, inserted count, bloom fill/broad policy, meta
+flags) and then performs the **single** `active_config` write that flips the slot
+and bumps the node map version. Any build, verify, or timeout failure exits
+non-zero **before** the flip, leaving the prior slot, version, and verdicts live.
+Service and global applies share this one `active_config`/version and alternate
+safely; each re-reads the live slot fresh, so neither writes stale-over-new.
+
+The control plane skips invoking the helper when the desired revision already
+equals the active one; an identical-but-unconverged desired state (e.g. after a
+failed apply) still runs and converges.
+
+**Test and scale commands** (root required):
+
+```bash
+sudo make globalapplysmoke   # feed snapshot → real helper → blacklist_drop verdict
+sudo make globalapplyscale   # loads 1,048,576 entries; rejects 1,048,577 before flip
+```
+
+The 1M envelope reuses the AD-023 1M LPM / 2M bloom limits; a snapshot above
+1,048,576 distinct entries is rejected before any map write.
+
 ## Requirements
 
 - `clang`
