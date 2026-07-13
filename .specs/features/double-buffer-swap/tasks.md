@@ -114,6 +114,11 @@ pin/unpin/rollback structure; `service.h`/`rules.h`/`whitelist.h`/`blacklist.h`/
 **Gate**: build (+ quick 112 unchanged)
 **Commit**: `feat(dp): pin config maps + apply_snapshot/fair_budget contracts`
 
+**Executed 2026-07-13** (`7fcfb1b`, corrected by `d3cf007`): pin the 14 slotted config maps in `loader.c`
+(+155) + new `apply_snapshot.h`/`fair_budget.h` contracts; the follow-up correction moved VIP to the
+service record and renamed the wire surrogate to `dp_id` (see the T2 contract-correction note above).
+Verdict-neutral — build gate green, `make test` unchanged at **112**.
+
 ---
 
 ### T2: `xdpgw-apply` scaffold — snapshot parser + fresh-inner de-risk (the fail-fast)
@@ -185,23 +190,27 @@ tests proving a build+flip changes enforcement.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `build_inactive_slot` rebuilds every service-scoped outer's inactive-slot inner from `node_cfg`;
+- [x] `build_inactive_slot` rebuilds every service-scoped outer's inactive-slot inner from `node_cfg`;
       `service_map` enabled/`wl_flags`/`bl_flags` + `fair_node_config[inactive]` (headroom from Σcommitted)
       derived from the same snapshot; live slot untouched (DBS-02/15).
-- [ ] `carry_forward_feed` pointer-copies `global_blacklist_bloom`/`_lpm`/`udp_blocked_port_bitmap` active
+- [x] `carry_forward_feed` pointer-copies `global_blacklist_bloom`/`_lpm`/`udp_blocked_port_bitmap` active
       inners into the inactive index and copies the `gbl_meta` row (DBS-17); 1M list never rebuilt.
-- [ ] `verify_slot` fails on any missing enabled service / `rule_block` version-count mismatch / missing
+- [x] `verify_slot` fails on any missing enabled service / `rule_block` version-count mismatch / missing
       inner fd (DBS-18); `commit` is the single `active_config` write bumping `version` (DBS-03/19); reads
       `active_slot` fresh each run (DBS-24).
-- [ ] **dp-unit**: seed slot 0 (skel), run the core with a snapshot that (a) adds an allow-rule → newly
+- [x] **dp-unit**: seed slot 0 (skel), run the core with a snapshot that (a) adds an allow-rule → newly
       allowed flow admits; (b) adds a service → its dest resolves; (c) disables/removes a service →
       `service_miss`/`service_disabled`; assert non-triggering services **and** the carried-forward global
       blacklist unchanged after the flip (DBS-16/17).
-- [ ] Quick gate passes: `make test` → **≥ 118** (pin exact).
+- [x] Quick gate passes: `make test` → **≥ 118** (pin exact).
 
 **Tests**: dp-unit
 **Gate**: quick (≥118)
 **Commit**: `feat(dp): xdpgw-apply build/verify/single-write swap core`
+
+**Executed 2026-07-13** (`e3ee877`): `build_inactive_slot`/`carry_forward_feed`/`verify_slot`/`commit`
+fd-taking core in `xdpgw-apply.c` (+476) + 6 build/verify/flip verdict dp-unit cases in `test_parse.c`
+(+412). Quick gate `make test` → **119** (113 + 6).
 
 ---
 
@@ -220,17 +229,21 @@ and targets the opposite slot.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] A forced build write-failure and a forced `verify_slot` mismatch each leave `active_config`
+- [x] A forced build write-failure and a forced `verify_slot` mismatch each leave `active_config`
       `{active_slot, version}` unchanged and prior verdicts intact; fresh inners closed on `fail` (DBS-11/12/13).
-- [ ] Interrupting between build and commit (no `commit` call) leaves the live slot unchanged; a
+- [x] Interrupting between build and commit (no `commit` call) leaves the live slot unchanged; a
       subsequent full apply overwrites the inactive slot and succeeds (DBS-14).
-- [ ] Two applies of the same snapshot: `version` goes V→V+1→V+2, `active_slot` toggles, verdicts
+- [x] Two applies of the same snapshot: `version` goes V→V+1→V+2, `active_slot` toggles, verdicts
       identical (DBS-21); an apply started with `active_slot=1` builds slot 0 (DBS-24).
-- [ ] Quick gate passes: `make test` → **≥ 122** (pin exact).
+- [x] Quick gate passes: `make test` → **≥ 122** (pin exact).
 
 **Tests**: dp-unit
 **Gate**: quick (≥122)
 **Commit**: `test(dp): xdpgw-apply fail-closed rollback + version idempotency`
+
+**Executed 2026-07-13** (`b8a5f9f`): abort-before-flip error paths in `xdpgw-apply.c` (+81) + 3
+rollback/version-idempotency dp-unit cases (`test_parse.c` +221). Quick gate `make test` → **122**
+(119 + 3; re-verified live during the T3–T7 record back-fill).
 
 ---
 
@@ -249,18 +262,25 @@ DBS-23 (first apply reconciles), DBS-25 (≤5 s e2e), DBS-26 (scale rebuild meas
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `xdpgw-apply <snapshot>` opens all pinned config maps (friendly error if a pin is absent), runs the
+- [x] `xdpgw-apply <snapshot>` opens all pinned config maps (friendly error if a pin is absent), runs the
       core, exits 0 on swap / nonzero with a stderr reason on any failure (DBS-06/07).
-- [ ] Privileged smoke: loader (with T1 config-map pins) up → run `xdpgw-apply` with a snapshot that
+- [x] Privileged smoke: loader (with T1 config-map pins) up → run `xdpgw-apply` with a snapshot that
       adds/removes a service → assert `active_config.active_slot` flipped, the hot path enforces the change
       over veth (or via `dpstat`/readback), and the seeded global blacklist still drops (DBS-23).
-- [ ] `make applybulk`: build a 1000-service snapshot, run one apply, **measure** build+verify+flip wall
+- [x] `make applybulk`: build a 1000-service snapshot, run one apply, **measure** build+verify+flip wall
       time and assert < budget; confirms feed maps are carried-forward not rebuilt (DBS-26).
-- [ ] Full gate passes: `make test && sudo make smoke`; scale gate: `sudo make applybulk` green.
+- [x] Full gate passes: `make test && sudo make smoke`; scale gate: `sudo make applybulk` green.
 
 **Tests**: dp-integration (privileged)
 **Gate**: full (+ scale)
 **Commit**: `feat(dp): xdpgw-apply CLI + privileged apply smoke + applybulk`
+
+**Executed 2026-07-13** (`c8cd95d`): `main()` pin-open + subprocess CLI (`xdpgw-apply.c` +157); `make
+applybulk` body via `tests/apply_bulk.sh` + `tests/apply_smoke.py generate-bulk` (1000-service snapshot,
+asserts <5 s wall time, single `active_config` flip slot 0→1/version 1→2, feed inners carried forward);
+privileged apply smoke `tests/smoke_apply.sh` wired into `make smoke`. `make test` unchanged at **122**
+(no new dp-unit case). Privileged full/scale gates (`sudo make smoke` / `sudo make applybulk`) are
+root-only and landed with the commit — not re-run in this back-fill.
 
 ---
 
@@ -283,23 +303,29 @@ fixture.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `serialize_node_snapshot(node)` emits bytes **identical** to `apply_snapshot_golden.bin` for the
+- [x] `serialize_node_snapshot(node)` emits bytes **identical** to `apply_snapshot_golden.bin` for the
       matching fixture node (unit; round-trips T2's C parser) (DBS-10).
-- [ ] `DoubleBufferApplier.apply(config)` loads `load_node_config(db)` (all enabled services + children),
+- [x] `DoubleBufferApplier.apply(config)` loads `load_node_config(db)` (all enabled services + children),
       serializes to a temp file (0600, unlinked), execs the helper via
       `asyncio.create_subprocess_exec` with `worker_apply_timeout_seconds`; exit 0 → return + structured
       swap log (slot/version/duration, DBS-28); nonzero/timeout → `ApplyError(stderr)` (DBS-06/07).
-- [ ] `__main__` injects `DoubleBufferApplier(session_factory=…, apply_bin=…, timeout=…)` in place of
+- [x] `__main__` injects `DoubleBufferApplier(session_factory=…, apply_bin=…, timeout=…)` in place of
       `PlaceholderApplier`; the boundary + `process_job` are unchanged (DBS-01); startup performs **no**
       swap (applier only runs on a job) (DBS-22).
-- [ ] **integration** (fake helper stub recording argv + snapshot bytes, exiting 0/1/timeout): success →
+- [x] **integration** (fake helper stub recording argv + snapshot bytes, exiting 0/1/timeout): success →
       `active`, `active_version=N`; nonzero → `failed`, `active_version` kept; a `bump_version` mid-apply
       → supersede via the existing two-txn guard, exactly one advance (DBS-04/07/20).
-- [ ] Quick gate (unit serialize) + Full gate pass: `pytest -q` green; state the added pass count.
+- [x] Quick gate (unit serialize) + Full gate pass: `pytest -q` green; state the added pass count.
 
 **Tests**: integration (+ unit for serialize)
 **Gate**: full
 **Commit**: `feat(worker): DoubleBufferApplier build/swap via xdpgw-apply`
+
+**Executed 2026-07-13** (`6c6a532`): `DoubleBufferApplier` + `load_node_config` + `serialize_node_snapshot`
++ `ApplyError` (`applier.py` +224), DI swap in `__main__.py`, `worker_apply_binary_path`/
+`worker_apply_timeout_seconds` settings (`config.py`). **5 CP cases** — 4 fake-helper integration
+(`test_double_buffer_applier.py`) + 1 serialize round-trip unit (`test_snapshot_serialize.py`, binds the
+committed golden fixture). CP full gate `pytest -q` landed with the commit — not re-run in this back-fill.
 
 ---
 
@@ -315,14 +341,19 @@ version), with the friendly gateway-not-loaded error when the pin is absent.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `dpstat` prints `active_slot` and `version` from the pinned `active_config`.
-- [ ] Without the pin, it returns the existing friendly "gateway not loaded" error (no crash).
-- [ ] Build gate passes: `make bpf skel loader apply dpstat`; manual: `./build/dpstat` shows the section
+- [x] `dpstat` prints `active_slot` and `version` from the pinned `active_config`.
+- [x] Without the pin, it returns the existing friendly "gateway not loaded" error (no crash).
+- [x] Build gate passes: `make bpf skel loader apply dpstat`; manual: `./build/dpstat` shows the section
       after a load.
 
 **Tests**: none (build + manual readback, per drop-reason-counters dpstat precedent)
 **Gate**: build
 **Commit**: `feat(dp): dpstat active_config slot/version section`
+
+**Executed 2026-07-13** (`94ddc1e`): `dpstat active_config` section (`dpstat.c` +26) printing `active_slot`
++ `version` from the pinned map, with the friendly gateway-not-loaded error when the pin is absent. Build
+gate `make bpf skel loader apply dpstat` green (re-verified during T2/T8). `apply_bulk.sh` consumes this
+section to assert the flip.
 
 ---
 
