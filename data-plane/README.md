@@ -201,6 +201,7 @@ The loader pins these maps for operators and later workers:
 | `/sys/fs/bpf/xdp_gateway/sample_config` | Runtime sample budget: `rate_per_sec` and `burst`. |
 | `/sys/fs/bpf/xdp_gateway/sample_stats` | Per-CPU emitted, suppressed, and lost sample counters. |
 | `/sys/fs/bpf/xdp_gateway/bloom_stats` | Per-stage bloom-hit/LPM-miss counters. |
+| `/sys/fs/bpf/xdp_gateway/svc_stat_map` | Exact per-service clean/drop packet and byte counters, keyed by `dp_id`. |
 
 Use `dpstat` while the loader is running:
 
@@ -216,6 +217,29 @@ interpret values as lifetime totals. Sampling budget is per CPU; a rate of `256`
 `256 * online_cpu_count` events per second across the node, with burst `64` per CPU by default. Exact
 drop counters stay correct even when samples are suppressed or lost. `dpstat counters` also prints
 the `bloom_hit_lpm_miss` rows for whitelist, global blacklist, service blacklist, and total.
+
+## Per-service telemetry snapshot
+
+`svc_stat_map` records exact per-CPU clean and dropped packet/byte counters for
+matched services. Its key is the stable control-plane `dp_id`; packets that do
+not match a service stay in the node-global counters. A reload clears this map,
+so userspace consumers must calculate counter deltas and treat a decrease as a
+reset.
+
+Use `dpstat snapshot` to read every telemetry input in one JSON document:
+
+```bash
+sudo ./build/dpstat snapshot --json
+sudo ./build/dpstat snapshot --json --ifindex <ingress-ifindex>
+```
+
+The output includes `ts_ns`, `active.slot`, `active.version`, XDP mode and
+program metadata, node counters, sample and bloom statistics, and a sorted
+`services` array. Each service row has `dp_id`, clean/drop packets and bytes,
+and `drop_by_reason`. Provide the ingress ifindex to report the live XDP mode;
+without it, the mode remains `unknown`. If a required pinned map is unavailable,
+`dpstat` reports the gateway as offline and exits non-zero rather than emitting
+a partial snapshot.
 
 ## Apply helper (xdpgw-apply)
 

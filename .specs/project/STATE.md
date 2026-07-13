@@ -3,21 +3,25 @@
 **Last Updated:** 2026-07-13
 
 **Current Work (authoritative update):** M5 → **Telemetry & dashboards P1** —
-**EXECUTING** (2026-07-13). T1–T6 and T10 are complete. T5 is now verified by
-`657cd3d` after its model/migration work in `7ca62db`; the full control-plane
-gate passed **395 tests**. Execute the remaining P1 work in this order:
-T7 → T9 → (T8 ∥ T11) → T12 → T17. Capture fresh control-plane and frontend
-baselines before T7. T13–T15 (P2) and T16 (P3) are deferred and are not part
-of this run.
+**EXECUTED / VERIFIED** (2026-07-13). T1–T12 and T17 are complete. This run
+landed T7 `8efba3b`, T9 `c2d4239`, T8 `17f0aa9`, T11 `77753e4`, and T12
+`6e335e8`; T17 records the operational and testing conventions. Final gates:
+control-plane `ruff check`/format/mypy clean and `pytest -q` → **450 passed**
+(18 existing Pydantic deprecation warnings); frontend lint/typecheck/Vitest →
+**9 files / 13 tests** plus production build; data-plane build/quick →
+**130 passed** and privileged redirect/fairness/apply smoke passed. Browser
+validation against a FastAPI-served production bundle confirmed `/tenant` and
+`/admin` history routes, unauthenticated-session redirect to Login, a missing
+asset's 404, tenant-only service selection, two-second polling, and the
+critical `generic` XDP health treatment.
 
-**P1 defaults:** Telemetry aggregation remains a worker background lane, not a
-`JobType`. `worker_telemetry_interval_seconds` is an integer from 1 through 2,
-with a default of 2 seconds. Production SPA serving is opt-in through
-`CONTROL_PLANE_FRONTEND_STATIC_DIR`: FastAPI serves the built bundle only when
-configured, uses an HTML-only browser-history fallback, and preserves API and
-missing-asset 404 responses. T12 owns that implementation and its focused
-control-plane test. P1 is not complete until the remaining tasks and final
-validation pass.
+**P1 defaults and deferral:** Telemetry is a worker background lane, not a
+`JobType`; `worker_telemetry_interval_seconds` is an integer 1–2 (default 2).
+`CONTROL_PLANE_FRONTEND_STATIC_DIR` opts FastAPI into serving the built SPA with
+an HTML-only browser-history fallback while preserving API and missing-asset
+404s. TEL-01–30 are verified. T13–T15/TEL-31–38 remain deferred to P2, and
+T16/TEL-39–40 remain deferred to P3; alerting, chargeback, and configuration
+management screens remain out of scope for this P1 release.
 
 **Prior current work:** M4 #3 → **Threat intelligence feed sync** — **EXECUTED / VERIFIED** (2026-07-13). All of T1–T15 landed. T1–T13 committed earlier (`021f567..ae33648`); **T14** (`xdpgw-apply` `GLOBAL_DENY` mode + shared pin-dir lock + inverse carry-forward + global-apply smoke/scale) and **T15** (operations docs + final traceability) executed and committed this session. **Gates re-run green this session:** control-plane `ruff check`/`ruff format --check` (128 files)/`mypy app/` (60 files) clean, `pytest -q` → **435 passed** (100 unit + 335 integration, 89 s); data-plane `make bpf skel loader dpstat apply` + `make test` green (test_parse 130 + `test_snapshot` service+global golden self-tests); `make smoke` green (redirect TTL/csum, fairness, apply `active_config` flip in 78 ms — no regression); **`make globalapplysmoke`** → fake feed snapshot reached `blacklist_drop` via the real helper while an unlisted source stayed delivered; **`make globalapplyscale`** → **1,048,576** distinct entries loaded in **6925 ms**, **1,048,577** rejected before flip (helper peak RSS ~17.6 MB; kernel BPF-map footprint via cgroup = n/a in this container). **External gate resolved:** M4 #2 double-buffer (`7fcfb1b..86120bc`) is executed, which unblocked T12–T14. `spec.md` moves all 40 FEED reqs to **Verified**; `tasks.md` Execution Results + Done-when boxes back-filled; ROADMAP marks the feature VERIFIED. **Deviations:** none material — one pre-existing Pydantic `__fields_set__` deprecation warning in `services/feeds.py:407` (non-blocking, fallback branch only). **Next phase:** M4 is complete (agent-worker VERIFIED, double-buffer executed, threat-feed-sync VERIFIED) → resume **M5** Execute (Telemetry & dashboards / Chargeback metering are design+tasks-drafted).
 
@@ -336,8 +340,8 @@ Open before Pilot (non-engineering, non-blocking — Product/Legal owned):
 - [ ] CM-02: IPv6 hard-drop blackhole warning + checklist in onboarding
 - [ ] CM-06: capacity positioning (single 40G node = small/mid scrubber; absorption depends on upstream)
 - [ ] CM-07: review threat-feed licenses for commercial/internal-paid use
-- [ ] Complete telemetry P1 execution: T7 → T9 → (T8 ∥ T11) → T12 → T17;
-  keep P2/P3 telemetry tasks deferred — updated 2026-07-13
+- [x] Complete telemetry P1 execution: T7 → T9 → (T8 ∥ T11) → T12 → T17;
+  P2/P3 telemetry tasks remain deferred — verified 2026-07-13
 
 ---
 

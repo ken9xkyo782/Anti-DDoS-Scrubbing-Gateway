@@ -11,6 +11,7 @@
 | --- | --- | --- | --- |
 | **unit** | Pure logic, no I/O | nothing | `@pytest.mark.unit` |
 | **integration** | Exercises Postgres and/or Redis, or the full HTTP path | `compose.test.yml` up | `@pytest.mark.integration` |
+| **fe-unit** | React component, hook, route, or API-client behavior in Vitest/jsdom | `control-plane/frontend/node_modules` | Vitest `*.test.ts(x)` |
 
 No mocking of the DB/Redis for integration tests — use the real services (PG-specific features `citext`/`JSONB`/`CHECK` make SQLite/fakeredis unfaithful). Each integration test runs in a rolled-back transaction or a truncated schema for isolation.
 
@@ -32,6 +33,7 @@ No mocking of the DB/Redis for integration tests — use the real services (PG-s
 | Worker backoff and Redis-pop helper | `app/worker/worker.py` | unit: `tests/unit/test_worker_backoff.py` |
 | Worker processor and reconciliation | `app/worker/processor.py` | integration: `tests/integration/test_worker_processor.py` |
 | Worker runtime and module entrypoint | `app/worker/worker.py`, `app/worker/__main__.py` | integration: `tests/integration/test_worker_runtime.py` |
+| Frontend dashboard, hooks, and routes | `control-plane/frontend/src/` | fe-unit: Vitest tests beside the source |
 
 **Rule:** a task creating any layer above writes that layer's tests **in the same task** (highest type wins if it spans layers). `Tests: none` only where the matrix says none.
 
@@ -42,8 +44,15 @@ No mocking of the DB/Redis for integration tests — use the real services (PG-s
 | **quick** | `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit` | unit-only tasks; fast inner loop |
 | **full** | `ruff check . && ruff format --check . && mypy app/ && pytest -q` (requires `compose.test.yml` up) | any task with integration tests |
 | **build** | `python -c "import app.main"` (import smoke) + `alembic upgrade head` on test DB | skeleton / wiring tasks |
+| **fe** | `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build` | frontend work; runs lint, TypeScript, Vitest, and the production Vite build |
 
 Every task's **Done when** cites the expected pass count (e.g. "N tests pass") to prevent silent test deletion.
+
+The frontend gate is independent of `compose.test.yml`, so it can run in
+parallel with control-plane integration tests when no shared source files are
+being edited. Keep frontend component and hook tests close to their source, and
+use the typed API client rather than mocking browser fetch behavior in each
+panel.
 
 ## Parallelism Assessment
 
@@ -143,6 +152,29 @@ Run these from `data-plane/`.
 | **full** | `make test && sudo make smoke` | Pre-merge checks on a BPF+veth-capable runner; `make smoke` runs the redirect, fairness, and apply smokes and is privileged and not parallel-safe |
 | **scale (blacklist)** | `sudo make blbulk` | Privileged 1M global-blacklist load and footprint check; run only when blacklist map capacity or kernel memory posture changes |
 | **scale (apply)** | `sudo make applybulk` | Privileged 1000-service build/verify/flip; asserts a sub-5 s wall time, exactly one `active_config` flip, and feed-owned maps carried forward. Run when the apply path or the slotted config-map set changes |
+
+### Per-service telemetry counters and snapshots
+
+`svc_stat_map` is a preallocated per-CPU hash keyed by the control-plane
+`dp_id`. Each matched service records exact clean and dropped packet/byte
+counters, plus a packet count for every drop reason. Unmatched traffic remains
+node-only. The map resets when the XDP program reloads; the worker treats that
+as a counter reset and computes deltas rather than lifetime totals.
+
+Run the machine-readable snapshot command while the loader owns the pinned
+maps:
+
+```sh
+sudo ./build/dpstat snapshot --json
+sudo ./build/dpstat snapshot --json --ifindex <ingress-ifindex>
+```
+
+The command writes one JSON object to standard output containing the timestamp,
+active slot/version, XDP attachment data, node counters, sampling and bloom
+statistics, and sorted per-service `dp_id` counter rows. Supplying the ingress
+ifindex lets `dpstat` report `native`, `generic`, or `offline` XDP mode. A
+missing or unreadable pinned map is an offline/error condition, not a partial
+snapshot; consumers must retain the last good window and mark it stale.
 
 The native-mode loader is verified by the build gate plus a manual veth/NIC smoke:
 `SERVICE_DEST=<ipv4-or-cidr> sudo ./build/xdp_gateway_loader <in-ifname> <out-ifname>` should attach to

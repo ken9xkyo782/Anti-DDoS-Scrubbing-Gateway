@@ -32,6 +32,59 @@ All worker timing values are positive seconds.
 | `CONTROL_PLANE_WORKER_BACKOFF_MAX_SECONDS` | `30.0` | Caps the doubling retry delay after Redis or database failures. |
 | `CONTROL_PLANE_WORKER_SHUTDOWN_GRACE_SECONDS` | `10.0` | Sets how long shutdown waits for the in-flight job. After the grace period, the job remains `applying` for a later startup sweep to recover. |
 
+## Telemetry lane and dashboards
+
+The worker runs telemetry as an independent background lane, not as an
+`AgentJob`. It invokes the data-plane `dpstat snapshot --json` reader on a
+whole-second cadence, stores windowed service and node telemetry, and keeps job
+processing available if a telemetry read fails. The first successful reader
+snapshot establishes a zero-delta baseline. If the gateway reader is offline,
+the lane stores an `offline` node-health snapshot and resumes on the next tick.
+
+Configure the lane with these environment variables:
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `CONTROL_PLANE_WORKER_TELEMETRY_ENABLED` | `true` | Enables the telemetry background lane. |
+| `CONTROL_PLANE_WORKER_TELEMETRY_INTERVAL_SECONDS` | `2` | Exact aggregation window in seconds. Values must be `1` or `2`. |
+| `CONTROL_PLANE_WORKER_TELEMETRY_RETENTION_SECONDS` | `604800` | Retains seven days of telemetry and health windows. |
+| `CONTROL_PLANE_WORKER_TELEMETRY_BINARY_PATH` | `../data-plane/build/dpstat` | Path to the `dpstat` executable. |
+| `CONTROL_PLANE_WORKER_TELEMETRY_IFINDEX` | unset | Optional ingress ifindex for live XDP-mode detection. |
+| `CONTROL_PLANE_WORKER_TELEMETRY_TIMEOUT_SECONDS` | `5.0` | Bounds each reader subprocess. |
+
+Build the data-plane reader and start the worker from `control-plane/`:
+
+```sh
+cd ../data-plane && make dpstat
+cd ../control-plane && python -m app.worker
+```
+
+The data-plane loader must be running and must own the pinned observability
+maps. See the data-plane README for the `dpstat snapshot --json` contract.
+
+## Telemetry APIs and SPA deployment
+
+Tenant users can read `GET /services/{service_id}/telemetry` only for services
+they own. Administrators can read `GET /node/telemetry` and `GET /node/health`.
+The node-health response includes live queued/applying job counts and current
+feed-source status. All responses include a `has_data` marker, UTC window
+metadata, and `stale`; a no-data response is zeroed, has a null window start,
+uses `window_seconds: 0`, and is stale.
+
+Build the React application and set its output directory to let FastAPI serve
+the SPA:
+
+```sh
+cd control-plane/frontend && npm run build
+export CONTROL_PLANE_FRONTEND_STATIC_DIR="$PWD/dist"
+```
+
+With this setting, FastAPI serves the built assets and returns `index.html` for
+browser history routes such as `/tenant` and `/admin`. API prefixes and missing
+assets still return their normal 404 responses; the fallback never returns SPA
+HTML for them. Leave the setting unset when another web server serves the
+frontend.
+
 ## Deploy and observe
 
 Run one dedicated worker process on the gateway node. It uses the same database

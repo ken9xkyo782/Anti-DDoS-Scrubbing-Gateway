@@ -2,7 +2,7 @@
 
 **Feature ID prefix:** `TEL`
 **Milestone:** M5 — Observability & chargeback (first of two features; sibling = *Chargeback metering*)
-**Status:** Spec drafted
+**Status:** P1 verified (2026-07-13); P2/P3 pending
 
 ## Problem Statement
 
@@ -10,11 +10,11 @@ The gateway enforces a full L3/L4 verdict pipeline (M2–M3) and syncs config vi
 
 ## Goals
 
-- [ ] Tenant can see their own service's clean-vs-drop packets/bytes, drop-reason distribution, and current PPS/BPS, refreshing **≤ 2 s** (PROJECT goal, TDD §11).
-- [ ] Admin can see node-level aggregates plus a health snapshot: XDP mode (native/generic/off), active map version, apply status, `map_error`, worker backlog, feed status, throughput-vs-capacity.
-- [ ] Data-plane emits **exact per-CPU per-service** clean + per-drop-reason packet/byte counters on the hot path — the exact clean-byte counter becomes the billing source of truth reused by *Chargeback metering*.
-- [ ] Strict tenant isolation on all telemetry reads (5.2): zero cross-tenant leakage.
-- [ ] Bootstrap the React SPA (auth/session, role-aware routing, layout) — the first frontend in the project.
+- [x] Tenant can see their own service's clean-vs-drop packets/bytes, drop-reason distribution, and current PPS/BPS, refreshing **≤ 2 s** (PROJECT goal, TDD §11).
+- [x] Admin can see node-level aggregates plus a health snapshot: XDP mode (native/generic/off), active map version, apply status, `map_error`, worker backlog, feed status, throughput-vs-capacity.
+- [x] Data-plane emits **exact per-CPU per-service** clean + per-drop-reason packet/byte counters on the hot path — the exact clean-byte counter becomes the billing source of truth reused by *Chargeback metering*.
+- [x] Strict tenant isolation on all telemetry reads (5.2): zero cross-tenant leakage.
+- [x] Bootstrap the React SPA (auth/session, role-aware routing, layout) — the first frontend in the project.
 
 ## Out of Scope
 
@@ -183,36 +183,36 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Requirement ID | Story | Phase | Status |
 | --- | --- | --- | --- |
-| TEL-01 | P1: Per-service counters | - | Pending |
-| TEL-02 | P1: Per-service counters | - | Pending |
-| TEL-03 | P1: Per-service counters | - | Pending |
-| TEL-04 | P1: Per-service counters | - | Pending |
-| TEL-05 | P1: Per-service counters | - | Pending |
-| TEL-06 | P1: Per-service counters | - | Pending |
-| TEL-07 | P1: Aggregation pipeline | - | Pending |
-| TEL-08 | P1: Aggregation pipeline | - | Pending |
-| TEL-09 | P1: Aggregation pipeline | - | Pending |
-| TEL-10 | P1: Aggregation pipeline | - | Pending |
-| TEL-11 | P1: Aggregation pipeline | - | Pending |
-| TEL-12 | P1: Aggregation pipeline | - | Pending |
-| TEL-13 | P1: Aggregation pipeline | - | Pending |
-| TEL-14 | P1: Aggregation pipeline | - | Pending |
-| TEL-15 | P1: Aggregation pipeline | - | Pending |
-| TEL-16 | P1: Telemetry & health API | - | Pending |
-| TEL-17 | P1: Telemetry & health API | - | Pending |
-| TEL-18 | P1: Telemetry & health API | - | Pending |
-| TEL-19 | P1: Telemetry & health API | - | Pending |
-| TEL-20 | P1: Telemetry & health API | - | Pending |
-| TEL-21 | P1: Telemetry & health API | - | Pending |
-| TEL-22 | P1: Dashboard SPA | - | Pending |
-| TEL-23 | P1: Dashboard SPA | - | Pending |
-| TEL-24 | P1: Dashboard SPA | - | Pending |
-| TEL-25 | P1: Dashboard SPA | - | Pending |
-| TEL-26 | P1: Dashboard SPA | - | Pending |
-| TEL-27 | P1: Dashboard SPA | - | Pending |
-| TEL-28 | P1: Dashboard SPA | - | Pending |
-| TEL-29 | P1: Dashboard SPA | - | Pending |
-| TEL-30 | P1: Dashboard SPA | - | Pending |
+| TEL-01 | P1: Per-service counters | - | Verified |
+| TEL-02 | P1: Per-service counters | - | Verified |
+| TEL-03 | P1: Per-service counters | - | Verified |
+| TEL-04 | P1: Per-service counters | - | Verified |
+| TEL-05 | P1: Per-service counters | - | Verified |
+| TEL-06 | P1: Per-service counters | - | Verified |
+| TEL-07 | P1: Aggregation pipeline | - | Verified |
+| TEL-08 | P1: Aggregation pipeline | - | Verified |
+| TEL-09 | P1: Aggregation pipeline | - | Verified |
+| TEL-10 | P1: Aggregation pipeline | - | Verified |
+| TEL-11 | P1: Aggregation pipeline | - | Verified |
+| TEL-12 | P1: Aggregation pipeline | - | Verified |
+| TEL-13 | P1: Aggregation pipeline | - | Verified |
+| TEL-14 | P1: Aggregation pipeline | - | Verified |
+| TEL-15 | P1: Aggregation pipeline | - | Verified |
+| TEL-16 | P1: Telemetry & health API | - | Verified |
+| TEL-17 | P1: Telemetry & health API | - | Verified |
+| TEL-18 | P1: Telemetry & health API | - | Verified |
+| TEL-19 | P1: Telemetry & health API | - | Verified |
+| TEL-20 | P1: Telemetry & health API | - | Verified |
+| TEL-21 | P1: Telemetry & health API | - | Verified |
+| TEL-22 | P1: Dashboard SPA | - | Verified |
+| TEL-23 | P1: Dashboard SPA | - | Verified |
+| TEL-24 | P1: Dashboard SPA | - | Verified |
+| TEL-25 | P1: Dashboard SPA | - | Verified |
+| TEL-26 | P1: Dashboard SPA | - | Verified |
+| TEL-27 | P1: Dashboard SPA | - | Verified |
+| TEL-28 | P1: Dashboard SPA | - | Verified |
+| TEL-29 | P1: Dashboard SPA | - | Verified |
+| TEL-30 | P1: Dashboard SPA | - | Verified |
 | TEL-31 | P2: Richer admin observability | - | Pending |
 | TEL-32 | P2: Richer admin observability | - | Pending |
 | TEL-33 | P2: Richer admin observability | - | Pending |
@@ -228,7 +228,8 @@ Explicitly excluded. Documented to prevent scope creep.
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 40 total, 0 mapped to tasks (Tasks phase pending). P1 = TEL-01..30 (MVP vertical slice: DP counters → worker aggregation → API → SPA); P2 = TEL-31..38; P3 = TEL-39..40.
+**Coverage:** 40 total. TEL-01..30 are implemented and verified by the P1
+gates; TEL-31..38 remain pending for P2 and TEL-39..40 remain pending for P3.
 
 ---
 
@@ -236,9 +237,9 @@ Explicitly excluded. Documented to prevent scope creep.
 
 How we know the feature is successful:
 
-- [ ] A tenant sees their own service's clean-vs-drop + drop-reason distribution + PPS/BPS, refreshing ≤ 2 s.
-- [ ] An admin node view shows XDP mode, active map version, `map_error`, apply status, worker backlog, and feed status.
-- [ ] The per-service clean-byte counter is exact and reconciles to node-level clean bytes within counter-reset tolerance (billing-grade for chargeback reuse).
-- [ ] Tenant isolation holds: a tenant cannot read another tenant's telemetry via API or SPA (zero leakage in the test set).
-- [ ] Data-plane counter → visible-in-dashboard latency ≤ 2 s under nominal operation.
-- [ ] The data-plane test suite baseline stays green with the new per-service counters wired.
+- [x] A tenant sees their own service's clean-vs-drop + drop-reason distribution + PPS/BPS, refreshing ≤ 2 s.
+- [x] An admin node view shows XDP mode, active map version, `map_error`, apply status, worker backlog, and feed status.
+- [x] The per-service clean-byte counter is exact and reconciles to node-level clean bytes within counter-reset tolerance (billing-grade for chargeback reuse).
+- [x] Tenant isolation holds: a tenant cannot read another tenant's telemetry via API or SPA (zero leakage in the test set).
+- [x] Data-plane counter → visible-in-dashboard latency ≤ 2 s under nominal operation.
+- [x] The data-plane test suite baseline stays green with the new per-service counters wired.

@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/telemetry-dashboards/design.md` (AD-030)
 **Spec**: `.specs/features/telemetry-dashboards/spec.md` (TEL-01..40)
-**Status**: P1 executing (reconciled 2026-07-13)
+**Status**: P1 verified (2026-07-13)
 
 **Confirmed defaults carried from Design review** (the 3 flags):
 - D-030-6 — aggregation is a **worker background task**, no `TELEMETRY_AGGREGATE` `JobType`. ✅
@@ -34,20 +34,26 @@ Do not use the historic counts below as a current baseline.
 | T4 | Complete | `bfe4376`; full CP gate: 392 passed |
 | T5 | Complete | `7ca62db` + `657cd3d`; full CP gate: 395 passed |
 | T6 | Complete | `7f879c8`; quick CP gate: 97 passed, 295 deselected |
-| T7 | Complete | full CP gate: 441 passed |
-| T9 | Complete | full CP gate: 444 passed |
+| T7 | Complete | `8efba3b`; full CP gate: 441 passed |
+| T9 | Complete | `c2d4239`; full CP gate: 444 passed |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
-| T8 | Complete | full CP gate: 448 passed |
-| T11 | Complete | FE gate: 5 files / 8 tests passed |
-| T12 | Complete | FE gate: 9 files / 13 tests; CP static-serving checks: 2 passed |
+| T8 | Complete | `17f0aa9`; full CP gate: 448 passed |
+| T11 | Complete | `77753e4`; FE gate: 5 files / 8 tests passed |
+| T12 | Complete | `6e335e8`; FE gate: 9 files / 13 tests; CP static-serving checks: 2 passed |
 | T13–T15 | Deferred | P2 is out of the approved P1 execution scope |
 | T16 | Deferred | P3 is out of the approved P1 execution scope |
-| T17 | Queued | Execute after T12 to document shipped surfaces |
+| T17 | Complete | docs render review and final P1 traceability recorded |
 
 T3 additionally pins `active_config` with the established observability
 lifecycle: the approved `active{slot,version}` snapshot contract is otherwise
-unreadable by `dpstat`. With T5 complete, execute the remaining P1 sequence as
-T7 → T9 → (T8 ∥ T11) → T12 → T17.
+unreadable by `dpstat`. P1 completed as T7 → T9 → (T8 ∥ T11) → T12 → T17.
+Final validation: CP full gate **450 passed** (18 existing Pydantic
+deprecation warnings); FE gate **9 files / 13 tests** plus production build;
+DP build/quick **130 passed** and privileged redirect/fairness/apply smoke;
+and browser validation of FastAPI-served `/tenant` and `/admin` deep links,
+login redirect, tenant isolation, two-second polling, critical generic XDP,
+and missing-asset 404 behavior. TEL-01–30 are verified;
+TEL-31–40 remain pending for the deferred P2/P3 work.
 
 **Tracks:** **DP** (`data-plane/`, C) · **CP** (`control-plane/app`, Python) · **FE** (`control-plane/frontend/`, React/TS). DP and CP/FE are separate dirs with separate gates → **cross-track parallel**. Within CP, only **unit**-typed tasks may be `[P]` (integration shares `compose.test.yml`). FE is a separate toolchain (Vitest, no compose.test) → the FE scaffold is `[P]`, but FE view tasks serialize on the shared project tree.
 
@@ -314,11 +320,11 @@ Phase 8 — Docs
 **Tools**: Skill `coding-guidelines`; MCP `context7` (Vite/React/React Router/TanStack Query/Recharts current stable), else web
 
 **Done when**:
-- [ ] Vite+React+TS project with React Router, TanStack Query (`QueryClientProvider`), Recharts, Vitest+RTL; deps pinned; `npm run {lint,typecheck,test,build}` scripts exist
-- [ ] `api/client.ts`: `fetch(..., {credentials:"include"})`, 401 → redirect `/login`; `AuthContext` (login via `POST /auth/login`, role via `GET /auth/me`, logout); `ProtectedRoute` gates by auth + role; `AppLayout`; `LoginPage`
-- [ ] Vitest unit: api-client 401→redirect, `ProtectedRoute` role gating, auth context login flow (mocked fetch)
-- [ ] Gate passes: `fe` — `B_fe + N` vitest tests pass; typecheck+lint+build clean
-- [ ] Dev proxy configured (`/auth`,`/services`,`/node` → FastAPI)
+- [x] Vite+React+TS project with React Router, TanStack Query (`QueryClientProvider`), Recharts, Vitest+RTL; deps pinned; `npm run {lint,typecheck,test,build}` scripts exist
+- [x] `api/client.ts`: `fetch(..., {credentials:"include"})`, 401 → redirect `/login`; `AuthContext` (login via `POST /auth/login`, role via `GET /auth/me`, logout); `ProtectedRoute` gates by auth + role; `AppLayout`; `LoginPage`
+- [x] Vitest unit: api-client 401→redirect, `ProtectedRoute` role gating, auth context login flow (mocked fetch)
+- [x] Gate passes: `fe` — 5 Vitest tests; typecheck+lint+build clean
+- [x] Dev proxy configured (`/auth`,`/services`,`/node` → FastAPI)
 
 **Tests**: fe-unit
 **Gate**: fe
@@ -474,9 +480,9 @@ opt-in FastAPI serving of the production SPA bundle.
 **Tools**: Skill `docs-writer`
 
 **Done when**:
-- [ ] TESTING.md gains a data-plane `svc_stat`/`snapshot --json` section + a **frontend** test-type + `fe` gate row
-- [ ] README/dashboards note (run worker with `worker_telemetry_*`, serve SPA, endpoints)
-- [ ] Gate passes: docs render; no code gate
+- [x] TESTING.md gains a data-plane `svc_stat`/`snapshot --json` section + a **frontend** test-type + `fe` gate row
+- [x] README/dashboards note (run worker with `worker_telemetry_*`, serve SPA, endpoints)
+- [x] Gate passes: docs render review; no code gate
 
 **Tests**: none
 **Gate**: none (docs)
@@ -555,17 +561,16 @@ No `[P]` task depends on another `[P]` task in its phase (T6, T10 are independen
 
 ---
 
-## Open Flags carried to Execute
+## Deferred P2/P3 flag
 
-1. **dp_id sequence** — dedicated `service_dp_id_seq` (monotonic, no-reuse) chosen; confirm at T4 vs plain autoincrement.
-2. **XDP-mode ifindex** — `worker_telemetry_ifindex` setting feeds `dpstat --ifindex` (T3/T8); alternative = loader pins a "mode" byte.
-3. **Frontend serve** — resolved: FastAPI serves the built Vite bundle only when
-   `CONTROL_PLANE_FRONTEND_STATIC_DIR` is set. An HTML-only history fallback
-   preserves API and missing-asset 404 responses. Implement and document this
-   in T12/T17.
-4. **`bpf_xdp_query`** (T3) and **ringbuf consumer-pos across processes** (T13) are the two design-flagged facts to web-verify at their tasks; T13 has a streaming-lane fallback.
-5. **M4 #2 gate** — true multi-service end-to-end needs the double-buffer applier to write `dp_id` into `service_val.service_id`. P1 tasks are testable now (loader-seed dp_id + `FakeTelemetryReader`); confirm executing ahead of M4 #2 is intended.
+1. **Ringbuf consumer position across processes** — T13 must verify this
+   `dpstat tail --json` behavior before implementing top-talkers. Its fallback
+   remains a long-lived streaming lane. The `dp_id` sequence, XDP-mode
+   `ifindex`, SPA-serving configuration, and M4 #2 `dp_id` contract are
+   resolved in the verified P1 implementation.
 
 **MCPs/Skills**: `coding-guidelines` on all code tasks; `docs-writer` on T17; `context7` (fallback web) on T3/T10/T13 for external-API/version checks; `mermaid-studio` already used in Design. Confirm this mapping.
 
-**Next**: capture fresh CP and FE baselines, then **Execute** T7.
+**P1 execution result (2026-07-13):** T1–T12 and T17 are complete. Final
+validation is recorded above; TEL-01–30 are verified. T13–T15 remain deferred
+to P2 and T16 remains deferred to P3.

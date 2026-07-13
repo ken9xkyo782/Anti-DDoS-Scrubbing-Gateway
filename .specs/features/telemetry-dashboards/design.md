@@ -2,7 +2,7 @@
 
 **Spec**: `.specs/features/telemetry-dashboards/spec.md`
 **Context**: `.specs/features/telemetry-dashboards/context.md` (D-TEL-1..4, A-TEL-1..8)
-**Status**: Draft
+**Status**: P1 implemented and verified (2026-07-13); P2/P3 deferred
 **Decision record**: **AD-030**
 
 ---
@@ -344,4 +344,5 @@ dp_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)  # from
 | TEL-36..38 (top-talkers, P2) | §4 `dpstat tail --json`, §6 rolling top-N, §8 JSONB fields |
 | TEL-39..40 (trend/export, P3) | §8 retained windows, §10 export endpoint |
 
-All 40 requirements mapped. **Next: Tasks** (resolve the 8 flags; expect a DP track + a CP/worker track + a frontend track with explicit `[P]`/serial marking per TESTING.md).
+All 40 requirements mapped. P1 (TEL-01..30) is implemented and verified; P2
+(TEL-31..38) and P3 (TEL-39..40) remain deferred.
