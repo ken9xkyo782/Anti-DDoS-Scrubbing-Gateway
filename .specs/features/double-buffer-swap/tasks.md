@@ -118,6 +118,16 @@ pin/unpin/rollback structure; `service.h`/`rules.h`/`whitelist.h`/`blacklist.h`/
 
 ### T2: `xdpgw-apply` scaffold — snapshot parser + fresh-inner de-risk (the fail-fast)
 
+> **Contract correction (2026-07-13, pre-consumption of `apply_snapshot.h` v1).** Two T2-blocking seams
+> fixed in T1's uncommitted header + AD-028 §Data Models before the parser/golden fixture bake the layout
+> in: (1) **VIP is service-level** — `vip_pps/vip_bps/vip_flags` moved from the per-whitelist record up to
+> the service fixed record (one `vip_config` keyed by `dp_id`, matching `struct vip_config` +
+> `ServiceConfig.vip_pps/vip_bps`); the `wl[]` entry is now `{prefixlen, src_be32}` only. Constants:
+> `SERVICE_FIXED_SIZE` 33→**50**, `WHITELIST_ENTRY_SIZE` 25→**8**. (2) **`dp_id` surrogate** — the wire
+> `service_id` field is renamed `dp_id` (the AD-030 D-030-4 `u32` surrogate, **not** the UUID);
+> `ServiceConfig` gained an additive `dp_id: int` (T6 serializer sources it). Schema stays v1 (nothing
+> consumed it yet). T2 golden fixture + parser and T6 serializer both build against the corrected layout.
+
 **What**: Bootstrap the C helper: parse the snapshot into an in-memory `node_cfg`, add the
 `create_inner_like()` primitive, and **prove the novel composition** (fresh inner meta-equal to an
 existing inner, installed into an `ARRAY_OF_MAPS` outer, read back) — the one load-bearing unknown,

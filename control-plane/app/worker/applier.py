@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ServiceConfig:
     service_id: uuid.UUID
+    dp_id: int
     version: int
     name: str
     cidr_or_ip: str
@@ -79,6 +80,7 @@ async def load_service_config(
 
     return ServiceConfig(
         service_id=service.id,
+        dp_id=service.dp_id,
         version=service.version,
         name=service.name,
         cidr_or_ip=service.cidr_or_ip,

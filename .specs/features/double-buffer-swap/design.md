@@ -262,11 +262,15 @@ sequenceDiagram
   format the Python worker writes and the C helper reads (A-DBS-2).
 - **Shape** (explicit little-endian fixed-width fields — **not** raw C-struct dumps, to decouple from
   compiler padding): magic `"XDPGWAP1"` (8 B) · `schema_version: u32` · `service_count: u32` · then per
-  service: `{ dst_prefixlen: u32, dst_addr: be32, service_id: u32, enabled: u8, wl_flags: u8,
-  bl_flags: u8, committed_bps: u64, ceiling_bps: u64, rule_count: u16, rules[rule_count] (src_lo,
-  src_hi, dst_lo, dst_hi, proto, flags), wl_count: u32, wl[]{prefixlen, src_be32, vip_pps: u64,
-  vip_bps: u64, vip_flags: u8}, sbl_count: u32, sbl[]{prefixlen, src_be32} }`. Flags/`wl_flags`/
+  service: `{ dst_prefixlen: u32, dst_addr: be32, dp_id: u32, enabled: u8, wl_flags: u8,
+  bl_flags: u8, committed_bps: u64, ceiling_bps: u64, vip_pps: u64, vip_bps: u64, vip_flags: u8,
+  rule_count: u16, rules[rule_count] (src_lo, src_hi, dst_lo, dst_hi, proto, flags), wl_count: u32,
+  wl[]{prefixlen, src_be32}, sbl_count: u32, sbl[]{prefixlen, src_be32} }`. Flags/`wl_flags`/
   `bl_flags`/`WL_F_HAS_BROAD` derivation matches the loader (`prepare_wl_seed`/`prepare_deny_seed`).
+  **VIP limits are service-level** (one `vip_config` keyed by `dp_id`, matching `struct vip_config`
+  and `ServiceConfig.vip_pps/vip_bps`) — not per whitelist entry; the helper stamps `vip_config.version`.
+  **`dp_id`** is the `u32` data-plane surrogate (`ProtectedService.dp_id`, AD-030 D-030-4), **not** the
+  service UUID; the serializer sources it from the `ServiceConfig.dp_id` field (added below).
 - **Contract discipline**: `schema_version` bumps on any layout change; helper rejects unknown versions
   (fail-closed). A **golden fixture** (bytes) round-trips Python-serialize ↔ C-parse in tests.
 - **Reuses**: field semantics from `service.h`/`rules.h`/`whitelist.h`/`blacklist.h`; the Python side
@@ -292,6 +296,10 @@ sequenceDiagram
 - **No control-plane schema change, no migration.** `DoubleBufferApplier` reads existing `ProtectedService`
   (+ `ServicePlan`, `AllowRule`, whitelist/blacklist rows) through the AD-027 `ServiceConfig` snapshot;
   `NodeConfig` is an in-memory list of them.
+- **`ServiceConfig` gains `dp_id: int`** (adopting the AD-030 D-030-4 surrogate `ProtectedService.dp_id`,
+  the `service_dp_id_seq` column already landed): a purely additive dataclass field populated in
+  `load_service_config`/`load_node_config` and serialized into the wire `dp_id`. The `service_id: UUID`
+  field stays for logging; `dp_id` is the on-wire identity the data-plane maps key on.
 - **`active_config.version` = node-global map version** (`{active_slot, version}`), incremented by the
   helper on each successful swap — **distinct** from each service's per-service `active_version` (advanced
   by `mark_active`). dpstat/telemetry read the former (A-DBS-5).
