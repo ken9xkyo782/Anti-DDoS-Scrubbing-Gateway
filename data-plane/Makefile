@@ -22,6 +22,13 @@ TEST_SRC := $(TEST_DIR)/test_parse.c
 TEST_BIN := $(BUILD_DIR)/test_parse
 BULK_SRC := $(TEST_DIR)/bulk_blacklist.c
 BULK_BIN := $(BUILD_DIR)/bulk_blacklist
+APPLY_SRC := $(TOOLS_DIR)/xdpgw-apply.c
+APPLY := $(BUILD_DIR)/xdpgw-apply
+TEST_SNAPSHOT_SRC := $(TEST_DIR)/test_snapshot.c
+TEST_SNAPSHOT_BIN := $(BUILD_DIR)/test_snapshot
+APPLY_GOLDEN := $(TEST_DIR)/fixtures/apply_snapshot_golden.bin
+APPLY_HDRS := $(SRC_DIR)/apply_snapshot.h $(SRC_DIR)/service.h $(SRC_DIR)/rules.h \
+	$(SRC_DIR)/whitelist.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/fairness.h
 
 ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 UAPI_INCLUDE := /usr/include/$(shell uname -m)-linux-gnu
@@ -31,7 +38,7 @@ LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
 USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
-.PHONY: all bpf skel loader dpstat test smoke blbulk clean run
+.PHONY: all bpf skel loader dpstat apply applybulk test smoke blbulk clean run
 
 all: bpf skel loader
 
@@ -66,6 +73,20 @@ dpstat: $(DPSTAT)
 $(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/blacklist.h | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
+apply: $(APPLY) $(TEST_SNAPSHOT_BIN)
+	$(TEST_SNAPSHOT_BIN) $(APPLY_GOLDEN)
+
+$(APPLY): $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
+
+$(TEST_SNAPSHOT_BIN): $(TEST_SNAPSHOT_SRC) $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
+
+# Scale-envelope apply measurement (1000-service snapshot, wall-time budget) is
+# implemented in T5; the target exists now so the gate table is complete.
+applybulk:
+	@echo "applybulk: scale measurement lands in T5 (double-buffer-swap)"
+
 test: $(TEST_BIN)
 	$(TEST_BIN)
 
@@ -73,7 +94,7 @@ smoke: loader dpstat
 	$(TEST_DIR)/smoke_redirect.sh
 	$(TEST_DIR)/smoke_fairness.sh
 
-$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(TEST_SKEL) | $(BUILD_DIR)
+$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 blbulk: $(BULK_BIN)

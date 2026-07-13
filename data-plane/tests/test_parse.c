@@ -24,6 +24,14 @@
 #include "whitelist.h"
 #include "xdp_gateway.test.skel.h"
 
+/*
+ * Pull in the xdpgw-apply helper core (fd-taking, static inline; main() elided)
+ * so the fresh-inner composition it depends on is exercised in-process here,
+ * against the real skeleton fds — the DBS-09 de-risk (AD-028 testability note).
+ */
+#define XDPGW_APPLY_NO_MAIN
+#include "../tools/xdpgw-apply.c"
+
 #define DEFAULT_SERVICE_ID 42
 #define DEFAULT_SRC htonl(TEST_SRC_PUB_A)
 #define DEFAULT_DST htonl(0x0a000002)
@@ -6027,10 +6035,93 @@ static int pin_to_cpu0(void)
 	return 0;
 }
 
+/*
+ * DBS-09 de-risk: prove the one novel composition xdpgw-apply stands on —
+ * create a fresh inner meta-equal to the live slot-0 inner via create_inner_like,
+ * populate it, install it into the inactive slot (1) of a statically-initialised
+ * ARRAY_OF_MAPS outer, then look it back up through the outer and read the key.
+ * If userspace inner-replacement into a pinned/static outer did not work, this
+ * fails fast at the first Execute gate (AD-028 fallback ladder).
+ */
+static int test_apply_fresh_inner_install(void)
+{
+	const __u32 inactive_slot = 1;
+	const __u32 service_id = 4242;
+	struct test_env env;
+	int fresh_fd = -1;
+	int got_fd = -1;
+	int err;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	fresh_fd = create_inner_like(env.rule_block_map_fd, 0);
+	if (!err)
+		err = expect_fd("fresh rule_block inner", fresh_fd);
+
+	if (!err) {
+		struct rule_block block;
+
+		memset(&block, 0, sizeof(block));
+		block.version = 7;
+		block.rule_count = 1;
+		block.rules[0].flags = RULE_F_ENABLED;
+		if (bpf_map_update_elem(fresh_fd, &service_id, &block,
+					BPF_ANY) != 0) {
+			fprintf(stderr, "populate fresh inner: %s\n",
+				strerror(errno));
+			err = -1;
+		}
+	}
+
+	if (!err &&
+	    bpf_map_update_elem(env.rule_block_map_fd, &inactive_slot, &fresh_fd,
+				BPF_ANY) != 0) {
+		fprintf(stderr, "install fresh inner into outer: %s\n",
+			strerror(errno));
+		err = -1;
+	}
+
+	if (!err) {
+		struct rule_block got;
+		__u32 inner_id = 0;
+
+		memset(&got, 0, sizeof(got));
+		if (bpf_map_lookup_elem(env.rule_block_map_fd, &inactive_slot,
+					&inner_id) != 0) {
+			fprintf(stderr, "look up installed inner: %s\n",
+				strerror(errno));
+			err = -1;
+		} else if ((got_fd = bpf_map_get_fd_by_id(inner_id)) < 0) {
+			fprintf(stderr, "fd for installed inner id: %s\n",
+				strerror(errno));
+			err = -1;
+		} else if (bpf_map_lookup_elem(got_fd, &service_id, &got) != 0) {
+			fprintf(stderr, "read key back from inner: %s\n",
+				strerror(errno));
+			err = -1;
+		} else if (got.version != 7 || got.rule_count != 1 ||
+			   got.rules[0].flags != RULE_F_ENABLED) {
+			fprintf(stderr, "installed inner read-back mismatch\n");
+			err = -1;
+		}
+	}
+
+	if (got_fd >= 0)
+		close(got_fd);
+	if (fresh_fd >= 0)
+		close(fresh_fd);
+	env_close(&env);
+	return err;
+}
+
 int main(void)
 {
 		const struct test_case tests[] = {
 			{ "config maps load", test_config_maps_load },
+		{ "apply fresh inner install round-trips",
+		  test_apply_fresh_inner_install },
 			{ "fair committed spin lock mutates tokens",
 			  test_fair_committed_spin_lock_mutates_tokens },
 			{ "ingress cap under limit continues",
