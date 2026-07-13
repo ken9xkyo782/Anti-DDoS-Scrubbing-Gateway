@@ -3,16 +3,13 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth/AuthContext'
 import { AppLayout } from './layout/AppLayout'
 import { LoginPage } from './pages/LoginPage'
+import { TenantDashboard } from './pages/TenantDashboard'
 import { ProtectedRoute } from './routes/ProtectedRoute'
 
 function DashboardLanding() {
   const { principal } = useAuth()
 
   return <Navigate to={principal?.role === 'admin' ? '/admin' : '/tenant'} replace />
-}
-
-function TenantDashboardPlaceholder() {
-  return <h1>Tenant dashboard</h1>
 }
 
 function AdminDashboardPlaceholder() {
@@ -32,7 +29,7 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route index element={<DashboardLanding />} />
           <Route element={<ProtectedRoute allowedRoles={['tenant_user']} />}>
-            <Route path="/tenant" element={<TenantDashboardPlaceholder />} />
+            <Route path="/tenant" element={<TenantDashboard />} />
           </Route>
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
             <Route path="/admin" element={<AdminDashboardPlaceholder />} />

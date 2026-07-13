@@ -38,7 +38,7 @@ Do not use the historic counts below as a current baseline.
 | T9 | Complete | full CP gate: 444 passed |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
 | T8 | Complete | full CP gate: 448 passed |
-| T11 | Queued | Execute after T9; runs in parallel with T8 |
+| T11 | Complete | FE gate: 5 files / 8 tests passed |
 | T12 | Queued | Execute after T11, including production SPA serving |
 | T13–T15 | Deferred | P2 is out of the approved P1 execution scope |
 | T16 | Deferred | P3 is out of the approved P1 execution scope |
@@ -337,10 +337,10 @@ Phase 8 — Docs
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] `TenantDashboard` lists the tenant's services and renders `ServiceTelemetryPanel` (clean-vs-drop, drop-reason distribution chart, pps/bps tiles)
-- [ ] `useServiceTelemetry(id)` (TanStack `refetchInterval:2000`) updates in place; `StalenessBadge` from `window_start`/`stale`; loading/empty/error states
-- [ ] Vitest unit: panel renders from mock payload; staleness badge shows on stale/`has_data:false`; poll interval configured
-- [ ] Gate passes: `fe` — `B_fe + N`
+- [x] `TenantDashboard` lists the tenant's services and renders `ServiceTelemetryPanel` (clean-vs-drop, drop-reason distribution chart, pps/bps tiles)
+- [x] `useServiceTelemetry(id)` (TanStack `refetchInterval:2000`) updates in place; `StalenessBadge` from `window_start`/`stale`; loading/empty/error states
+- [x] Vitest unit: panel renders from mock payload; staleness badge shows on stale/`has_data:false`; poll interval configured
+- [x] Gate passes: `fe` — 5 files / 8 tests passed
 
 **Tests**: fe-unit
 **Gate**: fe
