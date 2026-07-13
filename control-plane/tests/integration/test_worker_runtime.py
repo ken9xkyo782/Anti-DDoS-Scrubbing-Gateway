@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import uuid
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -17,14 +18,18 @@ from app.db.models import (
     FeedSyncRun,
     FeedSyncStatus,
     JobStatus,
+    NodeHealthSnapshot,
     ProtectedService,
     Tenant,
+    XdpMode,
 )
 from app.db.session import session_scope
 from app.services.apply import enqueue_service_update
 from app.services.feeds import create_source, enqueue_sync
 from app.worker.applier import GlobalDenyApplyResult, ServiceConfig
 from app.worker.feed_runner import FeedRunner
+from app.worker.telemetry import TelemetryAggregator
+from app.worker.telemetry_reader import FakeTelemetryReader, NodeCounters, TelemetrySnapshot
 from app.worker.worker import Worker
 
 pytestmark = pytest.mark.integration
@@ -56,7 +61,7 @@ class NoopGlobalApplier:
         return GlobalDenyApplyResult(active_slot=0, node_map_version=0)
 
 
-def runtime_settings(**values: float) -> Settings:
+def runtime_settings(**values: object) -> Settings:
     return Settings(
         worker_poll_timeout_seconds=0.05,
         worker_reconcile_interval_seconds=0.05,
@@ -336,6 +341,95 @@ async def test_worker_logs_effective_configuration_at_startup(
 
     assert "Worker starting" in caplog.text
     assert caplog.records[-1].queue_key == "apply:jobs"
+
+
+async def test_worker_runs_and_stops_the_telemetry_lane(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    snapshot = TelemetrySnapshot(
+        ts_ns=1_000_000_000,
+        active_slot=0,
+        active_version=1,
+        xdp_mode="native",
+        xdp_prog_id=1,
+        xdp_ifindex=2,
+        node=NodeCounters(
+            counters={"map_error": 0},
+            sample_stats={},
+            bloom_stats={},
+        ),
+        services=(),
+    )
+    telemetry = TelemetryAggregator(
+        reader=FakeTelemetryReader(snapshots=[snapshot]),
+        session_factory=committed_db,
+        interval_seconds=1,
+        retention_seconds=60,
+        node_clean_capacity_gbps=Decimal("40"),
+    )
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(worker_telemetry_interval_seconds=1),
+        redis=redis_client,
+        session_factory=committed_db,
+        telemetry=telemetry,
+    )
+    task = asyncio.create_task(worker.run(stop))
+
+    for _ in range(100):
+        async with committed_db() as db:
+            health = await db.scalar(select(NodeHealthSnapshot))
+        if health is not None:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("Telemetry lane did not persist a health snapshot")
+
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
+    assert health.xdp_mode is XdpMode.native
+
+
+async def test_telemetry_lane_failure_does_not_stop_job_processing(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    started = asyncio.Event()
+
+    class FailingTelemetry:
+        async def run_loop(self, _stop: asyncio.Event) -> None:
+            started.set()
+            raise RuntimeError("telemetry lane failed")
+
+    applier = RecordingApplier()
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(),
+        redis=redis_client,
+        session_factory=committed_db,
+        applier=applier,
+        telemetry=FailingTelemetry(),  # type: ignore[arg-type]
+    )
+    task = asyncio.create_task(worker.run(stop))
+
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        _, job_id = await enqueue_job("runtime-telemetry-isolation")
+        await asyncio.wait_for(applier.applied.wait(), timeout=2)
+        await asyncio.wait_for(
+            wait_for_job_status(committed_db, job_id, JobStatus.succeeded),
+            timeout=2,
+        )
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2)
 
 
 async def _noop() -> None:

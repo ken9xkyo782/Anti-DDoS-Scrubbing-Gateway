@@ -37,7 +37,7 @@ Do not use the historic counts below as a current baseline.
 | T7 | Complete | full CP gate: 441 passed |
 | T9 | Complete | full CP gate: 444 passed |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
-| T8 | Queued | Execute after T9; runs in parallel with T11 |
+| T8 | Complete | full CP gate: 448 passed |
 | T11 | Queued | Execute after T9; runs in parallel with T8 |
 | T12 | Queued | Execute after T11, including production SPA serving |
 | T13–T15 | Deferred | P2 is out of the approved P1 execution scope |
@@ -268,11 +268,11 @@ Phase 8 — Docs
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] `Worker.__init__` takes optional `telemetry`; `run()` spawns `telemetry.run_loop(stop)` before the main loop and awaits/cancels it in `finally` (mirrors feed lane); job processing unaffected when the lane errors
-- [ ] `__main__._run_worker` builds `TelemetryReader`+`TelemetryAggregator` from settings and injects them (skipped when `worker_telemetry_enabled=False`)
-- [ ] `Settings`: `worker_telemetry_enabled=True`, integer `worker_telemetry_interval_seconds=2` constrained to 1–2 inclusive, `worker_telemetry_retention_seconds`, `worker_telemetry_binary_path`, `worker_telemetry_ifindex: int|None`, `worker_telemetry_timeout_seconds=5.0`
-- [ ] Integration: runtime with a `FakeTelemetryReader` produces rows on the cadence and cancels cleanly on stop; a raising aggregator does not stop job processing. Unit: settings defaults
-- [ ] Gate passes: `full` — count = prior + N
+- [x] `Worker.__init__` takes optional `telemetry`; `run()` spawns `telemetry.run_loop(stop)` before the main loop and awaits/cancels it in `finally` (mirrors feed lane); job processing unaffected when the lane errors
+- [x] `__main__._run_worker` builds `TelemetryReader`+`TelemetryAggregator` from settings and injects them (skipped when `worker_telemetry_enabled=False`)
+- [x] `Settings`: `worker_telemetry_enabled=True`, integer `worker_telemetry_interval_seconds=2` constrained to 1–2 inclusive, `worker_telemetry_retention_seconds`, `worker_telemetry_binary_path`, `worker_telemetry_ifindex: int|None`, `worker_telemetry_timeout_seconds=5.0`
+- [x] Integration: runtime with a `FakeTelemetryReader` produces rows on the cadence and cancels cleanly on stop; a raising aggregator does not stop job processing. Unit: settings defaults
+- [x] Gate passes: `full` — 448 passed
 
 **Tests**: integration
 **Gate**: full

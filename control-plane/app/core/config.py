@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     worker_shutdown_grace_seconds: float = Field(default=10.0, gt=0)
     worker_apply_binary_path: str = "../data-plane/build/xdpgw-apply"
     worker_apply_timeout_seconds: float = Field(default=5.0, gt=0)
+    worker_telemetry_enabled: bool = True
+    worker_telemetry_interval_seconds: int = Field(default=2, ge=1, le=2)
+    worker_telemetry_retention_seconds: int = Field(default=7 * 24 * 60 * 60, gt=0)
+    worker_telemetry_binary_path: str = "../data-plane/build/dpstat"
+    worker_telemetry_ifindex: int | None = Field(default=None, ge=0)
+    worker_telemetry_timeout_seconds: float = Field(default=5.0, gt=0)
 
     feed_fetch_connect_timeout_seconds: float = Field(default=5.0, gt=0)
     feed_fetch_read_timeout_seconds: float = Field(default=10.0, gt=0)

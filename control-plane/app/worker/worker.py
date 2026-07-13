@@ -2,6 +2,7 @@ import asyncio
 import logging
 import signal
 import uuid
+from typing import Protocol
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -24,6 +25,10 @@ from app.worker.processor import claim_job, process_job, reconcile_once
 logger = logging.getLogger(__name__)
 
 
+class TelemetryLane(Protocol):
+    async def run_loop(self, stop: asyncio.Event) -> None: ...
+
+
 class Worker:
     def __init__(
         self,
@@ -33,12 +38,14 @@ class Worker:
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         applier: Applier | None = None,
         feed_runner: FeedRunner | None = None,
+        telemetry: TelemetryLane | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
         self.session_factory = session_factory or get_session_factory()
         self.applier = applier or PlaceholderApplier()
         self.feed_runner = feed_runner
+        self.telemetry = telemetry
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         stop_event = stop or asyncio.Event()
@@ -50,6 +57,11 @@ class Worker:
         )
         if self.feed_runner is not None:
             configure_feed_runner(self.feed_runner)
+        telemetry_task = (
+            asyncio.create_task(self.telemetry.run_loop(stop_event))
+            if self.telemetry is not None
+            else None
+        )
         inflight: asyncio.Task[object] | None = None
         backoff: float | None = None
         redis_degraded = False
@@ -63,6 +75,7 @@ class Worker:
                 "reconcile_interval_seconds": self.settings.worker_reconcile_interval_seconds,
                 "backoff_initial_seconds": self.settings.worker_backoff_initial_seconds,
                 "backoff_max_seconds": self.settings.worker_backoff_max_seconds,
+                "telemetry_enabled": self.telemetry is not None,
             },
         )
 
@@ -223,9 +236,11 @@ class Worker:
                 next_reconcile = asyncio.get_running_loop().time()
                 next_reconcile += self.settings.worker_reconcile_interval_seconds
         finally:
+            stop_event.set()
             self._remove_signal_handlers(installed_signals)
             await self._finish_inflight(inflight)
             try:
+                await self._finish_background_lane(telemetry_task)
                 await self._finish_inflight(
                     feed_coordinator.inflight_task if feed_coordinator is not None else None
                 )
@@ -422,6 +437,31 @@ class Worker:
             logger.warning("Worker shutdown grace elapsed; leaving job applying for recovery")
             task.cancel()
             await self._discard_cancelled(task)
+
+    async def _finish_background_lane(self, task: asyncio.Task[None] | None) -> None:
+        if task is None:
+            return
+        if not task.done():
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=self.settings.worker_shutdown_grace_seconds,
+                )
+            except TimeoutError:
+                logger.warning("Telemetry lane did not stop during worker shutdown")
+                task.cancel()
+                await self._discard_cancelled(task)
+                return
+            except Exception:
+                logger.exception("Telemetry lane stopped with an error")
+                return
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Telemetry lane stopped with an error")
 
     @staticmethod
     async def _discard_cancelled(task: asyncio.Task[object]) -> None:
