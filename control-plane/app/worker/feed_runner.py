@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import uuid
@@ -27,6 +28,7 @@ from app.services.feed_reconcile import (
     load_global_snapshot,
     reconcile,
 )
+from app.worker.feed_coordinator import FeedFetchCompletion
 from app.worker.feed_jobs import JOB_LIFECYCLES
 
 logger = logging.getLogger(__name__)
@@ -67,30 +69,100 @@ class FeedRunner:
     global_applier: GlobalDenyApplier
 
     async def handle_feed_sync(self, job: AgentJob) -> None:
+        """Run a feed synchronously for direct processor callers."""
         started = time.monotonic()
-        metrics = _RunMetrics()
-        run_id = job.feed_sync_run_id
         source_id: uuid.UUID | None = None
-        status = FeedSyncStatus.failed
 
         try:
-            loaded = await self._load_run_and_source(run_id)
-            if loaded is None:
+            source = await self.load_source_for_fetch(job)
+            if source is None:
                 await self._finish_feed(job.id, FeedSyncStatus.success, node_map_version=None)
-                status = FeedSyncStatus.success
+                self._log_summary(
+                    source_id=None,
+                    run_id=job.feed_sync_run_id,
+                    metrics=_RunMetrics(),
+                    duration_ms=_duration_ms(started),
+                    status=FeedSyncStatus.success,
+                )
                 return
-
-            run, source = loaded
             source_id = source.id
+            try:
+                body = await self.fetch_source(source)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                completion = FeedFetchCompletion(
+                    job=job,
+                    source_id=source.id,
+                    started=started,
+                    body=None,
+                    error=exc,
+                )
+            else:
+                completion = FeedFetchCompletion(
+                    job=job,
+                    source_id=source.id,
+                    started=started,
+                    body=body,
+                    error=None,
+                )
+            await self.complete_feed_fetch(completion)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._fail_feed(job.id, exc)
+            self._log_summary(
+                source_id=source_id,
+                run_id=job.feed_sync_run_id,
+                metrics=_RunMetrics(),
+                duration_ms=_duration_ms(started),
+                status=FeedSyncStatus.failed,
+            )
 
-            fetched = await fetch_line_list(source, self.client, self.settings)
-            parsed = parse_line_list(fetched.body)
+    async def load_source_for_fetch(self, job: AgentJob) -> ThreatFeedSource | None:
+        loaded = await self._load_run_and_source(job.feed_sync_run_id)
+        if loaded is None:
+            return None
+        _, source = loaded
+        return source
+
+    async def finish_missing_feed(self, job: AgentJob) -> None:
+        started = time.monotonic()
+        await self._finish_feed(job.id, FeedSyncStatus.success, node_map_version=None)
+        self._log_summary(
+            source_id=None,
+            run_id=job.feed_sync_run_id,
+            metrics=_RunMetrics(),
+            duration_ms=_duration_ms(started),
+            status=FeedSyncStatus.success,
+        )
+
+    async def fetch_source(self, source: ThreatFeedSource) -> bytes:
+        fetched = await fetch_line_list(source, self.client, self.settings)
+        return fetched.body
+
+    async def complete_feed_fetch(self, completion: FeedFetchCompletion) -> None:
+        """Parse, reconcile, apply, and finish a completed network fetch."""
+        metrics = _RunMetrics()
+        status = FeedSyncStatus.failed
+        job = completion.job
+
+        try:
+            if completion.error is not None:
+                raise completion.error
+            if completion.body is None:
+                raise RuntimeError("Feed fetch completed without a response body")
+
+            parsed = parse_line_list(completion.body)
             _set_parse_metrics(metrics, parsed)
             if parsed.outcome == ParseOutcome.failed:
-                await self._store_failed_parse_stats(run.id, parsed)
+                if job.feed_sync_run_id is not None:
+                    await self._store_failed_parse_stats(job.feed_sync_run_id, parsed)
                 raise FeedParseError(_parse_failure_message(parsed))
 
-            result, desired_revision = await self._reconcile(run.id, parsed)
+            if job.feed_sync_run_id is None:
+                raise RuntimeError("Feed sync job is missing its run")
+            result, desired_revision = await self._reconcile(job.feed_sync_run_id, parsed)
             _set_reconcile_metrics(metrics, result)
             node_map_version: int | None = None
             if desired_revision is not None:
@@ -104,15 +176,16 @@ class FeedRunner:
                 else FeedSyncStatus.success
             )
             await self._finish_feed(job.id, status, node_map_version=node_map_version)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             await self._fail_feed(job.id, exc)
-            raise
         finally:
             self._log_summary(
-                source_id=source_id,
-                run_id=run_id,
+                source_id=completion.source_id,
+                run_id=job.feed_sync_run_id,
                 metrics=metrics,
-                duration_ms=_duration_ms(started),
+                duration_ms=_duration_ms(completion.started),
                 status=status,
             )
 

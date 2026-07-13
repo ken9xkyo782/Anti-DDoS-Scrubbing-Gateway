@@ -5,17 +5,21 @@ import uuid
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.redis import close_redis_client, get_redis_client
-from app.db.models import utc_now
+from app.db.models import AgentJob, JobStatus, JobType, utc_now
 from app.db.session import dispose_engine, get_session_factory
 from app.services.apply import APPLY_QUEUE_KEY
 from app.worker.applier import Applier, PlaceholderApplier
+from app.worker.feed_coordinator import FeedCoordinator, FeedFetchCompletion
+from app.worker.feed_runner import FeedRunner
 from app.worker.feed_scheduler import enqueue_due_feed_syncs
-from app.worker.processor import process_job, reconcile_once
+from app.worker.handlers import configure_feed_runner
+from app.worker.processor import claim_job, process_job, reconcile_once
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +32,24 @@ class Worker:
         redis: Redis | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         applier: Applier | None = None,
+        feed_runner: FeedRunner | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
         self.session_factory = session_factory or get_session_factory()
         self.applier = applier or PlaceholderApplier()
+        self.feed_runner = feed_runner
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         stop_event = stop or asyncio.Event()
         installed_signals = self._install_signal_handlers(stop_event)
+        feed_coordinator = (
+            FeedCoordinator(fetch=self.feed_runner.fetch_source)
+            if self.feed_runner is not None
+            else None
+        )
+        if self.feed_runner is not None:
+            configure_feed_runner(self.feed_runner)
         inflight: asyncio.Task[object] | None = None
         backoff: float | None = None
         redis_degraded = False
@@ -65,6 +78,7 @@ class Worker:
                         session_factory=self.session_factory,
                         applier=self.applier,
                         include_orphans=True,
+                        exclude_feed_sync=feed_coordinator is not None,
                     )
                 )
                 try:
@@ -82,8 +96,24 @@ class Worker:
                 asyncio.get_running_loop().time() + self.settings.worker_reconcile_interval_seconds
             )
             while not stop_event.is_set():
+                if feed_coordinator is not None and not feed_coordinator.busy:
+                    started_feed_fetch = await self._start_next_feed_fetch(feed_coordinator)
+                    if started_feed_fetch:
+                        continue
+
+                completion: FeedFetchCompletion | None = None
                 try:
-                    job_id = await self._wait_for_pop(stop_event)
+                    if feed_coordinator is not None and feed_coordinator.busy:
+                        if feed_coordinator.completion_queue.empty():
+                            job_id, completion = await self._wait_for_work(
+                                stop_event,
+                                feed_coordinator,
+                            )
+                        else:
+                            job_id = None
+                            completion = await feed_coordinator.next_completion()
+                    else:
+                        job_id = await self._wait_for_pop(stop_event)
                 except RedisError:
                     if not redis_degraded:
                         logger.warning("Redis unavailable; degrading to ledger reconciliation")
@@ -98,6 +128,7 @@ class Worker:
                             session_factory=self.session_factory,
                             applier=self.applier,
                             include_orphans=False,
+                            exclude_feed_sync=feed_coordinator is not None,
                         )
                     )
                     try:
@@ -123,7 +154,30 @@ class Worker:
                     redis_degraded = False
                 backoff = None
 
+                if completion is not None:
+                    inflight = asyncio.create_task(
+                        self._complete_feed_fetch(feed_coordinator, completion)
+                    )
+                    try:
+                        stopping = await self._stop_or_finish(inflight, stop_event)
+                    except OperationalError:
+                        inflight = None
+                        backoff = await self._back_off(
+                            stop_event,
+                            backoff,
+                            "feed completion processing",
+                        )
+                        continue
+                    if stopping:
+                        break
+                    inflight = None
+                    continue
+
                 if job_id is not None:
+                    if feed_coordinator is not None and await self._is_feed_sync_job(job_id):
+                        if not feed_coordinator.busy:
+                            await self._start_feed_fetch(job_id, feed_coordinator)
+                        continue
                     inflight = asyncio.create_task(
                         process_job(
                             job_id,
@@ -154,6 +208,7 @@ class Worker:
                         session_factory=self.session_factory,
                         applier=self.applier,
                         include_orphans=False,
+                        exclude_feed_sync=feed_coordinator is not None,
                     )
                 )
                 try:
@@ -171,8 +226,15 @@ class Worker:
             self._remove_signal_handlers(installed_signals)
             await self._finish_inflight(inflight)
             try:
+                await self._finish_inflight(
+                    feed_coordinator.inflight_task if feed_coordinator is not None else None
+                )
+                if self.feed_runner is not None:
+                    await self.feed_runner.client.aclose()
                 await close_redis_client()
             finally:
+                if self.feed_runner is not None:
+                    configure_feed_runner(None)
                 await dispose_engine()
 
     async def _schedule_due_feeds(
@@ -186,6 +248,58 @@ class Worker:
         except OperationalError:
             return await self._back_off(stop, current_backoff, operation)
         return None
+
+    async def _start_next_feed_fetch(self, coordinator: FeedCoordinator) -> bool:
+        async with self.session_factory() as db:
+            job_id = await db.scalar(
+                select(AgentJob.id)
+                .where(
+                    AgentJob.job_type == JobType.feed_sync,
+                    AgentJob.status == JobStatus.queued,
+                )
+                .order_by(AgentJob.created_at.asc(), AgentJob.id.asc())
+                .limit(1)
+            )
+        if job_id is None:
+            return False
+        return await self._start_feed_fetch(job_id, coordinator)
+
+    async def _start_feed_fetch(self, job_id: uuid.UUID, coordinator: FeedCoordinator) -> bool:
+        if self.feed_runner is None or coordinator.busy:
+            return False
+
+        job = await claim_job(job_id)
+        if job is None:
+            return False
+        if job.job_type != JobType.feed_sync:
+            raise RuntimeError("feed fetch lane claimed a non-feed job")
+
+        source = await self.feed_runner.load_source_for_fetch(job)
+        if source is None:
+            await self.feed_runner.finish_missing_feed(job)
+            return True
+        if not coordinator.start(job, source):
+            raise RuntimeError("feed fetch lane became unavailable after claim")
+        return True
+
+    async def _complete_feed_fetch(
+        self,
+        coordinator: FeedCoordinator | None,
+        completion: FeedFetchCompletion,
+    ) -> None:
+        if self.feed_runner is None or coordinator is None:
+            raise RuntimeError("feed completion arrived without feed dependencies")
+        try:
+            await self.feed_runner.complete_feed_fetch(completion)
+        finally:
+            coordinator.release(completion)
+
+    async def _is_feed_sync_job(self, job_id: uuid.UUID) -> bool:
+        async with self.session_factory() as db:
+            return (
+                await db.scalar(select(AgentJob.job_type).where(AgentJob.id == job_id))
+                == JobType.feed_sync
+            )
 
     async def _brpop(self) -> uuid.UUID | None:
         result = await self.redis.brpop(
@@ -245,6 +359,43 @@ class Worker:
         stop_task.cancel()
         await self._discard_cancelled(stop_task)
         return await pop_task
+
+    async def _wait_for_work(
+        self,
+        stop: asyncio.Event,
+        coordinator: FeedCoordinator,
+    ) -> tuple[uuid.UUID | None, FeedFetchCompletion | None]:
+        pop_task = asyncio.create_task(self._brpop())
+        stop_task = asyncio.create_task(stop.wait())
+        completion_task = asyncio.create_task(coordinator.next_completion())
+        done, _ = await asyncio.wait(
+            {pop_task, stop_task, completion_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done:
+            if not pop_task.done():
+                pop_task.cancel()
+                await self._discard_cancelled(pop_task)
+            if not completion_task.done():
+                completion_task.cancel()
+                await self._discard_cancelled(completion_task)
+            return None, None
+        if completion_task in done:
+            if not pop_task.done():
+                pop_task.cancel()
+                await self._discard_cancelled(pop_task)
+            if not stop_task.done():
+                stop_task.cancel()
+                await self._discard_cancelled(stop_task)
+            return None, await completion_task
+
+        if not stop_task.done():
+            stop_task.cancel()
+            await self._discard_cancelled(stop_task)
+        if not completion_task.done():
+            completion_task.cancel()
+            await self._discard_cancelled(completion_task)
+        return await pop_task, None
 
     async def _stop_or_finish(self, task: asyncio.Task[object], stop: asyncio.Event) -> bool:
         stop_task = asyncio.create_task(stop.wait())

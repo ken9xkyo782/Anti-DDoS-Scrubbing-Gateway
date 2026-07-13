@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import AgentJob, JobStatus
+from app.db.models import AgentJob, JobStatus, JobType
 from app.db.session import session_scope
 from app.worker.applier import Applier
 from app.worker.feed_jobs import JOB_LIFECYCLES
@@ -17,6 +17,22 @@ logger = logging.getLogger(__name__)
 TERMINAL_MARK_ATTEMPTS: Final = 3
 
 
+async def claim_job(job_id: uuid.UUID) -> AgentJob | None:
+    """Claim one durable job before handing its work to a worker lane."""
+    async with session_scope() as db:
+        job = await db.get(AgentJob, job_id)
+        if job is None:
+            logger.warning("Apply job missing from ledger", extra={"job_id": str(job_id)})
+            return None
+
+        lifecycle = JOB_LIFECYCLES[job.job_type]
+        proceed = await lifecycle.claim(db, job)
+
+    if not proceed:
+        return None
+    return job
+
+
 async def process_job(
     job_id: uuid.UUID,
     *,
@@ -24,16 +40,8 @@ async def process_job(
     applier: Applier,
 ) -> None:
     """Process one durable job without holding a transaction across its handler."""
-    async with session_scope() as db:
-        job = await db.get(AgentJob, job_id)
-        if job is None:
-            logger.warning("Apply job missing from ledger", extra={"job_id": str(job_id)})
-            return
-
-        lifecycle = JOB_LIFECYCLES[job.job_type]
-        proceed = await lifecycle.claim(db, job)
-
-    if not proceed:
+    job = await claim_job(job_id)
+    if job is None:
         return
 
     error: str | None = None
@@ -61,15 +69,17 @@ async def reconcile_once(
     session_factory: async_sessionmaker[AsyncSession],
     applier: Applier,
     include_orphans: bool,
+    exclude_feed_sync: bool = False,
 ) -> int:
     """Process queued work and optionally recover startup-time applying orphans."""
     async with session_factory() as db:
+        queued_statement = select(AgentJob.id).where(AgentJob.status == JobStatus.queued)
+        if exclude_feed_sync:
+            queued_statement = queued_statement.where(AgentJob.job_type != JobType.feed_sync)
         queued_ids = list(
             (
                 await db.scalars(
-                    select(AgentJob.id)
-                    .where(AgentJob.status == JobStatus.queued)
-                    .order_by(AgentJob.created_at.asc(), AgentJob.id.asc())
+                    queued_statement.order_by(AgentJob.created_at.asc(), AgentJob.id.asc())
                 )
             ).all()
         )
