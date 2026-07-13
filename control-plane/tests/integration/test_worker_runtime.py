@@ -3,15 +3,28 @@ import logging
 import time
 import uuid
 
+import httpx
 import pytest
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.db.models import AgentJob, ApplyStatus, ChangeTrigger, JobStatus, ProtectedService, Tenant
+from app.db.models import (
+    AgentJob,
+    ApplyStatus,
+    ChangeTrigger,
+    FeedSyncRun,
+    FeedSyncStatus,
+    JobStatus,
+    ProtectedService,
+    Tenant,
+)
 from app.db.session import session_scope
 from app.services.apply import enqueue_service_update
-from app.worker.applier import ServiceConfig
+from app.services.feeds import create_source, enqueue_sync
+from app.worker.applier import GlobalDenyApplyResult, ServiceConfig
+from app.worker.feed_runner import FeedRunner
 from app.worker.worker import Worker
 
 pytestmark = pytest.mark.integration
@@ -35,6 +48,12 @@ class BarrierApplier:
         del config
         self.entered.set()
         await self.release.wait()
+
+
+class NoopGlobalApplier:
+    async def apply_global(self, snapshot: object) -> GlobalDenyApplyResult:
+        del snapshot
+        return GlobalDenyApplyResult(active_slot=0, node_map_version=0)
 
 
 def runtime_settings(**values: float) -> Settings:
@@ -74,6 +93,18 @@ async def get_job(
         return job
 
 
+async def wait_for_job_status(
+    session_factory: async_sessionmaker[AsyncSession],
+    job_id: uuid.UUID,
+    expected_status: JobStatus,
+) -> None:
+    for _ in range(500):
+        if (await get_job(session_factory, job_id)).status == expected_status:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Job {job_id} did not reach {expected_status}")
+
+
 async def get_service(
     session_factory: async_sessionmaker[AsyncSession],
     service_id: uuid.UUID,
@@ -82,6 +113,42 @@ async def get_service(
         service = await db.get(ProtectedService, service_id)
         assert service is not None
         return service
+
+
+async def enqueue_feed_job(name: str) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    async with session_scope() as db:
+        source = await create_source(
+            db,
+            {
+                "name": name,
+                "url": f"https://feeds.example.test/{name}.txt",
+                "sync_interval_seconds": 300,
+            },
+            actor=None,
+        )
+        run = await enqueue_sync(
+            db,
+            source,
+            trigger=ChangeTrigger.feed_manual,
+            dry_run=False,
+            actor=None,
+        )
+        job = await db.scalar(select(AgentJob).where(AgentJob.feed_sync_run_id == run.id))
+        assert job is not None
+    return source.id, run.id, job.id
+
+
+async def get_feed_records(
+    session_factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> tuple[FeedSyncRun, AgentJob]:
+    async with session_factory() as db:
+        run = await db.get(FeedSyncRun, run_id)
+        job = await db.get(AgentJob, job_id)
+        assert run is not None
+        assert job is not None
+        return run, job
 
 
 async def test_worker_brpop_processes_dispatched_job_and_exits_cleanly(
@@ -122,6 +189,78 @@ async def test_worker_brpop_processes_dispatched_job_and_exits_cleanly(
     assert service.apply_status == ApplyStatus.active
     assert service.active_version == 1
     assert job.status == JobStatus.succeeded
+
+
+async def test_worker_processes_service_while_feed_fetch_is_blocked(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    fetch_started = asyncio.Event()
+    keep_fetch_blocked = asyncio.Event()
+
+    async def barrier_fetch(request: httpx.Request) -> httpx.Response:
+        del request
+        fetch_started.set()
+        await keep_fetch_blocked.wait()
+        return httpx.Response(200, content=b"198.51.100.70\n")
+
+    _, first_run_id, first_job_id = await enqueue_feed_job("runtime-barrier-first")
+    _, queued_run_id, queued_job_id = await enqueue_feed_job("runtime-barrier-queued")
+    feed_runner = FeedRunner(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(barrier_fetch)),
+        settings=runtime_settings(),
+        global_applier=NoopGlobalApplier(),
+    )
+    service_applier = RecordingApplier()
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(),
+        redis=redis_client,
+        session_factory=committed_db,
+        applier=service_applier,
+        feed_runner=feed_runner,
+    )
+    worker_task = asyncio.create_task(worker.run(stop))
+
+    try:
+        await asyncio.wait_for(fetch_started.wait(), timeout=2)
+        started = time.monotonic()
+        service_id, service_job_id = await enqueue_job("runtime-feed-isolation")
+        await asyncio.wait_for(service_applier.applied.wait(), timeout=5)
+        await asyncio.wait_for(
+            wait_for_job_status(committed_db, service_job_id, JobStatus.succeeded),
+            timeout=5,
+        )
+
+        service = await get_service(committed_db, service_id)
+        service_job = await get_job(committed_db, service_job_id)
+        first_run, first_job = await get_feed_records(committed_db, first_run_id, first_job_id)
+        queued_run, queued_job = await get_feed_records(
+            committed_db,
+            queued_run_id,
+            queued_job_id,
+        )
+
+        assert time.monotonic() - started <= 5
+        assert (service.apply_status, service.active_version, service_job.status) == (
+            ApplyStatus.active,
+            1,
+            JobStatus.succeeded,
+        )
+        assert (first_run.status, first_job.status) == (
+            FeedSyncStatus.running,
+            JobStatus.applying,
+        )
+        assert (queued_run.status, queued_job.status) == (
+            FeedSyncStatus.queued,
+            JobStatus.queued,
+        )
+    finally:
+        stop.set()
+        await asyncio.wait_for(worker_task, timeout=2)
 
 
 async def test_worker_shutdown_timeout_leaves_applying_job_for_startup_recovery(
