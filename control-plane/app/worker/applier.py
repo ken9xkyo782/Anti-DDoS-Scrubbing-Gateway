@@ -1,5 +1,6 @@
 import asyncio
 import ipaddress
+import json
 import logging
 import os
 import struct
@@ -21,11 +22,14 @@ from app.db.models import (
     ServicePlan,
     WhitelistEntry,
 )
+from app.services.feed_reconcile import MAX_GLOBAL_DENY_ENTRIES, GlobalDenySnapshot
 
 logger = logging.getLogger(__name__)
 
 APPLY_SNAPSHOT_MAGIC = b"XDPGWAP1"
-APPLY_SNAPSHOT_SCHEMA_VERSION = 1
+APPLY_SNAPSHOT_SCHEMA_VERSION = 2
+APPLY_SNAPSHOT_KIND_SERVICE_FULL = 1
+APPLY_SNAPSHOT_KIND_GLOBAL_DENY = 2
 _GBPS = 1_000_000_000
 _WL_F_ACTIVE = 1 << 0
 _WL_F_HAS_BROAD = 1 << 1
@@ -81,6 +85,12 @@ class PlaceholderApplier:
 
 class ApplyError(RuntimeError):
     """The external apply helper did not complete a swap."""
+
+
+@dataclass(frozen=True, slots=True)
+class GlobalDenyApplyResult:
+    active_slot: int
+    node_map_version: int
 
 
 class DoubleBufferApplier:
@@ -148,6 +158,53 @@ class DoubleBufferApplier:
         )
 
 
+class GlobalDenyApplier:
+    """Run the v2 GLOBAL_DENY helper boundary without holding a DB transaction."""
+
+    def __init__(self, *, apply_bin: str, timeout_seconds: float) -> None:
+        self._apply_bin = apply_bin
+        self._timeout = timeout_seconds
+
+    async def apply_global(self, snapshot: GlobalDenySnapshot) -> GlobalDenyApplyResult:
+        snapshot_fd, snapshot_path = tempfile.mkstemp(prefix="xdpgw-global-deny-", suffix=".bin")
+        try:
+            os.fchmod(snapshot_fd, 0o600)
+            with os.fdopen(snapshot_fd, "wb") as snapshot_file:
+                snapshot_file.write(serialize_global_snapshot(snapshot))
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    self._apply_bin,
+                    snapshot_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except OSError as exc:
+                raise ApplyError(f"unable to start xdpgw-apply: {exc}") from exc
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=self._timeout
+                )
+            except TimeoutError as exc:
+                process.kill()
+                _, stderr = await process.communicate()
+                detail = _stderr_text(stderr)
+                message = "xdpgw-apply timed out"
+                if detail:
+                    message = f"{message}: {detail}"
+                raise ApplyError(message) from exc
+
+            if process.returncode != 0:
+                detail = _stderr_text(stderr)
+                if not detail:
+                    detail = f"exit status {process.returncode}"
+                raise ApplyError(detail)
+            return _parse_global_apply_result(stdout)
+        finally:
+            os.unlink(snapshot_path)
+
+
 async def load_service_config(
     db: AsyncSession,
     service_id: uuid.UUID,
@@ -197,10 +254,17 @@ async def load_node_config(db: AsyncSession) -> tuple[ServiceConfig, ...]:
 
 
 def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
-    """Encode the explicit v1 apply_snapshot.h wire format."""
+    """Encode the explicit v2 SERVICE_FULL apply_snapshot.h wire format."""
     payload = bytearray()
     payload.extend(APPLY_SNAPSHOT_MAGIC)
-    payload.extend(struct.pack("<II", APPLY_SNAPSHOT_SCHEMA_VERSION, len(node)))
+    payload.extend(
+        struct.pack(
+            "<III",
+            APPLY_SNAPSHOT_SCHEMA_VERSION,
+            APPLY_SNAPSHOT_KIND_SERVICE_FULL,
+            len(node),
+        )
+    )
     for service in node:
         dst_prefixlen, dst_addr = _cidr_parts(service.cidr_or_ip)
         whitelist = tuple(_cidr_parts(entry.source_cidr) for entry in service.whitelist)
@@ -244,6 +308,27 @@ def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
     return bytes(payload)
 
 
+def serialize_global_snapshot(snapshot: GlobalDenySnapshot) -> bytes:
+    """Encode sorted canonical global CIDRs for the v2 GLOBAL_DENY helper mode."""
+    if len(snapshot.cidrs) > MAX_GLOBAL_DENY_ENTRIES:
+        raise ValueError(f"Global deny entry limit is {MAX_GLOBAL_DENY_ENTRIES}")
+
+    entries = tuple(sorted(_strict_ipv4_cidr_parts(cidr) for cidr in snapshot.cidrs))
+    payload = bytearray(APPLY_SNAPSHOT_MAGIC)
+    payload.extend(
+        struct.pack(
+            "<IIQI",
+            APPLY_SNAPSHOT_SCHEMA_VERSION,
+            APPLY_SNAPSHOT_KIND_GLOBAL_DENY,
+            snapshot.revision,
+            len(entries),
+        )
+    )
+    for prefixlen, address in entries:
+        payload.extend(struct.pack("<I4s", prefixlen, address))
+    return bytes(payload)
+
+
 def _service_config(service: ProtectedService) -> ServiceConfig:
     return ServiceConfig(
         service_id=service.id,
@@ -266,6 +351,13 @@ def _cidr_parts(cidr: str) -> tuple[int, bytes]:
     network = ipaddress.ip_network(cidr, strict=False)
     if network.version != 4:
         raise ValueError(f"apply snapshots require IPv4 CIDRs: {cidr}")
+    return network.prefixlen, network.network_address.packed
+
+
+def _strict_ipv4_cidr_parts(cidr: str) -> tuple[int, bytes]:
+    network = ipaddress.ip_network(cidr, strict=True)
+    if network.version != 4:
+        raise ValueError(f"global deny snapshots require IPv4 CIDRs: {cidr}")
     return network.prefixlen, network.network_address.packed
 
 
@@ -307,3 +399,28 @@ def _append_source_list(payload: bytearray, entries: tuple[tuple[int, bytes], ..
 
 def _stderr_text(stderr: bytes) -> str:
     return stderr.decode(errors="replace").strip()
+
+
+def _parse_global_apply_result(stdout: bytes) -> GlobalDenyApplyResult:
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ApplyError("xdpgw-apply returned malformed global apply result") from exc
+    if not isinstance(payload, dict) or set(payload) != {"active_slot", "node_map_version"}:
+        raise ApplyError("xdpgw-apply returned malformed global apply result")
+
+    active_slot = payload["active_slot"]
+    node_map_version = payload["node_map_version"]
+    if (
+        isinstance(active_slot, bool)
+        or not isinstance(active_slot, int)
+        or active_slot not in {0, 1}
+        or isinstance(node_map_version, bool)
+        or not isinstance(node_map_version, int)
+        or node_map_version < 0
+    ):
+        raise ApplyError("xdpgw-apply returned malformed global apply result")
+    return GlobalDenyApplyResult(
+        active_slot=active_slot,
+        node_map_version=node_map_version,
+    )

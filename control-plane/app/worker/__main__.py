@@ -4,16 +4,9 @@ import logging
 from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.services.feed_fetch import create_feed_client
-from app.services.feed_reconcile import GlobalDenySnapshot
-from app.worker.applier import DoubleBufferApplier
-from app.worker.feed_runner import FeedRunner, GlobalDenyApplyResult
+from app.worker.applier import DoubleBufferApplier, GlobalDenyApplier
+from app.worker.feed_runner import FeedRunner
 from app.worker.worker import Worker
-
-
-class _UnavailableGlobalDenyApplier:
-    async def apply_global(self, snapshot: GlobalDenySnapshot) -> GlobalDenyApplyResult:
-        del snapshot
-        raise RuntimeError("global deny applier is not configured")
 
 
 async def _run_worker() -> None:
@@ -22,7 +15,10 @@ async def _run_worker() -> None:
     runner = FeedRunner(
         client=client,
         settings=settings,
-        global_applier=_UnavailableGlobalDenyApplier(),
+        global_applier=GlobalDenyApplier(
+            apply_bin=settings.worker_apply_binary_path,
+            timeout_seconds=settings.worker_apply_timeout_seconds,
+        ),
     )
     await Worker(
         settings=settings,

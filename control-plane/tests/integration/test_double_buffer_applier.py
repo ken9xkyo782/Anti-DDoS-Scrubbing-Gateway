@@ -184,7 +184,8 @@ async def test_double_buffer_applier_builds_full_node_snapshot_and_marks_active(
     assert updated_service.active_version == 1
     assert updated_job.status == JobStatus.succeeded
     assert snapshot_record.read_bytes()[:8] == b"XDPGWAP1"
-    assert struct.unpack_from("<I", snapshot_record.read_bytes(), 12)[0] == 2
+    assert struct.unpack_from("<I", snapshot_record.read_bytes(), 12)[0] == 1
+    assert struct.unpack_from("<I", snapshot_record.read_bytes(), 16)[0] == 2
     assert stat.S_IMODE(int(mode_record.read_text())) == 0o600
     assert not await asyncio.to_thread(snapshot_path.exists)
 

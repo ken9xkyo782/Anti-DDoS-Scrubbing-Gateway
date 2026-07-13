@@ -28,16 +28,11 @@ from app.services.feed_reconcile import (
     load_global_snapshot,
     reconcile,
 )
+from app.worker.applier import GlobalDenyApplyResult
 from app.worker.feed_coordinator import FeedFetchCompletion
 from app.worker.feed_jobs import JOB_LIFECYCLES
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class GlobalDenyApplyResult:
-    active_slot: int
-    node_map_version: int
 
 
 class GlobalDenyApplier(Protocol):
@@ -245,7 +240,11 @@ class FeedRunner:
                 return None
             snapshot = await load_global_snapshot(db, expected_revision)
 
-        result = await self.global_applier.apply_global(snapshot)
+        try:
+            result = await self.global_applier.apply_global(snapshot)
+        except Exception as exc:
+            await self._mark_global_apply_failed(snapshot, exc)
+            raise
 
         async with session_scope() as db:
             state = await _locked_global_state(db)
@@ -262,6 +261,23 @@ class FeedRunner:
             state.last_node_map_version = result.node_map_version
             await db.flush()
         return result
+
+    async def _mark_global_apply_failed(
+        self,
+        snapshot: GlobalDenySnapshot,
+        error: Exception,
+    ) -> None:
+        async with session_scope() as db:
+            state = await _locked_global_state(db)
+            if (
+                state is None
+                or state.desired_revision != snapshot.revision
+                or state.desired_digest != snapshot.digest
+            ):
+                return
+            state.apply_status = ApplyStatus.failed
+            state.last_error = f"{type(error).__name__}: {error}"[:2_000]
+            await db.flush()
 
     async def _finish_feed(
         self,

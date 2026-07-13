@@ -60,4 +60,7 @@ def test_serialize_node_snapshot_matches_apply_snapshot_golden_fixture() -> None
         blacklist=(),
     )
 
-    assert serialize_node_snapshot((rich, minimal)) == GOLDEN_FIXTURE.read_bytes()
+    snapshot = serialize_node_snapshot((rich, minimal))
+
+    assert snapshot == GOLDEN_FIXTURE.read_bytes()
+    assert snapshot[8:20] == b"\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00"
