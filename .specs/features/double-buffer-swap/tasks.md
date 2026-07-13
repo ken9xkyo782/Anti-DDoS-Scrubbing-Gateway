@@ -143,22 +143,28 @@ proven before building the rest.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `parse_snapshot(path) -> node_cfg` validates magic + `schema_version` + bounds; rejects
+- [x] `parse_snapshot(path) -> node_cfg` validates magic + `schema_version` + bounds; rejects
       truncated/unknown input (fail-closed).
-- [ ] `create_inner_like(outer_fd, src_slot) -> fd` replicates meta via `bpf_map_get_info_by_fd` →
+- [x] `create_inner_like(outer_fd, src_slot) -> fd` replicates meta via `bpf_map_get_info_by_fd` →
       `bpf_map_create` (`btf_fd=0`); an installed fresh inner is readable and meta-equal.
-- [ ] **De-risk dp-unit** (in `test_parse.c` harness, in-process via skel fds): create a fresh inner for
+- [x] **De-risk dp-unit** (in `test_parse.c` harness, in-process via skel fds): create a fresh inner for
       one outer (e.g. `rule_block_map`), populate, `bpf_map_update_elem(outer, slot, fd)`, then look it up
       and read a key back — proves `map_meta_equal` + create + install.
-- [ ] `make apply` builds `build/xdpgw-apply` + `build/test_snapshot`; the latter parses
+- [x] `make apply` builds `build/xdpgw-apply` + `build/test_snapshot`; the latter parses
       `apply_snapshot_golden.bin` to the expected `node_cfg` (returns nonzero on mismatch).
-- [ ] `make applybulk` target scaffolded (body filled in T5).
-- [ ] Build gate passes: `make bpf skel loader apply dpstat`.
-- [ ] Quick gate passes: `make test` → **113** (+1 de-risk case).
+- [x] `make applybulk` target scaffolded (body filled in T5).
+- [x] Build gate passes: `make bpf skel loader apply dpstat`.
+- [x] Quick gate passes: `make test` → **113** (+1 de-risk case).
 
 **Tests**: dp-unit (fresh-inner de-risk) + build-gate parse self-test
 **Gate**: quick (113)
 **Commit**: `feat(dp): xdpgw-apply scaffold, snapshot parser, fresh-inner de-risk`
+
+**Executed 2026-07-13** (`036da4f`): `xdpgw-apply.c` core (`static inline`, `main()` guarded) +
+`test_snapshot.c` parse self-test + committed `apply_snapshot_golden.bin` (158 B, 2 services, service-
+level VIP + `dp_id`, generator alongside) + de-risk dp-unit (case #2 "apply fresh inner install
+round-trips"). **Primary fresh-inner rung works — no fallback needed.** Build gate green; `make test`
+→ **113**. Next: **T3** (build/carry-forward/verify/single-write flip core + verdict tests).
 
 ---
 
