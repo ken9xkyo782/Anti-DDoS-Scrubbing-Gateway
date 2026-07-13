@@ -3,18 +3,38 @@
 **Design**: `.specs/features/double-buffer-swap/design.md` (AD-028)
 **Spec**: `.specs/features/double-buffer-swap/spec.md` (DBS-01..28)
 **Context**: `.specs/features/double-buffer-swap/context.md` (D-DBS-1..3, A-DBS-1..8)
-**Status**: Draft (awaiting approval → Execute)
+**Status**: Execute in progress — T1 complete; T2 blocked pending an approved wire-contract correction.
 
-**Hard gate — Execute is blocked until agent-worker (M4 #1) is executed.** This feature swaps
+**Prerequisite — agent-worker (M4 #1) is executed.** This feature swaps
 `PlaceholderApplier → DoubleBufferApplier` at the AD-027 injection site and reuses its `ServiceConfig`,
-`Applier` protocol, `handle_service_update`, and `process_job` two-txn guard. Agent-worker is currently
-**Tasks APPROVED, not executed** — land it first, then start T1 here.
+`Applier` protocol, `handle_service_update`, and `process_job` two-txn guard. Agent-worker T1–T6 are
+complete (`ef81fc4..c236fb3`); its final full gate passed with 262 tests.
 
 **Baselines** (pin exact totals live at Execute):
-- **Data-plane** `cd data-plane && make test` = **B_dp = 91** (TESTING.md). Targets below are `B_dp + Δ`.
-- **Control-plane** `pytest -q` = **B_cp = agent-worker's final count** (AD-027 static B=209 + its new
-  tests) — pin live once agent-worker lands. T6 adds a serialize **unit** case + fake-helper
+- **Data-plane** `cd data-plane && make test` = **B_dp = 112** (verified at T1; T1 adds no tests).
+  Targets below are `B_dp + Δ`.
+- **Control-plane** `pytest -q` = **B_cp = live count at T6 start** — pin before the T6 RED phase.
+  T6 adds a serialize **unit** case + fake-helper
   **integration** cases.
+
+## Execution Results
+
+| Task | Status | Commit | Gate result |
+| --- | --- | --- | --- |
+| T1 | Complete | `7fcfb1b` | build passed; quick passed, 112 tests (unchanged live baseline) |
+
+## Execute Blocker — Resolve Before T2
+
+The approved schema-v1 record cannot faithfully rebuild the current control-plane/data-plane model:
+
+- `rule_entry` and control-plane `AllowRule` have `pps` and `bps`, but the specified rule record has no
+  fields for either rate limit.
+- VIP limits are service-level (`ProtectedService.vip_pps`/`vip_bps`), while the specified record puts
+  them on each whitelist entry (which stores only a source CIDR).
+- BPF maps use the `u32` `ProtectedService.dp_id`, but `ServiceConfig` currently exposes only its UUID.
+
+The C parser/golden fixture and Python serializer must not be created until the wire contract explicitly
+carries rule rates, service-level VIP configuration, and `dp_id` (or an approved equivalent).
 
 **Gates** (from TESTING.md):
 - Data-plane: **build** = `make bpf skel loader apply dpstat` · **quick** = `make test` ·
@@ -76,22 +96,22 @@ pin/unpin/rollback structure; `service.h`/`rules.h`/`whitelist.h`/`blacklist.h`/
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `apply_snapshot.h` defines the versioned wire format: magic `"XDPGWAP1"`, `schema_version`, and the
+- [x] `apply_snapshot.h` defines the versioned wire format: magic `"XDPGWAP1"`, `schema_version`, and the
       per-service record layout (explicit LE fields per design §Data Models) as documented constants/comments.
-- [ ] `fair_budget.h` exposes `clamp_fair_rate`, `fair_rate_product`,
+- [x] `fair_budget.h` exposes `clamp_fair_rate`, `fair_rate_product`,
       `fair_budget(committed,ceiling,k,ref_pkt)`, `node_headroom(capacity,sum_committed)`; `loader.c`
       includes it and its numbers are byte-identical to before (same seed output).
-- [ ] `loader.c` pins all 14 config maps (`service_map`, `rule_block_map`, `whitelist_bloom`/`_lpm`,
+- [x] `loader.c` pins all 14 config maps (`service_map`, `rule_block_map`, `whitelist_bloom`/`_lpm`,
       `vip_config_map`, `global_blacklist_bloom`/`_lpm`, `service_blacklist_bloom`/`_lpm`,
       `udp_blocked_port_bitmap`, `fair_config_map`, `fair_node_config`, `gbl_meta`, `active_config`) under
       `PIN_DIR`, with matching unpin on clean exit; static inner_0/_1, `tx_devmap`, and all runtime-state
       maps are **not** pinned.
-- [ ] Build gate passes: `make bpf skel loader dpstat`.
-- [ ] Quick gate passes: `make test` → **91** (unchanged; verdict-neutral).
-- [ ] Pin runtime-correctness deferred to T5 smoke (documented; the test harness does not pin).
+- [x] Build gate passes: `make bpf skel loader dpstat`.
+- [x] Quick gate passes: `make test` → **112** (unchanged; verdict-neutral).
+- [x] Pin runtime-correctness deferred to T5 smoke (documented; the test harness does not pin).
 
 **Tests**: none (verdict-neutral; build + import of the shared header; runtime pins verified in T5)
-**Gate**: build (+ quick 91 unchanged)
+**Gate**: build (+ quick 112 unchanged)
 **Commit**: `feat(dp): pin config maps + apply_snapshot/fair_budget contracts`
 
 ---
@@ -124,10 +144,10 @@ proven before building the rest.
       `apply_snapshot_golden.bin` to the expected `node_cfg` (returns nonzero on mismatch).
 - [ ] `make applybulk` target scaffolded (body filled in T5).
 - [ ] Build gate passes: `make bpf skel loader apply dpstat`.
-- [ ] Quick gate passes: `make test` → **92** (+1 de-risk case).
+- [ ] Quick gate passes: `make test` → **113** (+1 de-risk case).
 
 **Tests**: dp-unit (fresh-inner de-risk) + build-gate parse self-test
-**Gate**: quick (92)
+**Gate**: quick (113)
 **Commit**: `feat(dp): xdpgw-apply scaffold, snapshot parser, fresh-inner de-risk`
 
 ---
@@ -161,10 +181,10 @@ tests proving a build+flip changes enforcement.
       allowed flow admits; (b) adds a service → its dest resolves; (c) disables/removes a service →
       `service_miss`/`service_disabled`; assert non-triggering services **and** the carried-forward global
       blacklist unchanged after the flip (DBS-16/17).
-- [ ] Quick gate passes: `make test` → **≥ 97** (pin exact).
+- [ ] Quick gate passes: `make test` → **≥ 118** (pin exact).
 
 **Tests**: dp-unit
-**Gate**: quick (≥97)
+**Gate**: quick (≥118)
 **Commit**: `feat(dp): xdpgw-apply build/verify/single-write swap core`
 
 ---
@@ -190,10 +210,10 @@ and targets the opposite slot.
       subsequent full apply overwrites the inactive slot and succeeds (DBS-14).
 - [ ] Two applies of the same snapshot: `version` goes V→V+1→V+2, `active_slot` toggles, verdicts
       identical (DBS-21); an apply started with `active_slot=1` builds slot 0 (DBS-24).
-- [ ] Quick gate passes: `make test` → **≥ 101** (pin exact).
+- [ ] Quick gate passes: `make test` → **≥ 122** (pin exact).
 
 **Tests**: dp-unit
-**Gate**: quick (≥101)
+**Gate**: quick (≥122)
 **Commit**: `test(dp): xdpgw-apply fail-closed rollback + version idempotency`
 
 ---
