@@ -120,6 +120,30 @@ struct apply_fds {
 	uint64_t sum_committed_bps;
 };
 
+/* These seams exist only in the in-process dp-unit translation unit. They are
+ * deliberately absent from the helper binary: no runtime flag can turn a
+ * production apply into a forced failure. */
+#ifdef XDPGW_APPLY_TEST
+enum apply_test_fault {
+	APPLY_TEST_FAULT_NONE,
+	APPLY_TEST_FAULT_BUILD_INSTALL,
+	APPLY_TEST_FAULT_VERIFY_MISMATCH,
+};
+
+static enum apply_test_fault apply_test_fault;
+static uint32_t apply_test_open_fresh_fds;
+
+static inline void apply_test_set_fault(enum apply_test_fault fault)
+{
+	apply_test_fault = fault;
+}
+
+static inline uint32_t apply_test_fresh_fd_count(void)
+{
+	return apply_test_open_fresh_fds;
+}
+#endif
+
 enum apply_service_outer {
 	APPLY_SERVICE_MAP,
 	APPLY_RULE_BLOCK_MAP,
@@ -430,6 +454,27 @@ static inline int create_inner_like(int outer_fd, uint32_t src_slot)
 	return fresh;
 }
 
+static inline int apply_create_fresh_inner(int outer_fd, uint32_t src_slot)
+{
+	int fresh = create_inner_like(outer_fd, src_slot);
+
+#ifdef XDPGW_APPLY_TEST
+	if (fresh >= 0)
+		apply_test_open_fresh_fds++;
+#endif
+	return fresh;
+}
+
+static inline void apply_close_fresh_inner(int fd)
+{
+	if (fd < 0)
+		return;
+	close(fd);
+#ifdef XDPGW_APPLY_TEST
+	apply_test_open_fresh_fds--;
+#endif
+}
+
 static inline int apply_inner_fd(int outer_fd, uint32_t slot)
 {
 	uint32_t inner_id = 0;
@@ -501,6 +546,12 @@ static inline int apply_node_knobs(uint64_t *capacity, uint64_t *k,
 
 static inline int apply_install_inner(int outer_fd, uint32_t slot, int inner_fd)
 {
+#ifdef XDPGW_APPLY_TEST
+	if (apply_test_fault == APPLY_TEST_FAULT_BUILD_INSTALL) {
+		errno = EIO;
+		return -1;
+	}
+#endif
 	if (bpf_map_update_elem(outer_fd, &slot, &inner_fd, BPF_ANY) != 0) {
 		fprintf(stderr, "xdpgw-apply: install inactive inner: %s\n",
 			strerror(errno));
@@ -681,7 +732,7 @@ static inline int build_inactive_slot(struct apply_fds *fds,
 		fresh[i] = -1;
 
 	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
-		fresh[i] = create_inner_like(outers[i], fds->active_slot);
+		fresh[i] = apply_create_fresh_inner(outers[i], fds->active_slot);
 		if (fresh[i] < 0)
 			goto out;
 	}
@@ -721,8 +772,7 @@ static inline int build_inactive_slot(struct apply_fds *fds,
 	err = 0;
 out:
 	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
-		if (fresh[i] >= 0)
-			close(fresh[i]);
+		apply_close_fresh_inner(fresh[i]);
 	}
 	return err;
 }
@@ -826,6 +876,11 @@ static inline int verify_slot(struct apply_fds *fds)
 	    active_meta.flags != inactive_meta.flags)
 		goto out;
 
+#ifdef XDPGW_APPLY_TEST
+	if (apply_test_fault == APPLY_TEST_FAULT_VERIFY_MISMATCH)
+		goto out;
+#endif
+
 	err = 0;
 out:
 	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
@@ -853,6 +908,26 @@ static inline int commit(struct apply_fds *fds)
 		return -1;
 	}
 	return 0;
+}
+
+/* A failed apply always returns before the sole active_config update. Each
+ * stage owns and closes its transient fds before returning, so fail only has
+ * to preserve the no-commit invariant. */
+static inline int apply_node_cfg(struct apply_fds *fds,
+				 const struct node_cfg *node)
+{
+	if (build_inactive_slot(fds, node) != 0)
+		goto fail;
+	if (carry_forward_feed(fds) != 0)
+		goto fail;
+	if (verify_slot(fds) != 0)
+		goto fail;
+	if (commit(fds) != 0)
+		goto fail;
+	return 0;
+
+fail:
+	return -1;
 }
 
 #ifndef XDPGW_APPLY_NO_MAIN

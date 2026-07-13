@@ -30,6 +30,7 @@
  * against the real skeleton fds — the DBS-09 de-risk (AD-028 testability note).
  */
 #define XDPGW_APPLY_NO_MAIN
+#define XDPGW_APPLY_TEST
 #include "../tools/xdpgw-apply.c"
 
 #define DEFAULT_SERVICE_ID 42
@@ -6519,6 +6520,220 @@ static int test_apply_fresh_inner_install(void)
 	return err;
 }
 
+static int expect_active_config(struct test_env *env, __u32 slot,
+				__u32 version)
+{
+	struct active_config active;
+	__u32 zero = 0;
+
+	if (bpf_map_lookup_elem(env->active_config_fd, &zero, &active) != 0)
+		return -1;
+	if (expect_u32("active slot", active.active_slot, slot) != 0)
+		return -1;
+	return expect_u32("active version", active.version, version);
+}
+
+static int test_apply_forced_failures_preserve_live_slot(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+	apply_test_set_fault(APPLY_TEST_FAULT_NONE);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 7);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		apply_test_set_fault(APPLY_TEST_FAULT_BUILD_INSTALL);
+		if (apply_node_cfg(&fds, &node) == 0)
+			err = -1;
+	}
+	apply_test_set_fault(APPLY_TEST_FAULT_NONE);
+	if (!err)
+		err = expect_active_config(&env, 0, 7);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u32("open fresh fds after build failure",
+				 apply_test_fresh_fd_count(), 0);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 9);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		apply_test_set_fault(APPLY_TEST_FAULT_VERIFY_MISMATCH);
+		if (apply_node_cfg(&fds, &node) == 0)
+			err = -1;
+	}
+	apply_test_set_fault(APPLY_TEST_FAULT_NONE);
+	if (!err)
+		err = expect_active_config(&env, 0, 9);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_u32("open fresh fds after verify failure",
+				 apply_test_fresh_fd_count(), 0);
+
+	apply_test_set_fault(APPLY_TEST_FAULT_NONE);
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_interruption_before_commit_preserves_live_slot(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = set_active(&env, 0, 10);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("pre-interrupt retval", retval, XDP_DROP);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = build_inactive_slot(&fds, &node);
+	}
+	if (!err)
+		err = carry_forward_feed(&fds);
+	if (!err)
+		err = verify_slot(&fds);
+	if (!err)
+		err = expect_active_config(&env, 0, 10);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("interrupted retval", retval, XDP_DROP);
+
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_node_cfg(&fds, &node);
+	}
+	if (!err)
+		err = expect_active_config(&env, 1, 11);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_same_snapshot_toggles_slots_and_versions(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
+	if (!err)
+		err = set_active(&env, 0, 20);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_node_cfg(&fds, &node);
+	}
+	if (!err)
+		err = expect_active_config(&env, 1, 21);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 1);
+
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_node_cfg(&fds, &node);
+	}
+	if (!err)
+		err = expect_active_config(&env, 0, 22);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+
+	env_close(&env);
+	return err;
+}
+
 int main(void)
 {
 		const struct test_case tests[] = {
@@ -6534,6 +6749,12 @@ int main(void)
 		  test_apply_swap_carries_global_blacklist },
 		{ "apply verify rejects structural mismatches",
 		  test_apply_verify_rejects_structural_mismatches },
+		{ "apply forced failures preserve live slot",
+		  test_apply_forced_failures_preserve_live_slot },
+		{ "apply interruption before commit preserves live slot",
+		  test_apply_interruption_before_commit_preserves_live_slot },
+		{ "apply same snapshot toggles slots and versions",
+		  test_apply_same_snapshot_toggles_slots_and_versions },
 			{ "fair committed spin lock mutates tokens",
 			  test_fair_committed_spin_lock_mutates_tokens },
 			{ "ingress cap under limit continues",
