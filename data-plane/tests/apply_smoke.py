@@ -12,7 +12,12 @@ from pathlib import Path
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(FIXTURES))
 
-from gen_apply_snapshot_golden import MAGIC, RULE_F_ENABLED, SCHEMA_VERSION, service
+from gen_apply_snapshot_golden import MAGIC, RULE_F_ENABLED, service
+
+APPLY_SNAPSHOT_SCHEMA_VERSION = 2
+APPLY_SNAPSHOT_KIND_SERVICE_FULL = 1
+APPLY_SNAPSHOT_KIND_GLOBAL_DENY = 2
+GLOBAL_DENY_MAX_ENTRIES = 1_048_576
 
 
 MATCH_ALL_RULE = [(0, 65535, 0, 65535, 0, RULE_F_ENABLED)]
@@ -40,7 +45,12 @@ def snapshot_service(dst_ip: str, dp_id: int) -> bytes:
 def write_snapshot(path: Path, services: list[bytes]) -> None:
     path.write_bytes(
         MAGIC
-        + struct.pack("<II", SCHEMA_VERSION, len(services))
+        + struct.pack(
+            "<III",
+            APPLY_SNAPSHOT_SCHEMA_VERSION,
+            APPLY_SNAPSHOT_KIND_SERVICE_FULL,
+            len(services),
+        )
         + b"".join(services)
     )
 
@@ -59,6 +69,43 @@ def generate_bulk(path: Path, count: int) -> None:
         fourth = index % 254 + 1
         services.append(snapshot_service(f"10.128.{third}.{fourth}", index + 1))
     write_snapshot(path, services)
+
+
+def write_global_snapshot(path: Path, *, count: int, include_entries: bool) -> None:
+    if count < 0:
+        raise ValueError("global entry count must not be negative")
+    if include_entries and count > GLOBAL_DENY_MAX_ENTRIES:
+        raise ValueError("global entry count exceeds the helper limit")
+
+    with path.open("wb") as snapshot:
+        snapshot.write(
+            MAGIC
+            + struct.pack(
+                "<IIQI",
+                APPLY_SNAPSHOT_SCHEMA_VERSION,
+                APPLY_SNAPSHOT_KIND_GLOBAL_DENY,
+                42,
+                count,
+            )
+        )
+        if include_entries:
+            for address in range(0x2D000000, 0x2D000000 + count):
+                snapshot.write(struct.pack("<I", 32))
+                snapshot.write(struct.pack("!I", address))
+
+
+def generate_global_small(path: Path) -> None:
+    write_global_snapshot(path, count=1, include_entries=True)
+
+
+def generate_global_scale(path: Path, count: int) -> None:
+    write_global_snapshot(path, count=count, include_entries=True)
+
+
+def generate_global_too_many(path: Path) -> None:
+    write_global_snapshot(
+        path, count=GLOBAL_DENY_MAX_ENTRIES + 1, include_entries=False
+    )
 
 
 def checksum(data: bytes) -> int:
@@ -153,6 +200,13 @@ def main() -> None:
     bulk = commands.add_parser("generate-bulk")
     bulk.add_argument("path", type=Path)
     bulk.add_argument("count", type=int)
+    global_small = commands.add_parser("generate-global-small")
+    global_small.add_argument("path", type=Path)
+    global_scale = commands.add_parser("generate-global-scale")
+    global_scale.add_argument("path", type=Path)
+    global_scale.add_argument("count", type=int)
+    global_too_many = commands.add_parser("generate-global-too-many")
+    global_too_many.add_argument("path", type=Path)
     expect = commands.add_parser("expect")
     expect.add_argument("source_if")
     expect.add_argument("sink_if")
@@ -165,6 +219,12 @@ def main() -> None:
         generate_small(args.path)
     elif args.command == "generate-bulk":
         generate_bulk(args.path, args.count)
+    elif args.command == "generate-global-small":
+        generate_global_small(args.path)
+    elif args.command == "generate-global-scale":
+        generate_global_scale(args.path, args.count)
+    elif args.command == "generate-global-too-many":
+        generate_global_too_many(args.path)
     else:
         expect_verdict(
             args.source_if,

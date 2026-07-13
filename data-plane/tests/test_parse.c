@@ -6734,6 +6734,380 @@ static int test_apply_same_snapshot_toggles_slots_and_versions(void)
 	return err;
 }
 
+static struct node_cfg global_deny_cfg(struct cfg_source *entries,
+				       __u32 count)
+{
+	return (struct node_cfg){
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.snapshot_kind = APPLY_SNAPSHOT_KIND_GLOBAL_DENY,
+		.global_revision = 91,
+		.global_count = count,
+		.global_entries = entries,
+	};
+}
+
+static int global_outer_id(int outer_fd, __u32 slot, __u32 *id)
+{
+	return bpf_map_lookup_elem(outer_fd, &slot, id);
+}
+
+static int test_global_apply_rebuilds_hot_path_blacklist(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 32, .addr = htonl(TEST_SRC_PUB_C) },
+	};
+	struct node_cfg node = global_deny_cfg(entries, 1);
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_C, 0x0a000002) != 0)
+		return -1;
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_global_deny_cfg(&fds, &node);
+	}
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("global blacklist retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_BLACKLIST_DROP, 1);
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_carries_service_outers_and_bitmap(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 32, .addr = htonl(TEST_SRC_PUB_C) },
+	};
+	int service_outers[] = {
+		APPLY_SERVICE_MAP,
+		APPLY_RULE_BLOCK_MAP,
+		APPLY_WHITELIST_BLOOM,
+		APPLY_WHITELIST_LPM,
+		APPLY_VIP_CONFIG_MAP,
+		APPLY_SERVICE_BLACKLIST_BLOOM,
+		APPLY_SERVICE_BLACKLIST_LPM,
+		APPLY_FAIR_CONFIG_MAP,
+	};
+	int outer_fds[] = {
+		0, 0, 0, 0, 0, 0, 0, 0,
+	};
+	struct node_cfg node = global_deny_cfg(entries, 1);
+	struct fair_node_config before_node = {
+		.version = 7,
+		.headroom_bps = 123456,
+	};
+	struct fair_node_config after_node;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 before_id[APPLY_SERVICE_OUTER_COUNT];
+	__u32 after_id;
+	__u32 bitmap_before;
+	__u32 bitmap_after;
+	__u32 slot0 = 0;
+	__u32 slot1 = 1;
+	int err;
+
+	(void)service_outers;
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_blocked_port(&env, 0, 9999);
+	if (!err)
+		err = seed_fair_node_config(&env, 0, &before_node);
+	outer_fds[APPLY_SERVICE_MAP] = env.service_map_fd;
+	outer_fds[APPLY_RULE_BLOCK_MAP] = env.rule_block_map_fd;
+	outer_fds[APPLY_WHITELIST_BLOOM] = env.whitelist_bloom_fd;
+	outer_fds[APPLY_WHITELIST_LPM] = env.whitelist_lpm_fd;
+	outer_fds[APPLY_VIP_CONFIG_MAP] = env.vip_config_map_fd;
+	outer_fds[APPLY_SERVICE_BLACKLIST_BLOOM] = env.service_blacklist_bloom_fd;
+	outer_fds[APPLY_SERVICE_BLACKLIST_LPM] = env.service_blacklist_lpm_fd;
+	outer_fds[APPLY_FAIR_CONFIG_MAP] = env.fair_config_map_fd;
+	for (__u32 i = 0; !err && i < APPLY_SERVICE_OUTER_COUNT; i++)
+		err = global_outer_id(outer_fds[i], slot0, &before_id[i]);
+	if (!err)
+		err = global_outer_id(env.blocked_port_bitmap_fd, slot0,
+				      &bitmap_before);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_global_deny_cfg(&fds, &node);
+	}
+	for (__u32 i = 0; !err && i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		err = global_outer_id(outer_fds[i], slot1, &after_id);
+		if (!err)
+			err = expect_u32("carried service outer id", after_id,
+					 before_id[i]);
+	}
+	if (!err)
+		err = global_outer_id(env.blocked_port_bitmap_fd, slot1,
+				      &bitmap_after);
+	if (!err)
+		err = expect_u32("carried bitmap id", bitmap_after, bitmap_before);
+	if (!err && bpf_map_lookup_elem(env.fair_node_config_fd, &slot1,
+					  &after_node) != 0)
+		err = -1;
+	if (!err && memcmp(&before_node, &after_node, sizeof(before_node)) != 0)
+		err = -1;
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_expands_16_to_bloom_coverage(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 16, .addr = htonl(0x2d2d0000) },
+	};
+	struct node_cfg node = global_deny_cfg(entries, 1);
+	struct gbl_meta meta;
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 slot = 1;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0x2d2d7f01, 0x0a000002) != 0)
+		return -1;
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_global_deny_cfg(&fds, &node);
+	}
+	if (!err && bpf_map_lookup_elem(env.gbl_meta_fd, &slot, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("expanded /16 flags", meta.flags, GBL_F_ACTIVE);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("expanded /16 retval", retval, XDP_DROP);
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_broad_prefix_sets_escape_flag(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 8, .addr = htonl(0x2d000000) },
+	};
+	struct node_cfg node = global_deny_cfg(entries, 1);
+	struct gbl_meta meta;
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 slot = 1;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, 0x2d040302, 0x0a000002) != 0)
+		return -1;
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_global_deny_cfg(&fds, &node);
+	}
+	if (!err && bpf_map_lookup_elem(env.gbl_meta_fd, &slot, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("broad flags", meta.flags,
+				GBL_F_ACTIVE | GBL_F_HAS_BROAD);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("broad global retval", retval, XDP_DROP);
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_empty_snapshot_clears_active_meta(void)
+{
+	struct node_cfg node = global_deny_cfg(NULL, 0);
+	struct gbl_meta meta;
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 slot = 1;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_C, 0x0a000002) != 0)
+		return -1;
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = seed_global_blacklist(&env, 0, TEST_SRC_PUB_C, 32);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_global_deny_cfg(&fds, &node);
+	}
+	if (!err && bpf_map_lookup_elem(env.gbl_meta_fd, &slot, &meta) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u8("empty global flags", meta.flags, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &(struct pkt_meta){},
+					DEFAULT_SERVICE_ID, slot);
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_build_failure_preserves_live_slot(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 32, .addr = htonl(TEST_SRC_PUB_C) },
+	};
+	struct node_cfg node = global_deny_cfg(entries, 1);
+	struct test_env env;
+	struct apply_fds fds;
+	int err;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 51);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		apply_test_set_fault(APPLY_TEST_FAULT_BUILD_INSTALL);
+		if (apply_global_deny_cfg(&fds, &node) == 0)
+			err = -1;
+	}
+	apply_test_set_fault(APPLY_TEST_FAULT_NONE);
+	if (!err)
+		err = expect_active_config(&env, 0, 51);
+	if (!err)
+		err = expect_u32("global build failure fresh fds",
+				 apply_test_fresh_fd_count(), 0);
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_verify_failure_preserves_live_slot(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 32, .addr = htonl(TEST_SRC_PUB_C) },
+	};
+	struct node_cfg node = global_deny_cfg(entries, 1);
+	struct test_env env;
+	struct apply_fds fds;
+	int err;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 52);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		apply_test_set_fault(APPLY_TEST_FAULT_VERIFY_MISMATCH);
+		if (apply_global_deny_cfg(&fds, &node) == 0)
+			err = -1;
+	}
+	apply_test_set_fault(APPLY_TEST_FAULT_NONE);
+	if (!err)
+		err = expect_active_config(&env, 0, 52);
+	if (!err)
+		err = expect_u32("global verify failure fresh fds",
+				 apply_test_fresh_fd_count(), 0);
+	env_close(&env);
+	return err;
+}
+
+static int test_global_apply_alternates_with_service_apply(void)
+{
+	struct cfg_source entries[] = {
+		{ .prefixlen = 32, .addr = htonl(TEST_SRC_PUB_C) },
+	};
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+					       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg global = global_deny_cfg(entries, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.snapshot_kind = APPLY_SNAPSHOT_KIND_SERVICE_FULL,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0 ||
+	    set_ipv4_addrs(&frame, TEST_SRC_PUB_C, 0x0a000002) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+	err = env_open(&env);
+	if (err)
+		return -1;
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 60);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_node_cfg(&fds, &node);
+	}
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_global_deny_cfg(&fds, &global);
+	}
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_node_cfg(&fds, &node);
+	}
+	if (!err)
+		err = expect_active_config(&env, 1, 63);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("alternating global retval", retval, XDP_DROP);
+	env_close(&env);
+	return err;
+}
+
 int main(void)
 {
 		const struct test_case tests[] = {
@@ -6755,6 +7129,22 @@ int main(void)
 		  test_apply_interruption_before_commit_preserves_live_slot },
 		{ "apply same snapshot toggles slots and versions",
 		  test_apply_same_snapshot_toggles_slots_and_versions },
+		{ "global apply rebuilds hot path blacklist",
+		  test_global_apply_rebuilds_hot_path_blacklist },
+		{ "global apply carries service outers and bitmap",
+		  test_global_apply_carries_service_outers_and_bitmap },
+		{ "global apply expands /16 to bloom coverage",
+		  test_global_apply_expands_16_to_bloom_coverage },
+		{ "global apply broad prefix sets escape flag",
+		  test_global_apply_broad_prefix_sets_escape_flag },
+		{ "global apply empty snapshot clears active meta",
+		  test_global_apply_empty_snapshot_clears_active_meta },
+		{ "global apply build failure preserves live slot",
+		  test_global_apply_build_failure_preserves_live_slot },
+		{ "global apply verify failure preserves live slot",
+		  test_global_apply_verify_failure_preserves_live_slot },
+		{ "global apply alternates with service apply",
+		  test_global_apply_alternates_with_service_apply },
 			{ "fair committed spin lock mutates tokens",
 			  test_fair_committed_spin_lock_mutates_tokens },
 			{ "ingress cap under limit continues",

@@ -22,11 +22,13 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 #include <bpf/bpf.h>
@@ -141,6 +143,8 @@ struct apply_fds {
 	const struct node_cfg *node;
 	uint64_t node_capacity_bps;
 	uint64_t sum_committed_bps;
+	uint32_t global_bloom_fill;
+	uint8_t global_meta_flags;
 };
 
 /* These seams exist only in the in-process dp-unit translation unit. They are
@@ -886,6 +890,24 @@ static inline int apply_copy_outer_inner(int outer_fd, uint32_t active_slot,
 	return err;
 }
 
+static inline int apply_outer_id(int outer_fd, uint32_t slot, uint32_t *id)
+{
+	return bpf_map_lookup_elem(outer_fd, &slot, id);
+}
+
+static inline void apply_service_outers(const struct apply_fds *fds,
+					int outers[APPLY_SERVICE_OUTER_COUNT])
+{
+	outers[APPLY_SERVICE_MAP] = fds->service_map_fd;
+	outers[APPLY_RULE_BLOCK_MAP] = fds->rule_block_map_fd;
+	outers[APPLY_WHITELIST_BLOOM] = fds->whitelist_bloom_fd;
+	outers[APPLY_WHITELIST_LPM] = fds->whitelist_lpm_fd;
+	outers[APPLY_VIP_CONFIG_MAP] = fds->vip_config_map_fd;
+	outers[APPLY_SERVICE_BLACKLIST_BLOOM] = fds->service_blacklist_bloom_fd;
+	outers[APPLY_SERVICE_BLACKLIST_LPM] = fds->service_blacklist_lpm_fd;
+	outers[APPLY_FAIR_CONFIG_MAP] = fds->fair_config_map_fd;
+}
+
 /* Feed-owned maps are immutable to a service apply: reinstall active inners by
  * fd and copy gbl_meta, avoiding any blacklist rebuild. */
 static inline int carry_forward_feed(struct apply_fds *fds)
@@ -906,6 +928,150 @@ static inline int carry_forward_feed(struct apply_fds *fds)
 				BPF_ANY) != 0)
 		return -1;
 	return 0;
+}
+
+/* A GLOBAL_DENY snapshot is the inverse of a service rebuild: service-owned
+ * maps retain their active identities while the global maps are rebuilt. */
+static inline int carry_forward_service_config(struct apply_fds *fds)
+{
+	int outers[APPLY_SERVICE_OUTER_COUNT];
+	struct fair_node_config node_config;
+	uint32_t i;
+
+	if (!fds)
+		return -1;
+	apply_service_outers(fds, outers);
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		if (apply_copy_outer_inner(outers[i], fds->active_slot,
+					  fds->inactive_slot) != 0)
+			return -1;
+	}
+	if (apply_copy_outer_inner(fds->udp_blocked_port_bitmap_fd,
+				  fds->active_slot, fds->inactive_slot) != 0 ||
+	    bpf_map_lookup_elem(fds->fair_node_config_fd, &fds->active_slot,
+					&node_config) != 0 ||
+	    bpf_map_update_elem(fds->fair_node_config_fd, &fds->inactive_slot,
+					&node_config, BPF_ANY) != 0)
+		return -1;
+	return 0;
+}
+
+/* Return the expected bloom construction policy. Prefixes 16..23 expand to
+ * their /24 coverage; anything broader or a 2M-entry overflow activates the
+ * LPM-only escape path, so the fresh bloom intentionally remains empty. */
+static inline int global_bloom_plan(const struct node_cfg *node,
+					uint8_t *flags_out, uint32_t *fill_out)
+{
+	uint64_t fill = 0;
+	uint8_t flags = 0;
+	uint32_t i;
+
+	if (!node || node->global_count > APPLY_SNAPSHOT_GLOBAL_DENY_MAX_ENTRIES ||
+	    node->global_count > GBL_LPM_MAX_ENTRIES ||
+	    (node->global_count && !node->global_entries))
+		return -1;
+	if (node->global_count)
+		flags |= GBL_F_ACTIVE;
+	for (i = 0; i < node->global_count; i++) {
+		const struct cfg_source *entry = &node->global_entries[i];
+		uint32_t buckets;
+
+		if (!global_entry_valid(entry) ||
+		    (i && !global_entries_sorted(&node->global_entries[i - 1],
+						       entry)))
+			return -1;
+		if (entry->prefixlen < GBL_EXPAND_FLOOR) {
+			flags |= GBL_F_HAS_BROAD;
+			continue;
+		}
+		buckets = entry->prefixlen < GBL_BLOOM_PREFIX
+				  ? 1U << (GBL_BLOOM_PREFIX - entry->prefixlen)
+				  : 1U;
+		if (fill > GBL_BLOOM_MAX_ENTRIES - buckets)
+			flags |= GBL_F_HAS_BROAD;
+		else
+			fill += buckets;
+	}
+	*flags_out = flags;
+	*fill_out = flags & GBL_F_HAS_BROAD ? 0 : (uint32_t)fill;
+	return 0;
+}
+
+static inline int global_bloom_insert(int bloom_fd,
+				      const struct cfg_source *entry)
+{
+	uint32_t first;
+	uint32_t buckets;
+	uint32_t i;
+
+	if (entry->prefixlen < GBL_EXPAND_FLOOR)
+		return 0;
+	first = ntohl(entry->addr) & BL_SRC24_MASK;
+	buckets = entry->prefixlen < GBL_BLOOM_PREFIX
+			  ? 1U << (GBL_BLOOM_PREFIX - entry->prefixlen)
+			  : 1U;
+	for (i = 0; i < buckets; i++) {
+		__be32 key = htonl(first + i * 256U);
+
+		if (bpf_map_update_elem(bloom_fd, NULL, &key, BPF_ANY) != 0)
+			return -1;
+	}
+	return 0;
+}
+
+static inline int build_global_deny_slot(struct apply_fds *fds,
+					 const struct node_cfg *node)
+{
+	struct gbl_meta meta = {};
+	uint8_t flags;
+	uint32_t bloom_fill;
+	uint32_t i;
+	int bloom_fd = -1;
+	int lpm_fd = -1;
+	int err = -1;
+
+	if (!fds || !node ||
+	    node->schema_version != APPLY_SNAPSHOT_SCHEMA_VERSION ||
+	    node->snapshot_kind != APPLY_SNAPSHOT_KIND_GLOBAL_DENY ||
+	    global_bloom_plan(node, &flags, &bloom_fill) != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	bloom_fd = apply_create_fresh_inner(fds->global_blacklist_bloom_fd,
+					 fds->active_slot);
+	lpm_fd = apply_create_fresh_inner(fds->global_blacklist_lpm_fd,
+				       fds->active_slot);
+	if (bloom_fd < 0 || lpm_fd < 0)
+		goto out;
+	for (i = 0; i < node->global_count; i++) {
+		const struct cfg_source *entry = &node->global_entries[i];
+		struct bl_lpm_key key = {
+			.prefixlen = entry->prefixlen,
+			.src = entry->addr,
+		};
+		__u8 present = 1;
+
+		if (bpf_map_update_elem(lpm_fd, &key, &present, BPF_ANY) != 0 ||
+		    (!(flags & GBL_F_HAS_BROAD) &&
+		     global_bloom_insert(bloom_fd, entry) != 0))
+			goto out;
+	}
+	meta.flags = flags;
+	if (bpf_map_update_elem(fds->gbl_meta_fd, &fds->inactive_slot, &meta,
+				BPF_ANY) != 0 ||
+	    apply_install_inner(fds->global_blacklist_bloom_fd,
+				fds->inactive_slot, bloom_fd) != 0 ||
+	    apply_install_inner(fds->global_blacklist_lpm_fd,
+				fds->inactive_slot, lpm_fd) != 0)
+		goto out;
+	fds->node = node;
+	fds->global_bloom_fill = bloom_fill;
+	fds->global_meta_flags = flags;
+	err = 0;
+out:
+	apply_close_fresh_inner(bloom_fd);
+	apply_close_fresh_inner(lpm_fd);
+	return err;
 }
 
 /* Structural read-back of the inactive candidate. This must remain side-effect
@@ -986,6 +1152,105 @@ out:
 	return err;
 }
 
+static inline int verify_global_lpm(int lpm_fd, const struct node_cfg *node)
+{
+	struct bl_lpm_key key;
+	struct bl_lpm_key next;
+	struct bl_lpm_key *previous = NULL;
+	uint32_t count = 0;
+	uint32_t i;
+
+	while (bpf_map_get_next_key(lpm_fd, previous, &next) == 0) {
+		key = next;
+		previous = &key;
+		if (++count > node->global_count)
+			return -1;
+	}
+	if (errno != ENOENT || count != node->global_count)
+		return -1;
+	for (i = 0; i < node->global_count; i++) {
+		const struct cfg_source *entry = &node->global_entries[i];
+		struct bl_lpm_key expected = {
+			.prefixlen = entry->prefixlen,
+			.src = entry->addr,
+		};
+		__u8 present;
+
+		if (bpf_map_lookup_elem(lpm_fd, &expected, &present) != 0 ||
+		    present != 1)
+			return -1;
+	}
+	return 0;
+}
+
+static inline int verify_global_deny_slot(struct apply_fds *fds)
+{
+	int service_outers[APPLY_SERVICE_OUTER_COUNT];
+	struct fair_node_config active_node;
+	struct fair_node_config inactive_node;
+	struct gbl_meta inactive_meta;
+	uint32_t active_id;
+	uint32_t inactive_id;
+	uint8_t expected_flags;
+	uint32_t expected_fill;
+	uint32_t i;
+	int lpm_fd = -1;
+	int err = -1;
+
+	if (!fds || !fds->node ||
+	    fds->node->snapshot_kind != APPLY_SNAPSHOT_KIND_GLOBAL_DENY ||
+	    global_bloom_plan(fds->node, &expected_flags, &expected_fill) != 0 ||
+	    expected_flags != fds->global_meta_flags ||
+	    expected_fill != fds->global_bloom_fill)
+		return -1;
+	apply_service_outers(fds, service_outers);
+	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++) {
+		if (apply_outer_id(service_outers[i], fds->active_slot,
+				   &active_id) != 0 ||
+		    apply_outer_id(service_outers[i], fds->inactive_slot,
+				   &inactive_id) != 0 ||
+		    active_id != inactive_id)
+			goto out;
+	}
+	if (apply_outer_id(fds->udp_blocked_port_bitmap_fd, fds->active_slot,
+			   &active_id) != 0 ||
+	    apply_outer_id(fds->udp_blocked_port_bitmap_fd, fds->inactive_slot,
+			   &inactive_id) != 0 ||
+	    active_id != inactive_id ||
+	    apply_outer_id(fds->global_blacklist_bloom_fd, fds->active_slot,
+			   &active_id) != 0 ||
+	    apply_outer_id(fds->global_blacklist_bloom_fd, fds->inactive_slot,
+			   &inactive_id) != 0 ||
+	    active_id == inactive_id ||
+	    apply_outer_id(fds->global_blacklist_lpm_fd, fds->active_slot,
+			   &active_id) != 0 ||
+	    apply_outer_id(fds->global_blacklist_lpm_fd, fds->inactive_slot,
+			   &inactive_id) != 0 ||
+	    active_id == inactive_id ||
+	    bpf_map_lookup_elem(fds->fair_node_config_fd, &fds->active_slot,
+				&active_node) != 0 ||
+	    bpf_map_lookup_elem(fds->fair_node_config_fd, &fds->inactive_slot,
+				&inactive_node) != 0 ||
+	    memcmp(&active_node, &inactive_node, sizeof(active_node)) != 0 ||
+	    bpf_map_lookup_elem(fds->gbl_meta_fd, &fds->inactive_slot,
+				&inactive_meta) != 0 ||
+	    inactive_meta.flags != expected_flags)
+		goto out;
+	lpm_fd = apply_inner_fd(fds->global_blacklist_lpm_fd, fds->inactive_slot);
+	if (lpm_fd < 0 || verify_global_lpm(lpm_fd, fds->node) != 0)
+		goto out;
+
+#ifdef XDPGW_APPLY_TEST
+	if (apply_test_fault == APPLY_TEST_FAULT_VERIFY_MISMATCH)
+		goto out;
+#endif
+	err = 0;
+out:
+	if (lpm_fd >= 0)
+		close(lpm_fd);
+	return err;
+}
+
 /* The sole active_config mutation in the core: publish the fully verified
  * inactive slot and advance the node-global version together. */
 static inline int commit(struct apply_fds *fds)
@@ -1017,6 +1282,25 @@ static inline int apply_node_cfg(struct apply_fds *fds,
 	if (carry_forward_feed(fds) != 0)
 		goto fail;
 	if (verify_slot(fds) != 0)
+		goto fail;
+	if (commit(fds) != 0)
+		goto fail;
+	return 0;
+
+fail:
+	return -1;
+}
+
+static inline int apply_global_deny_cfg(struct apply_fds *fds,
+					const struct node_cfg *node)
+{
+	if (apply_read_active(fds) != 0)
+		goto fail;
+	if (carry_forward_service_config(fds) != 0)
+		goto fail;
+	if (build_global_deny_slot(fds, node) != 0)
+		goto fail;
+	if (verify_global_deny_slot(fds) != 0)
 		goto fail;
 	if (commit(fds) != 0)
 		goto fail;
@@ -1130,10 +1414,29 @@ fail:
 	return -1;
 }
 
+static int lock_apply_pin_dir(void)
+{
+	int fd = open(APPLY_PIN_DIR, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+
+	if (fd < 0) {
+		fprintf(stderr, "xdpgw-apply: open pin directory %s: %s\n",
+			APPLY_PIN_DIR, strerror(errno));
+		return -1;
+	}
+	if (flock(fd, LOCK_EX) != 0) {
+		fprintf(stderr, "xdpgw-apply: lock pin directory %s: %s\n",
+			APPLY_PIN_DIR, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
 int main(int argc, char **argv)
 {
 	struct node_cfg node;
 	struct apply_fds fds;
+	int lock_fd = -1;
 	int err = 1;
 
 	if (argc != 2) {
@@ -1145,23 +1448,38 @@ int main(int argc, char **argv)
 		fprintf(stderr, "xdpgw-apply: failed to parse snapshot %s\n", argv[1]);
 		return 1;
 	}
-	if (node.snapshot_kind != APPLY_SNAPSHOT_KIND_SERVICE_FULL) {
-		fprintf(stderr,
-			"xdpgw-apply: GLOBAL_DENY map apply is not implemented\n");
-		free_node_cfg(&node);
-		return 1;
-	}
+	init_apply_fds(&fds);
+	lock_fd = lock_apply_pin_dir();
+	if (lock_fd < 0)
+		goto out;
 	if (open_apply_pins(&fds) != 0)
 		goto out;
-	if (apply_node_cfg(&fds, &node) != 0) {
+	if (node.snapshot_kind == APPLY_SNAPSHOT_KIND_SERVICE_FULL) {
+		if (apply_node_cfg(&fds, &node) == 0)
+			goto committed;
+	} else if (node.snapshot_kind == APPLY_SNAPSHOT_KIND_GLOBAL_DENY) {
+		if (apply_global_deny_cfg(&fds, &node) == 0)
+			goto committed;
+	} else {
+		errno = EINVAL;
+	}
+	{
 		fprintf(stderr,
-			"xdpgw-apply: build, verify, or feed carry-forward failed before "
+			"xdpgw-apply: build, verify, or carry-forward failed before "
 			"active_config swap%s%s\n",
 			errno ? ": " : "",
 			errno ? strerror(errno) : "");
 		goto out;
 	}
 
+
+committed:
+	if (node.snapshot_kind == APPLY_SNAPSHOT_KIND_GLOBAL_DENY) {
+		printf("{\"active_slot\":%u,\"node_map_version\":%u}\n",
+		       fds.inactive_slot, fds.version + 1);
+		err = 0;
+		goto out;
+	}
 	printf("xdpgw-apply: swapped active slot %u to %u, version %u to %u "
 	       "(%u service(s))\n",
 	       fds.active_slot, fds.inactive_slot, fds.version, fds.version + 1,
@@ -1170,6 +1488,8 @@ int main(int argc, char **argv)
 
 out:
 	close_apply_fds(&fds);
+	if (lock_fd >= 0)
+		close(lock_fd);
 	free_node_cfg(&node);
 	return err;
 }

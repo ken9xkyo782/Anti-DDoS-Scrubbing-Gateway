@@ -39,7 +39,7 @@ LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
 USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
-.PHONY: all bpf skel loader dpstat apply applybulk test smoke blbulk clean run
+.PHONY: all bpf skel loader dpstat apply applybulk globalapplysmoke globalapplyscale test smoke blbulk clean run
 
 all: bpf skel loader
 
@@ -85,6 +85,12 @@ $(TEST_SNAPSHOT_BIN): $(TEST_SNAPSHOT_SRC) $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_
 
 applybulk: loader dpstat apply
 	$(TEST_DIR)/apply_bulk.sh
+
+globalapplysmoke: loader dpstat apply
+	$(TEST_DIR)/smoke_global_apply.sh
+
+globalapplyscale: loader dpstat apply
+	$(TEST_DIR)/global_apply_scale.sh
 
 test: $(TEST_BIN) $(TEST_SNAPSHOT_BIN)
 	$(TEST_BIN)
