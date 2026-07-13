@@ -20,10 +20,24 @@
 #include "blacklist.h"
 #include "whitelist.h"
 #include "fairness.h"
+#include "fair_budget.h"
 #include "xdp_gateway.skel.h"
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
 #define ACTIVE_CONFIG_PIN_PATH PIN_DIR "/active_config"
+#define SERVICE_MAP_PIN_PATH PIN_DIR "/service_map"
+#define RULE_BLOCK_MAP_PIN_PATH PIN_DIR "/rule_block_map"
+#define WHITELIST_BLOOM_PIN_PATH PIN_DIR "/whitelist_bloom"
+#define WHITELIST_LPM_PIN_PATH PIN_DIR "/whitelist_lpm"
+#define VIP_CONFIG_MAP_PIN_PATH PIN_DIR "/vip_config_map"
+#define GLOBAL_BLACKLIST_BLOOM_PIN_PATH PIN_DIR "/global_blacklist_bloom"
+#define GLOBAL_BLACKLIST_LPM_PIN_PATH PIN_DIR "/global_blacklist_lpm"
+#define SERVICE_BLACKLIST_BLOOM_PIN_PATH PIN_DIR "/service_blacklist_bloom"
+#define SERVICE_BLACKLIST_LPM_PIN_PATH PIN_DIR "/service_blacklist_lpm"
+#define UDP_BLOCKED_PORT_BITMAP_PIN_PATH PIN_DIR "/udp_blocked_port_bitmap"
+#define FAIR_CONFIG_MAP_PIN_PATH PIN_DIR "/fair_config_map"
+#define FAIR_NODE_CONFIG_PIN_PATH PIN_DIR "/fair_node_config"
+#define GBL_META_PIN_PATH PIN_DIR "/gbl_meta"
 #define COUNTER_PIN_PATH PIN_DIR "/counter_map"
 #define SVC_STAT_PIN_PATH PIN_DIR "/svc_stat_map"
 #define RINGBUF_PIN_PATH PIN_DIR "/drop_ringbuf"
@@ -152,13 +166,39 @@ static int set_pin_path(struct bpf_map *map, const char *path)
 
 static int set_observability_pin_paths(struct xdp_gateway_bpf *skel)
 {
-	if (set_pin_path(skel->maps.active_config, ACTIVE_CONFIG_PIN_PATH) != 0 ||
-	    set_pin_path(skel->maps.counter_map, COUNTER_PIN_PATH) != 0 ||
+	if (set_pin_path(skel->maps.counter_map, COUNTER_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.svc_stat_map, SVC_STAT_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.drop_ringbuf, RINGBUF_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.sample_config, SAMPLE_CONFIG_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.sample_stats, SAMPLE_STATS_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.bloom_stats, BLOOM_STATS_PIN_PATH) != 0)
+		return -1;
+
+	return 0;
+}
+
+static int set_config_pin_paths(struct xdp_gateway_bpf *skel)
+{
+	if (set_pin_path(skel->maps.service_map, SERVICE_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.rule_block_map, RULE_BLOCK_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.whitelist_bloom, WHITELIST_BLOOM_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.whitelist_lpm, WHITELIST_LPM_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.vip_config_map, VIP_CONFIG_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.global_blacklist_bloom,
+			 GLOBAL_BLACKLIST_BLOOM_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.global_blacklist_lpm,
+			 GLOBAL_BLACKLIST_LPM_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.service_blacklist_bloom,
+			 SERVICE_BLACKLIST_BLOOM_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.service_blacklist_lpm,
+			 SERVICE_BLACKLIST_LPM_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.udp_blocked_port_bitmap,
+			 UDP_BLOCKED_PORT_BITMAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.fair_config_map, FAIR_CONFIG_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.fair_node_config,
+			 FAIR_NODE_CONFIG_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.gbl_meta, GBL_META_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.active_config, ACTIVE_CONFIG_PIN_PATH) != 0)
 		return -1;
 
 	return 0;
@@ -186,7 +226,6 @@ static void unpin_map(struct bpf_map *map, const char *name)
 
 static void unpin_observability_maps(struct xdp_gateway_bpf *skel)
 {
-	unpin_map(skel->maps.active_config, "active_config");
 	unpin_map(skel->maps.counter_map, "counter_map");
 	unpin_map(skel->maps.svc_stat_map, "svc_stat_map");
 	unpin_map(skel->maps.drop_ringbuf, "drop_ringbuf");
@@ -195,10 +234,26 @@ static void unpin_observability_maps(struct xdp_gateway_bpf *skel)
 	unpin_map(skel->maps.bloom_stats, "bloom_stats");
 }
 
+static void unpin_config_maps(struct xdp_gateway_bpf *skel)
+{
+	unpin_map(skel->maps.service_map, "service_map");
+	unpin_map(skel->maps.rule_block_map, "rule_block_map");
+	unpin_map(skel->maps.whitelist_bloom, "whitelist_bloom");
+	unpin_map(skel->maps.whitelist_lpm, "whitelist_lpm");
+	unpin_map(skel->maps.vip_config_map, "vip_config_map");
+	unpin_map(skel->maps.global_blacklist_bloom, "global_blacklist_bloom");
+	unpin_map(skel->maps.global_blacklist_lpm, "global_blacklist_lpm");
+	unpin_map(skel->maps.service_blacklist_bloom, "service_blacklist_bloom");
+	unpin_map(skel->maps.service_blacklist_lpm, "service_blacklist_lpm");
+	unpin_map(skel->maps.udp_blocked_port_bitmap, "udp_blocked_port_bitmap");
+	unpin_map(skel->maps.fair_config_map, "fair_config_map");
+	unpin_map(skel->maps.fair_node_config, "fair_node_config");
+	unpin_map(skel->maps.gbl_meta, "gbl_meta");
+	unpin_map(skel->maps.active_config, "active_config");
+}
+
 static int pin_observability_maps(struct xdp_gateway_bpf *skel)
 {
-	if (pin_map(skel->maps.active_config, "active_config") != 0)
-		return -1;
 	if (pin_map(skel->maps.counter_map, "counter_map") != 0)
 		return -1;
 	if (pin_map(skel->maps.svc_stat_map, "svc_stat_map") != 0)
@@ -216,6 +271,49 @@ static int pin_observability_maps(struct xdp_gateway_bpf *skel)
 
 rollback:
 	unpin_observability_maps(skel);
+	return -1;
+}
+
+static int pin_config_maps(struct xdp_gateway_bpf *skel)
+{
+	if (pin_map(skel->maps.service_map, "service_map") != 0)
+		return -1;
+	if (pin_map(skel->maps.rule_block_map, "rule_block_map") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.whitelist_bloom, "whitelist_bloom") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.whitelist_lpm, "whitelist_lpm") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.vip_config_map, "vip_config_map") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.global_blacklist_bloom,
+		    "global_blacklist_bloom") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.global_blacklist_lpm,
+		    "global_blacklist_lpm") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.service_blacklist_bloom,
+		    "service_blacklist_bloom") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.service_blacklist_lpm,
+		    "service_blacklist_lpm") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.udp_blocked_port_bitmap,
+		    "udp_blocked_port_bitmap") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.fair_config_map, "fair_config_map") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.fair_node_config, "fair_node_config") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.gbl_meta, "gbl_meta") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.active_config, "active_config") != 0)
+		goto rollback;
+
+	return 0;
+
+rollback:
+	unpin_config_maps(skel);
 	return -1;
 }
 
@@ -330,20 +428,6 @@ static int parse_u16_env(const char *name, __u16 *value, int *is_set)
 	return 0;
 }
 
-static __u64 clamp_fair_rate(__u64 value)
-{
-	return value > FAIR_RATE_MAX ? FAIR_RATE_MAX : value;
-}
-
-static __u64 fair_rate_product(__u64 left, __u64 right)
-{
-	if (left == 0 || right == 0)
-		return 0;
-	if (left > FAIR_RATE_MAX / right)
-		return FAIR_RATE_MAX;
-	return left * right;
-}
-
 static int prepare_fair_seed(struct fair_seed *seed)
 {
 	__u64 committed_bps = DEFAULT_FAIR_COMMITTED_BPS;
@@ -351,6 +435,7 @@ static int prepare_fair_seed(struct fair_seed *seed)
 	__u64 capacity_bps = DEFAULT_NODE_CLEAN_CAPACITY_BPS;
 	__u64 k = DEFAULT_FAIR_K;
 	__u64 ref_pkt = DEFAULT_FAIR_REF_PKT;
+	struct fair_budget budget;
 	int is_set;
 
 	if (parse_u64_env("XDPGW_FAIR_COMMITTED_BPS", &committed_bps,
@@ -378,13 +463,12 @@ static int prepare_fair_seed(struct fair_seed *seed)
 	}
 
 	memset(seed, 0, sizeof(*seed));
-	committed_bps = clamp_fair_rate(committed_bps);
-	ceiling_bps = clamp_fair_rate(ceiling_bps);
+	budget = fair_budget(committed_bps, ceiling_bps, k, ref_pkt);
 	seed->config.version = 1;
-	seed->config.committed_bps = committed_bps;
-	seed->config.burst_bps = ceiling_bps - committed_bps;
-	seed->config.cap_bps = fair_rate_product(ceiling_bps, k);
-	seed->config.cap_pps = seed->config.cap_bps / ref_pkt;
+	seed->config.committed_bps = budget.committed_bps;
+	seed->config.burst_bps = budget.burst_bps;
+	seed->config.cap_bps = budget.cap_bps;
+	seed->config.cap_pps = budget.cap_pps;
 	seed->node_clean_capacity_bps = clamp_fair_rate(capacity_bps);
 	return 0;
 }
@@ -814,9 +898,8 @@ static int seed_fair_node_config(struct xdp_gateway_bpf *skel,
 {
 	struct fair_node_config node = {
 		.version = seed->config.version,
-		.headroom_bps = seed->node_clean_capacity_bps >
-					 committed_bps ?
-			seed->node_clean_capacity_bps - committed_bps : 0,
+		.headroom_bps = node_headroom(seed->node_clean_capacity_bps,
+						     committed_bps),
 	};
 	__u32 slot;
 	int node_fd = bpf_map__fd(skel->maps.fair_node_config);
@@ -838,9 +921,8 @@ static int seed_fair_node_config(struct xdp_gateway_bpf *skel,
 static int seed_fairness_for_service(struct xdp_gateway_bpf *skel,
 				     __u32 service_id, const struct fair_seed *seed)
 {
-	__u64 headroom_bps = seed->node_clean_capacity_bps >
-				      seed->config.committed_bps ?
-		seed->node_clean_capacity_bps - seed->config.committed_bps : 0;
+	__u64 headroom_bps = node_headroom(seed->node_clean_capacity_bps,
+					     seed->config.committed_bps);
 
 	if (seed_fair_config_slot(skel, 0, service_id, &seed->config) != 0 ||
 	    seed_fair_config_slot(skel, 1, service_id, &seed->config) != 0 ||
@@ -975,7 +1057,8 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	if (set_observability_pin_paths(skel) != 0) {
+	if (set_config_pin_paths(skel) != 0 ||
+	    set_observability_pin_paths(skel) != 0) {
 		err = 1;
 		goto cleanup;
 	}
@@ -992,11 +1075,15 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	if (pin_observability_maps(skel) != 0) {
+	if (pin_config_maps(skel) != 0) {
 		err = 1;
 		goto cleanup;
 	}
 	pins_created = 1;
+	if (pin_observability_maps(skel) != 0) {
+		err = 1;
+		goto cleanup;
+	}
 
 	prog_fd = bpf_program__fd(skel->progs.xdp_gateway);
 	if (prog_fd < 0) {
@@ -1048,6 +1135,8 @@ int main(int argc, char **argv)
 	}
 
 cleanup:
+	if (pins_created)
+		unpin_config_maps(skel);
 	if (pins_created)
 		unpin_observability_maps(skel);
 	if (pin_dir_created)
