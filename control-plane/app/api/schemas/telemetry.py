@@ -15,6 +15,8 @@ class TelemetryWindowResponse(BaseModel):
     drop_by_reason: dict[str, int]
     pps: int
     bps: int
+    top_dst_ports: list[dict[str, int]]
+    top_src: list[dict[str, int | str]]
     window_start: datetime | None
     window_seconds: int
     stale: bool

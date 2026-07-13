@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Mapping
+from collections import Counter, deque
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
@@ -20,13 +22,21 @@ from app.db.models import (
     XdpMode,
     utc_now,
 )
-from app.worker.telemetry_reader import ServiceCounters, TelemetrySnapshot
+from app.worker.telemetry_reader import DropEvent, ServiceCounters, TelemetrySnapshot
 
 logger = logging.getLogger(__name__)
 
 
 class SnapshotReader(Protocol):
     async def snapshot(self) -> TelemetrySnapshot | None: ...
+
+    def tail(self) -> AsyncIterator[DropEvent]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _SampledEvent:
+    captured_at: datetime
+    event: DropEvent
 
 
 class TelemetryAggregator:
@@ -40,13 +50,18 @@ class TelemetryAggregator:
         interval_seconds: int,
         retention_seconds: int,
         node_clean_capacity_gbps: Decimal,
+        top_talkers_window_seconds: int = 60,
+        top_talkers_limit: int = 10,
     ) -> None:
         self.reader = reader
         self.session_factory = session_factory
         self.interval_seconds = interval_seconds
         self.retention_seconds = retention_seconds
         self.node_clean_capacity_bps = int(node_clean_capacity_gbps * Decimal(1_000_000_000))
+        self.top_talkers_window_seconds = top_talkers_window_seconds
+        self.top_talkers_limit = top_talkers_limit
         self._previous: TelemetrySnapshot | None = None
+        self._sampled_events: deque[_SampledEvent] = deque()
 
     @staticmethod
     def counter_delta(current: int, previous: int, *, reset: bool) -> int:
@@ -74,16 +89,47 @@ class TelemetryAggregator:
 
     async def run_loop(self, stop: asyncio.Event) -> None:
         """Run aggregation until cancelled, without letting one bad read stop the lane."""
+        sample_task = asyncio.create_task(self._run_sampled_event_lane(stop))
+        try:
+            while not stop.is_set():
+                try:
+                    await self.aggregate_once()
+                except Exception:
+                    logger.exception("Telemetry aggregation iteration failed")
+
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=self.interval_seconds)
+                except TimeoutError:
+                    continue
+        finally:
+            sample_task.cancel()
+            await asyncio.gather(sample_task, return_exceptions=True)
+
+    async def _run_sampled_event_lane(self, stop: asyncio.Event) -> None:
+        """Keep a single dpstat tail process consuming the shared ring buffer."""
         while not stop.is_set():
             try:
-                await self.aggregate_once()
+                await self.collect_sampled_events(stop)
             except Exception:
-                logger.exception("Telemetry aggregation iteration failed")
+                logger.exception("Sampled top-talker event lane failed")
 
+            if stop.is_set():
+                return
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self.interval_seconds)
             except TimeoutError:
                 continue
+
+    async def collect_sampled_events(self, stop: asyncio.Event | None = None) -> None:
+        """Collect one streaming reader lifetime into the rolling sampled window."""
+        async for event in self.reader.tail():
+            captured_at = utc_now()
+            self._sampled_events.append(_SampledEvent(captured_at=captured_at, event=event))
+            # The tail can remain healthy while snapshots or Postgres are not.
+            # Retain only the configured rolling horizon in that failure mode too.
+            self._prune_sampled_events(captured_at)
+            if stop is not None and stop.is_set():
+                return
 
     async def _persist_offline(self, captured_at: datetime) -> None:
         async with self._session()() as db:
@@ -116,6 +162,7 @@ class TelemetryAggregator:
         )
 
         async with self._session()() as db:
+            self._prune_sampled_events(captured_at)
             service_ids = {
                 service.dp_id: service.id
                 for service in (await db.scalars(select(ProtectedService))).all()
@@ -140,6 +187,7 @@ class TelemetryAggregator:
                 service_id = service_ids.get(service.dp_id)
                 if service_id is None:
                     continue
+                top_dst_ports, top_src = self._top_talkers(service.dp_id)
                 db.add(
                     self._counter_row(
                         scope=TelemetryScope.service,
@@ -151,6 +199,8 @@ class TelemetryAggregator:
                         drop_pkts=delta.drop_pkts,
                         drop_bytes=delta.drop_bytes,
                         drop_by_reason=delta.drop_by_reason,
+                        top_dst_ports=top_dst_ports,
+                        top_src=top_src,
                         is_baseline=is_baseline,
                     )
                 )
@@ -168,6 +218,7 @@ class TelemetryAggregator:
             )
             # The dataplane exposes per-service byte counters but only node-wide
             # drop reasons. Service totals therefore provide node dropped bytes.
+            node_top_dst_ports, node_top_src = self._top_talkers(None)
             db.add(
                 self._counter_row(
                     scope=TelemetryScope.node,
@@ -179,6 +230,8 @@ class TelemetryAggregator:
                     drop_pkts=node_drop_pkts,
                     drop_bytes=drop_bytes,
                     drop_by_reason=drop_by_reason,
+                    top_dst_ports=node_top_dst_ports,
+                    top_src=node_top_src,
                     is_baseline=is_baseline,
                 )
             )
@@ -210,6 +263,8 @@ class TelemetryAggregator:
         drop_pkts: int,
         drop_bytes: int,
         drop_by_reason: dict[str, int],
+        top_dst_ports: list[dict[str, int]],
+        top_src: list[dict[str, int | str]],
         is_baseline: bool,
     ) -> TelemetryCounter:
         return TelemetryCounter(
@@ -225,8 +280,8 @@ class TelemetryAggregator:
             drop_by_reason=drop_by_reason,
             pps=self._rate(clean_pkts),
             bps=self._rate(clean_bytes, 8),
-            top_dst_ports=None,
-            top_src=None,
+            top_dst_ports=top_dst_ports,
+            top_src=top_src,
             is_baseline=is_baseline,
         )
 
@@ -288,6 +343,39 @@ class TelemetryAggregator:
 
     def _rate(self, value: int, multiplier: int = 1) -> int:
         return value * multiplier // self.interval_seconds
+
+    def _prune_sampled_events(self, captured_at: datetime) -> None:
+        cutoff = captured_at - timedelta(seconds=self.top_talkers_window_seconds)
+        while self._sampled_events and self._sampled_events[0].captured_at < cutoff:
+            self._sampled_events.popleft()
+
+    def _top_talkers(
+        self, dp_id: int | None
+    ) -> tuple[list[dict[str, int]], list[dict[str, int | str]]]:
+        events = (
+            sample.event
+            for sample in self._sampled_events
+            if dp_id is None or sample.event.service_id == dp_id
+        )
+        dst_ports: Counter[int] = Counter()
+        source_ips: Counter[str] = Counter()
+        for event in events:
+            dst_ports[event.dport] += 1
+            source_ips[event.src_ip] += 1
+        return (
+            [
+                {"port": port, "count": count}
+                for port, count in sorted(dst_ports.items(), key=lambda item: (-item[1], item[0]))[
+                    : self.top_talkers_limit
+                ]
+            ],
+            [
+                {"ip": ip, "count": count}
+                for ip, count in sorted(source_ips.items(), key=lambda item: (-item[1], item[0]))[
+                    : self.top_talkers_limit
+                ]
+            ],
+        )
 
     async def _prune(self, db: AsyncSession, captured_at: datetime) -> None:
         cutoff = captured_at - timedelta(seconds=self.retention_seconds)

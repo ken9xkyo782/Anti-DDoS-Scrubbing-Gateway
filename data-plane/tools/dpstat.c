@@ -38,7 +38,7 @@ static void handle_signal(int sig)
 static void usage(const char *prog)
 {
 	fprintf(stderr, "usage: %s counters [-w seconds]\n", prog);
-	fprintf(stderr, "       %s tail\n", prog);
+	fprintf(stderr, "       %s tail [--json]\n", prog);
 	fprintf(stderr, "       %s rate <per_cpu_rate> <burst>\n", prog);
 	fprintf(stderr, "       %s active_config\n", prog);
 	fprintf(stderr, "       %s snapshot --json [--ifindex N]\n", prog);
@@ -646,17 +646,51 @@ static int print_event(void *ctx, void *data, size_t len)
 	return 0;
 }
 
-static int cmd_tail(void)
+static int print_event_json(void *ctx, void *data, size_t len)
+{
+	const struct drop_event *event = data;
+	char src[INET_ADDRSTRLEN];
+	char dst[INET_ADDRSTRLEN];
+	const char *reason;
+
+	(void)ctx;
+	if (len != sizeof(*event)) {
+		fprintf(stderr, "unexpected drop event size: %zu\n", len);
+		return 0;
+	}
+
+	format_ipv4(event->src_ip, src, sizeof(src));
+	format_ipv4(event->dst_ip, dst, sizeof(dst));
+	reason = event->reason < DROP_REASON_COUNT ? drop_reason_name[event->reason] : "unknown";
+	printf("{\"ts_ns\":%llu,\"reason\":", (unsigned long long)event->ts_ns);
+	print_json_string(reason);
+	printf(",\"src_ip\":");
+	print_json_string(src);
+	printf(",\"dst_ip\":");
+	print_json_string(dst);
+	printf(",\"sport\":%u,\"dport\":%u,\"ip_proto\":%u,\"service_id\":%u}\n",
+	       ntohs(event->sport), ntohs(event->dport), event->ip_proto, event->service_id);
+	fflush(stdout);
+	return 0;
+}
+
+static int cmd_tail(int argc, char **argv)
 {
 	struct ring_buffer *ring = NULL;
+	ring_buffer_sample_fn callback = print_event;
 	int ring_fd;
 	int err = 1;
+
+	if (argc == 1 && strcmp(argv[0], "--json") == 0)
+		callback = print_event_json;
+	else if (argc != 0)
+		return 2;
 
 	ring_fd = open_pinned_map(RINGBUF_PIN_PATH);
 	if (ring_fd < 0)
 		return 1;
 
-	ring = ring_buffer__new(ring_fd, print_event, NULL, NULL);
+	ring = ring_buffer__new(ring_fd, callback, NULL, NULL);
 	if (!ring) {
 		fprintf(stderr, "failed to create ringbuf reader: %s\n", strerror(errno));
 		goto out;
@@ -751,7 +785,7 @@ int main(int argc, char **argv)
 	if (strcmp(argv[1], "counters") == 0)
 		err = cmd_counters(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "tail") == 0)
-		err = argc == 2 ? cmd_tail() : 2;
+		err = cmd_tail(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "rate") == 0)
 		err = cmd_rate(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "active_config") == 0)

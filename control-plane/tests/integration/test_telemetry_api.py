@@ -113,6 +113,8 @@ def counter(
         drop_by_reason={"rate_limit_drop": 5},
         pps=50,
         bps=4_000,
+        top_dst_ports=[{"port": 443, "count": 4}],
+        top_src=[{"ip": "198.51.100.10", "count": 4}],
         is_baseline=baseline,
     )
 
@@ -181,6 +183,8 @@ async def test_service_telemetry_is_tenant_scoped_and_zeroed_when_empty(
         "drop_by_reason": {"rate_limit_drop": 5},
         "pps": 50,
         "bps": 4_000,
+        "top_dst_ports": [{"port": 443, "count": 4}],
+        "top_src": [{"ip": "198.51.100.10", "count": 4}],
         "window_start": now.isoformat().replace("+00:00", "Z"),
         "window_seconds": 2,
         "stale": False,
@@ -196,6 +200,8 @@ async def test_service_telemetry_is_tenant_scoped_and_zeroed_when_empty(
         "drop_by_reason": {},
         "pps": 0,
         "bps": 0,
+        "top_dst_ports": [],
+        "top_src": [],
         "window_start": None,
         "window_seconds": 0,
         "stale": True,
@@ -283,6 +289,8 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
     assert node_telemetry.status_code == 200
     assert node_telemetry.json()["has_data"] is True
     assert node_telemetry.json()["clean_bytes"] == 1_000
+    assert node_telemetry.json()["top_dst_ports"] == [{"port": 443, "count": 4}]
+    assert node_telemetry.json()["top_src"] == [{"ip": "198.51.100.10", "count": 4}]
     assert node_telemetry.json()["stale"] is False
     assert node_health.status_code == 200
     assert node_health.json() == {
@@ -330,6 +338,8 @@ async def test_node_endpoints_return_stale_zeroed_empty_payloads(
     assert telemetry_response.json()["window_start"] is None
     assert telemetry_response.json()["window_seconds"] == 0
     assert telemetry_response.json()["stale"] is True
+    assert telemetry_response.json()["top_dst_ports"] == []
+    assert telemetry_response.json()["top_src"] == []
     assert health_response.status_code == 200
     assert health_response.json()["has_data"] is False
     assert health_response.json()["window_start"] is None

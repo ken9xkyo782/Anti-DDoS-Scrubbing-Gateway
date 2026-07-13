@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -6,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.worker.telemetry import TelemetryAggregator
 from app.worker.telemetry_reader import (
+    DropEvent,
     FakeTelemetryReader,
     NodeCounters,
     ServiceCounters,
@@ -107,3 +109,31 @@ async def test_database_failure_does_not_advance_the_telemetry_baseline(
     await aggregator.aggregate_once()
 
     assert aggregator._previous is None
+
+
+@pytest.mark.unit
+async def test_sampled_event_collection_prunes_the_rolling_window_without_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_time = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    reader = FakeTelemetryReader(
+        snapshots=[],
+        drop_events=[
+            DropEvent(1, "rate_limit_drop", "198.51.100.10", "203.0.113.20", 1, 443, 6, 1),
+            DropEvent(2, "rate_limit_drop", "198.51.100.11", "203.0.113.20", 2, 53, 17, 1),
+        ],
+    )
+    aggregator = TelemetryAggregator(
+        reader=reader,
+        session_factory=None,
+        interval_seconds=1,
+        retention_seconds=60,
+        node_clean_capacity_gbps=Decimal("40"),
+        top_talkers_window_seconds=1,
+    )
+    captured_times = iter((initial_time, initial_time + timedelta(seconds=2)))
+    monkeypatch.setattr("app.worker.telemetry.utc_now", lambda: next(captured_times))
+
+    await aggregator.collect_sampled_events()
+
+    assert [sample.event.src_ip for sample in aggregator._sampled_events] == ["198.51.100.11"]

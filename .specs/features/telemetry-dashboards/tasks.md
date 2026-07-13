@@ -9,9 +9,9 @@
 - D-030-4 — `dp_id` assigned in `create_service` (touches executed M1 code, additive). ✅
 - D-030-3 — `svc_stat` value uses `drop_by_reason[DROP_REASON_CAP=32]`. ✅
 
-**P1 execution defaults (2026-07-13):**
-- P1 includes T1–T12 and T17. T13–T15 are deferred to P2, and T16 is
-  deferred to P3.
+**Execution scope (2026-07-13):**
+- The completed P1 scope includes T1–T12 and T17. This follow-on execution
+  includes the P2 tasks T13–T15 and the P3 task T16.
 - `worker_telemetry_interval_seconds` is an integer in the inclusive range
   1–2 seconds. The default is 2 seconds, so persisted `window_seconds` is
   exact.
@@ -40,8 +40,9 @@ Do not use the historic counts below as a current baseline.
 | T8 | Complete | `17f0aa9`; full CP gate: 448 passed |
 | T11 | Complete | `77753e4`; FE gate: 5 files / 8 tests passed |
 | T12 | Complete | `6e335e8`; FE gate: 9 files / 13 tests; CP static-serving checks: 2 passed |
-| T13–T15 | Deferred | P2 is out of the approved P1 execution scope |
-| T16 | Deferred | P3 is out of the approved P1 execution scope |
+| T13 | Complete | DP build and 130 DP tests; CP full gate passed with 452 tests; focused follow-up passed with 19 tests |
+| T14–T15 | Pending | Execute after T13 because the CP integration fixtures serialize these tasks |
+| T16 | Pending | Execute after the P2 work to validate the final dashboard surface together |
 | T17 | Complete | docs render review and final P1 traceability recorded |
 
 T3 additionally pins `active_config` with the established observability
@@ -52,8 +53,8 @@ deprecation warnings); FE gate **9 files / 13 tests** plus production build;
 DP build/quick **130 passed** and privileged redirect/fairness/apply smoke;
 and browser validation of FastAPI-served `/tenant` and `/admin` deep links,
 login redirect, tenant isolation, two-second polling, critical generic XDP,
-and missing-asset 404 behavior. TEL-01–30 are verified;
-TEL-31–40 remain pending for the deferred P2/P3 work.
+and missing-asset 404 behavior. TEL-01–30, TEL-36, and TEL-37 are verified.
+The remaining P2/P3 requirements are pending their scheduled tasks.
 
 **Tracks:** **DP** (`data-plane/`, C) · **CP** (`control-plane/app`, Python) · **FE** (`control-plane/frontend/`, React/TS). DP and CP/FE are separate dirs with separate gates → **cross-track parallel**. Within CP, only **unit**-typed tasks may be `[P]` (integration shares `compose.test.yml`). FE is a separate toolchain (Vitest, no compose.test) → the FE scaffold is `[P]`, but FE view tasks serialize on the shared project tree.
 
@@ -86,12 +87,12 @@ Phase 4
 Phase 5
   T9,T10,T11 → T12   (FE: admin dashboard)           (after T11 — shared FE tree)
 
-Phase 6 — P2 (deferred; not part of P1)
+Phase 6 — P2 follow-on execution
   T3,T7  → T13  (top-talkers backend)
   T7,T9  → T14  (richer-health backend)     [T13,T14 CP-integration → serialize]
   T12,T13,T14 → T15 (P2 frontend panels)
 
-Phase 7 — P3 (deferred; not part of P1)
+Phase 7 — P3 follow-on execution
   T9,T12 → T16 (trend chart + export)
 
 Phase 8 — Docs
@@ -395,10 +396,12 @@ opt-in FastAPI serving of the production SPA bundle.
 **Tools**: Skill `coding-guidelines`; MCP `context7`/web (ringbuf consumer-pos across processes — design-flagged; fallback = long-lived streaming lane)
 
 **Done when**:
-- [ ] `dpstat tail --json` streams sampled `drop_event`s as JSON lines; aggregator maintains a rolling per-service+node top-N (dst-port, src IP) over a configurable window and persists to `top_dst_ports`/`top_src`
-- [ ] Ringbuf consumption verified (consumer-pos correctness); labeled sampled/approximate; `top_src` PII note (CM-08)
-- [ ] Integration (FakeReader with sample events) + build; `make test` unchanged
-- [ ] Gate passes: DP `build` + CP `full`
+- [x] `dpstat tail --json` streams sampled `drop_event`s as JSON lines; aggregator maintains a rolling per-service+node top-N (dst-port, src IP) over a configurable window and persists to `top_dst_ports`/`top_src`.
+- [x] Ringbuf consumption uses one long-lived consumer lane. The top-talker
+  data is sampled/approximate, T15 labels it in the UI, and `top_src` carries
+  the CM-08 pilot-PII note.
+- [x] Integration uses `FakeTelemetryReader` sample events; DP build and its unchanged test suite pass.
+- [x] DP `build` and the CP `full` gate pass.
 
 **Tests**: integration
 **Gate**: full

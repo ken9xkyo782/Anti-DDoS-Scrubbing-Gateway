@@ -2,7 +2,7 @@
 
 **Feature ID prefix:** `TEL`
 **Milestone:** M5 — Observability & chargeback (first of two features; sibling = *Chargeback metering*)
-**Status:** P1 verified (2026-07-13); P2/P3 pending
+**Status:** P1 verified (2026-07-13); P2 in progress; P3 pending
 
 ## Problem Statement
 
@@ -218,8 +218,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | TEL-33 | P2: Richer admin observability | - | Pending |
 | TEL-34 | P2: Richer admin observability | - | Pending |
 | TEL-35 | P2: Richer admin observability | - | Pending |
-| TEL-36 | P2: Top-talkers view | - | Pending |
-| TEL-37 | P2: Top-talkers view | - | Pending |
+| TEL-36 | P2: Top-talkers view | - | Verified |
+| TEL-37 | P2: Top-talkers view | - | Verified |
 | TEL-38 | P2: Top-talkers view | - | Pending |
 | TEL-39 | P3: Historical trend & export | - | Pending |
 | TEL-40 | P3: Historical trend & export | - | Pending |
@@ -229,7 +229,8 @@ Explicitly excluded. Documented to prevent scope creep.
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
 **Coverage:** 40 total. TEL-01..30 are implemented and verified by the P1
-gates; TEL-31..38 remain pending for P2 and TEL-39..40 remain pending for P3.
+gates. T13 verifies TEL-36..37; TEL-31..35 and TEL-38 remain pending for P2,
+and TEL-39..40 remain pending for P3.
 
 ---
 

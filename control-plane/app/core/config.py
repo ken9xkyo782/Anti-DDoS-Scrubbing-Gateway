@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     worker_telemetry_binary_path: str = "../data-plane/build/dpstat"
     worker_telemetry_ifindex: int | None = Field(default=None, ge=0)
     worker_telemetry_timeout_seconds: float = Field(default=5.0, gt=0)
+    worker_telemetry_top_talkers_window_seconds: int = Field(default=60, gt=0)
+    worker_telemetry_top_talkers_limit: int = Field(default=10, ge=1, le=100)
 
     feed_fetch_connect_timeout_seconds: float = Field(default=5.0, gt=0)
     feed_fetch_read_timeout_seconds: float = Field(default=10.0, gt=0)

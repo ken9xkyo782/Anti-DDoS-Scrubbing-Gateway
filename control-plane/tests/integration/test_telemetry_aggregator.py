@@ -15,6 +15,7 @@ from app.db.models import (
 )
 from app.worker.telemetry import TelemetryAggregator
 from app.worker.telemetry_reader import (
+    DropEvent,
     FakeTelemetryReader,
     NodeCounters,
     ServiceCounters,
@@ -83,13 +84,17 @@ def aggregator(
     snapshots: list[TelemetrySnapshot | None],
     *,
     retention_seconds: int = 60,
+    sample_events: list[DropEvent] | None = None,
+    top_talkers_window_seconds: int = 60,
 ) -> TelemetryAggregator:
     return TelemetryAggregator(
-        reader=FakeTelemetryReader(snapshots=snapshots),
+        reader=FakeTelemetryReader(snapshots=snapshots, drop_events=sample_events or []),
         session_factory=session_factory,
         interval_seconds=2,
         retention_seconds=retention_seconds,
         node_clean_capacity_gbps=Decimal("40"),
+        top_talkers_window_seconds=top_talkers_window_seconds,
+        top_talkers_limit=10,
     )
 
 
@@ -281,3 +286,98 @@ async def test_aggregator_prunes_expired_rows_and_records_offline_health(
     assert counters == []
     assert len(health) == 1
     assert health[0].xdp_mode is XdpMode.offline
+
+
+async def test_aggregator_persists_sampled_rolling_top_talkers_for_service_and_node(
+    committed_db: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = await create_service(committed_db)
+    initial_time = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    first = snapshot(
+        ts_ns=1_000_000_000,
+        services=(
+            service_counters(
+                service.dp_id,
+                clean_pkts=10,
+                clean_bytes=1_000,
+                drop_pkts=2,
+                drop_bytes=100,
+            ),
+        ),
+    )
+    second = snapshot(
+        ts_ns=3_000_000_000,
+        services=(
+            service_counters(
+                service.dp_id,
+                clean_pkts=11,
+                clean_bytes=1_100,
+                drop_pkts=5,
+                drop_bytes=250,
+            ),
+        ),
+    )
+    sample_events = [
+        DropEvent(1, "rate_limit_drop", "198.51.100.10", "203.0.113.20", 1, 443, 6, service.dp_id),
+        DropEvent(2, "rate_limit_drop", "198.51.100.10", "203.0.113.20", 2, 443, 6, service.dp_id),
+        DropEvent(3, "rate_limit_drop", "198.51.100.11", "203.0.113.20", 3, 53, 17, service.dp_id),
+        DropEvent(4, "service_miss", "198.51.100.12", "203.0.113.20", 4, 9_999, 17, 0),
+    ]
+    telemetry = aggregator(
+        committed_db,
+        [first, second, second],
+        sample_events=sample_events,
+        top_talkers_window_seconds=1,
+    )
+    monkeypatch.setattr("app.worker.telemetry.utc_now", lambda: initial_time)
+
+    await telemetry.collect_sampled_events()
+    await telemetry.aggregate_once()
+    await telemetry.aggregate_once()
+
+    async with committed_db() as db:
+        service_row = (
+            await db.scalars(
+                select(TelemetryCounter)
+                .where(TelemetryCounter.scope == TelemetryScope.service)
+                .order_by(TelemetryCounter.window_start.desc())
+                .limit(1)
+            )
+        ).one()
+        node_row = (
+            await db.scalars(
+                select(TelemetryCounter)
+                .where(TelemetryCounter.scope == TelemetryScope.node)
+                .order_by(TelemetryCounter.window_start.desc())
+                .limit(1)
+            )
+        ).one()
+
+    assert service_row.top_dst_ports == [{"port": 443, "count": 2}, {"port": 53, "count": 1}]
+    assert service_row.top_src == [
+        {"ip": "198.51.100.10", "count": 2},
+        {"ip": "198.51.100.11", "count": 1},
+    ]
+    assert node_row.top_dst_ports == [
+        {"port": 443, "count": 2},
+        {"port": 53, "count": 1},
+        {"port": 9_999, "count": 1},
+    ]
+    assert node_row.top_src[-1] == {"ip": "198.51.100.12", "count": 1}
+
+    monkeypatch.setattr("app.worker.telemetry.utc_now", lambda: initial_time + timedelta(seconds=2))
+    await telemetry.aggregate_once()
+
+    async with committed_db() as db:
+        expired_node_row = (
+            await db.scalars(
+                select(TelemetryCounter)
+                .where(TelemetryCounter.scope == TelemetryScope.node)
+                .order_by(TelemetryCounter.window_start.desc())
+                .limit(1)
+            )
+        ).one()
+
+    assert expired_node_row.top_dst_ports == []
+    assert expired_node_row.top_src == []

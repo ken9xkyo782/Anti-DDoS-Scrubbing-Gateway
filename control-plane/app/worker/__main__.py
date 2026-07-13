@@ -29,6 +29,8 @@ def build_telemetry_aggregator(
         interval_seconds=settings.worker_telemetry_interval_seconds,
         retention_seconds=settings.worker_telemetry_retention_seconds,
         node_clean_capacity_gbps=settings.node_clean_capacity_gbps,
+        top_talkers_window_seconds=settings.worker_telemetry_top_talkers_window_seconds,
+        top_talkers_limit=settings.worker_telemetry_top_talkers_limit,
     )
 
 
