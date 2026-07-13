@@ -52,6 +52,25 @@
 #define APPLY_DEFAULT_FAIR_K 3ULL
 #define APPLY_DEFAULT_FAIR_REF_PKT 512ULL
 
+/* These are deliberately the config-map pins only. Runtime maps, static
+ * inners, and tx_devmap remain owned by the loader and are never opened here.
+ */
+#define APPLY_PIN_DIR "/sys/fs/bpf/xdp_gateway"
+#define APPLY_ACTIVE_CONFIG_PIN APPLY_PIN_DIR "/active_config"
+#define APPLY_SERVICE_MAP_PIN APPLY_PIN_DIR "/service_map"
+#define APPLY_RULE_BLOCK_MAP_PIN APPLY_PIN_DIR "/rule_block_map"
+#define APPLY_WHITELIST_BLOOM_PIN APPLY_PIN_DIR "/whitelist_bloom"
+#define APPLY_WHITELIST_LPM_PIN APPLY_PIN_DIR "/whitelist_lpm"
+#define APPLY_VIP_CONFIG_MAP_PIN APPLY_PIN_DIR "/vip_config_map"
+#define APPLY_GLOBAL_BLACKLIST_BLOOM_PIN APPLY_PIN_DIR "/global_blacklist_bloom"
+#define APPLY_GLOBAL_BLACKLIST_LPM_PIN APPLY_PIN_DIR "/global_blacklist_lpm"
+#define APPLY_SERVICE_BLACKLIST_BLOOM_PIN APPLY_PIN_DIR "/service_blacklist_bloom"
+#define APPLY_SERVICE_BLACKLIST_LPM_PIN APPLY_PIN_DIR "/service_blacklist_lpm"
+#define APPLY_UDP_BLOCKED_PORT_BITMAP_PIN APPLY_PIN_DIR "/udp_blocked_port_bitmap"
+#define APPLY_FAIR_CONFIG_MAP_PIN APPLY_PIN_DIR "/fair_config_map"
+#define APPLY_FAIR_NODE_CONFIG_PIN APPLY_PIN_DIR "/fair_node_config"
+#define APPLY_GBL_META_PIN APPLY_PIN_DIR "/gbl_meta"
+
 /* In-memory decode of the wire snapshot. Mirrors apply_snapshot.h field for
  * field; T3 maps these into the BPF map values. Addresses are stored as __be32
  * (network byte order, verbatim wire bytes) to match the data-plane map keys. */
@@ -931,26 +950,144 @@ fail:
 }
 
 #ifndef XDPGW_APPLY_NO_MAIN
+static void init_apply_fds(struct apply_fds *fds)
+{
+	*fds = (struct apply_fds){
+		.active_config_fd = -1,
+		.service_map_fd = -1,
+		.rule_block_map_fd = -1,
+		.whitelist_bloom_fd = -1,
+		.whitelist_lpm_fd = -1,
+		.vip_config_map_fd = -1,
+		.global_blacklist_bloom_fd = -1,
+		.global_blacklist_lpm_fd = -1,
+		.service_blacklist_bloom_fd = -1,
+		.service_blacklist_lpm_fd = -1,
+		.udp_blocked_port_bitmap_fd = -1,
+		.fair_config_map_fd = -1,
+		.fair_node_config_fd = -1,
+		.gbl_meta_fd = -1,
+	};
+}
+
+static void close_apply_fds(struct apply_fds *fds)
+{
+	int *map_fds[] = {
+		&fds->active_config_fd,
+		&fds->service_map_fd,
+		&fds->rule_block_map_fd,
+		&fds->whitelist_bloom_fd,
+		&fds->whitelist_lpm_fd,
+		&fds->vip_config_map_fd,
+		&fds->global_blacklist_bloom_fd,
+		&fds->global_blacklist_lpm_fd,
+		&fds->service_blacklist_bloom_fd,
+		&fds->service_blacklist_lpm_fd,
+		&fds->udp_blocked_port_bitmap_fd,
+		&fds->fair_config_map_fd,
+		&fds->fair_node_config_fd,
+		&fds->gbl_meta_fd,
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(map_fds) / sizeof(map_fds[0]); i++) {
+		if (*map_fds[i] >= 0) {
+			close(*map_fds[i]);
+			*map_fds[i] = -1;
+		}
+	}
+}
+
+static int open_apply_pin(const char *name, const char *path, int *fd)
+{
+	*fd = bpf_obj_get(path);
+	if (*fd >= 0)
+		return 0;
+
+	fprintf(stderr,
+		"xdpgw-apply: required pinned config map %s is unavailable at %s: %s; "
+		"is xdp_gateway_loader running?\n",
+		name, path, strerror(errno));
+	return -1;
+}
+
+static int open_apply_pins(struct apply_fds *fds)
+{
+	init_apply_fds(fds);
+
+	if (open_apply_pin("active_config", APPLY_ACTIVE_CONFIG_PIN,
+			   &fds->active_config_fd) != 0 ||
+	    open_apply_pin("service_map", APPLY_SERVICE_MAP_PIN,
+			   &fds->service_map_fd) != 0 ||
+	    open_apply_pin("rule_block_map", APPLY_RULE_BLOCK_MAP_PIN,
+			   &fds->rule_block_map_fd) != 0 ||
+	    open_apply_pin("whitelist_bloom", APPLY_WHITELIST_BLOOM_PIN,
+			   &fds->whitelist_bloom_fd) != 0 ||
+	    open_apply_pin("whitelist_lpm", APPLY_WHITELIST_LPM_PIN,
+			   &fds->whitelist_lpm_fd) != 0 ||
+	    open_apply_pin("vip_config_map", APPLY_VIP_CONFIG_MAP_PIN,
+			   &fds->vip_config_map_fd) != 0 ||
+	    open_apply_pin("global_blacklist_bloom", APPLY_GLOBAL_BLACKLIST_BLOOM_PIN,
+			   &fds->global_blacklist_bloom_fd) != 0 ||
+	    open_apply_pin("global_blacklist_lpm", APPLY_GLOBAL_BLACKLIST_LPM_PIN,
+			   &fds->global_blacklist_lpm_fd) != 0 ||
+	    open_apply_pin("service_blacklist_bloom",
+			   APPLY_SERVICE_BLACKLIST_BLOOM_PIN,
+			   &fds->service_blacklist_bloom_fd) != 0 ||
+	    open_apply_pin("service_blacklist_lpm", APPLY_SERVICE_BLACKLIST_LPM_PIN,
+			   &fds->service_blacklist_lpm_fd) != 0 ||
+	    open_apply_pin("udp_blocked_port_bitmap",
+			   APPLY_UDP_BLOCKED_PORT_BITMAP_PIN,
+			   &fds->udp_blocked_port_bitmap_fd) != 0 ||
+	    open_apply_pin("fair_config_map", APPLY_FAIR_CONFIG_MAP_PIN,
+			   &fds->fair_config_map_fd) != 0 ||
+	    open_apply_pin("fair_node_config", APPLY_FAIR_NODE_CONFIG_PIN,
+			   &fds->fair_node_config_fd) != 0 ||
+	    open_apply_pin("gbl_meta", APPLY_GBL_META_PIN, &fds->gbl_meta_fd) != 0)
+		goto fail;
+
+	return 0;
+
+fail:
+	close_apply_fds(fds);
+	return -1;
+}
+
 int main(int argc, char **argv)
 {
 	struct node_cfg node;
+	struct apply_fds fds;
+	int err = 1;
 
-	if (argc < 2) {
+	if (argc != 2) {
 		fprintf(stderr, "usage: %s <snapshot-path>\n", argv[0]);
 		return 2;
 	}
 
-	if (parse_snapshot(argv[1], &node) != 0)
+	if (parse_snapshot(argv[1], &node) != 0) {
+		fprintf(stderr, "xdpgw-apply: failed to parse snapshot %s\n", argv[1]);
 		return 1;
+	}
+	if (open_apply_pins(&fds) != 0)
+		goto out;
+	if (apply_node_cfg(&fds, &node) != 0) {
+		fprintf(stderr,
+			"xdpgw-apply: build, verify, or feed carry-forward failed before "
+			"active_config swap%s%s\n",
+			errno ? ": " : "",
+			errno ? strerror(errno) : "");
+		goto out;
+	}
 
-	/*
-	 * T3 provides the fd-taking build/verify/commit core above. T5 opens the
-	 * pinned maps and invokes it; until then this CLI must remain fail-closed.
-	 */
-	fprintf(stderr,
-		"xdpgw-apply: parsed %u service(s) (schema v%u); pin-open CLI not yet implemented (T5)\n",
-		node.service_count, node.schema_version);
+	printf("xdpgw-apply: swapped active slot %u to %u, version %u to %u "
+	       "(%u service(s))\n",
+	       fds.active_slot, fds.inactive_slot, fds.version, fds.version + 1,
+	       node.service_count);
+	err = 0;
+
+out:
+	close_apply_fds(&fds);
 	free_node_cfg(&node);
-	return 3;
+	return err;
 }
 #endif

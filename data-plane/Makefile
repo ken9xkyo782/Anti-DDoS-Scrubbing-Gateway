@@ -82,17 +82,16 @@ $(APPLY): $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_DIR)
 $(TEST_SNAPSHOT_BIN): $(TEST_SNAPSHOT_SRC) $(APPLY_SRC) $(APPLY_HDRS) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
-# Scale-envelope apply measurement (1000-service snapshot, wall-time budget) is
-# implemented in T5; the target exists now so the gate table is complete.
-applybulk:
-	@echo "applybulk: scale measurement lands in T5 (double-buffer-swap)"
+applybulk: loader dpstat apply
+	$(TEST_DIR)/apply_bulk.sh
 
 test: $(TEST_BIN)
 	$(TEST_BIN)
 
-smoke: loader dpstat
+smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_redirect.sh
 	$(TEST_DIR)/smoke_fairness.sh
+	$(TEST_DIR)/smoke_apply.sh
 
 $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
