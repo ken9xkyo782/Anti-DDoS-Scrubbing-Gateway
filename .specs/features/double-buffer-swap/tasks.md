@@ -339,14 +339,23 @@ discipline, and the worker `DoubleBufferApplier` + `xdpgw-apply` invocation (REA
 **Tools**: MCP: NONE · Skill: `docs-writer`
 
 **Done when**:
-- [ ] TESTING.md gains an `xdpgw-apply` subsection (fixture + build/flip conventions + `applybulk`),
+- [x] TESTING.md gains an `xdpgw-apply` subsection (fixture + build/flip conventions + `applybulk`),
       and the data-plane gate table lists `make apply`/`make applybulk`.
-- [ ] `apply_snapshot` wire format + `schema_version` bump rule documented.
-- [ ] READMEs describe the CP→helper apply path (loader pins config maps; helper reuses seed idioms).
+- [x] `apply_snapshot` wire format + `schema_version` bump rule documented.
+- [x] READMEs describe the CP→helper apply path (loader pins config maps; helper reuses seed idioms).
 
 **Tests**: none
 **Gate**: none (doc build/lint only)
 **Commit**: `docs: xdpgw-apply flow, snapshot contract, apply testing conventions`
+
+**Executed 2026-07-13**: `TESTING.md` — new "Apply-helper (`xdpgw-apply`) conventions" subsection
+(in-harness fd-taking core, fault injection under `-DXDPGW_APPLY_TEST`, golden-fixture round-trip +
+`schema_version` discipline, `applybulk` scale), `apply`/`applybulk` added to the gate table, corpus
+count refreshed 91→**122**. `data-plane/README.md` — new "Apply helper (xdpgw-apply)" section (loader
+pins the 14 config maps, CLI, single-write flip, abort-before-flip rollback, `dpstat active_config`).
+`control-plane/README.md` — replaced the stale "Placeholder applier caveat" with "Double-buffer applier"
++ the `CONTROL_PLANE_WORKER_APPLY_{BINARY_PATH,TIMEOUT_SECONDS}` settings. No new requirement; doc-only.
+**Double-buffer-swap (M4 #2) Execute complete: T1–T8 all landed.**
 
 ---
 

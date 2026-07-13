@@ -217,6 +217,34 @@ interpret values as lifetime totals. Sampling budget is per CPU; a rate of `256`
 drop counters stay correct even when samples are suppressed or lost. `dpstat counters` also prints
 the `bloom_hit_lpm_miss` rows for whitelist, global blacklist, service blacklist, and total.
 
+## Apply helper (xdpgw-apply)
+
+`xdpgw-apply` is the write side of the control plane → data plane apply path. The loader pins the 14
+slotted config maps (`service_map`, `rule_block_map`, `whitelist_bloom`/`_lpm`, `vip_config_map`,
+`global_blacklist_bloom`/`_lpm`, `service_blacklist_bloom`/`_lpm`, `udp_blocked_port_bitmap`,
+`fair_config_map`, `fair_node_config`, `gbl_meta`, `active_config`) under `/sys/fs/bpf/xdp_gateway/`;
+runtime-state maps, the static inner maps, and `tx_devmap` stay owned by the loader and are never opened
+here.
+
+On a committed change the worker serializes a consistent full-node snapshot in the `apply_snapshot.h`
+wire format and runs the helper:
+
+```bash
+sudo ./build/xdpgw-apply <snapshot-path>
+```
+
+The helper opens the pinned config maps and, for the **inactive** slot, builds a fresh inner per
+service-scoped outer from the snapshot (reusing the loader's seed/leaf-writer idioms), carries forward
+the feed-owned global-deny inners unchanged, structurally verifies the slot, then performs a single
+`active_config` write to flip the active slot and bump the version. It prints the slot and version
+transition and exits `0` on success. Any build, verify, or carry-forward failure exits non-zero **before**
+the flip, so the last-good slot stays live — abort-before-flip is the entire rollback. No BPF work runs
+in the worker; all map writes stay in this audited C helper.
+
+Inspect the live slot and version with `sudo ./build/dpstat active_config`. Build the helper and run its
+snapshot parse self-test with `make apply`; exercise the full privileged flow with `sudo make applybulk`
+(1000-service build/verify/flip under a 5 s budget) and the apply smoke inside `sudo make smoke`.
+
 ## Requirements
 
 - `clang`

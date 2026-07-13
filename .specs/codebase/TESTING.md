@@ -115,10 +115,11 @@ Run these from `data-plane/`.
 
 | Gate | Command | When |
 | --- | --- | --- |
-| **build** | `make bpf skel loader dpstat` | Scaffold, loader, observability tooling, and wiring tasks |
+| **build** | `make bpf skel loader apply dpstat` | Scaffold, loader, apply helper, observability tooling, and wiring tasks. `make apply` also builds `test_snapshot` and runs the snapshot parse self-test against the golden fixture |
 | **quick** | `make test` | Parser/verdict tasks with `dp-unit` coverage |
-| **full** | `make test && sudo make smoke` | Pre-merge checks on a BPF+veth-capable runner; `make smoke` is privileged and not parallel-safe |
-| **scale** | `sudo make blbulk` | Privileged 1M global-blacklist load and footprint check; run only when blacklist map capacity or kernel memory posture changes |
+| **full** | `make test && sudo make smoke` | Pre-merge checks on a BPF+veth-capable runner; `make smoke` runs the redirect, fairness, and apply smokes and is privileged and not parallel-safe |
+| **scale (blacklist)** | `sudo make blbulk` | Privileged 1M global-blacklist load and footprint check; run only when blacklist map capacity or kernel memory posture changes |
+| **scale (apply)** | `sudo make applybulk` | Privileged 1000-service build/verify/flip; asserts a sub-5 s wall time, exactly one `active_config` flip, and feed-owned maps carried forward. Run when the apply path or the slotted config-map set changes |
 
 The native-mode loader is verified by the build gate plus a manual veth/NIC smoke:
 `SERVICE_DEST=<ipv4-or-cidr> sudo ./build/xdp_gateway_loader <in-ifname> <out-ifname>` should attach to
@@ -224,12 +225,44 @@ capacity assumptions. The target is not part of `make test`; it loads the normal
 1,048,576 mixed `/24` and `/32` global blacklist entries, checks sampled bloom/LPM membership, and
 runs one `BPF_PROG_TEST_RUN` packet that must return `XDP_DROP`.
 
+### Apply-helper (`xdpgw-apply`) conventions
+
+The `xdpgw-apply` build core is factored into fd-taking functions —
+`build_inactive_slot`, `carry_forward_feed`, `verify_slot`, `commit` — so the whole
+build → verify → flip → verdict path runs in-harness under `make test`. `tests/test_parse.c`
+`#include`s the helper (its `main()` is elided) and drives the core with skeleton fds, then replays a
+`BPF_PROG_TEST_RUN` packet to confirm the flip changed enforcement. Only the `main()` pin-open plus the
+subprocess CLI need the privileged smoke.
+
+Apply dp-unit cases seed the live slot, run the core against a snapshot, and assert the flip. Cover the
+build-then-flip verdict change (a newly allowed flow admits, a removed service misses) alongside the
+carry-forward invariant (feed-owned global-deny maps and non-triggering services are unchanged after the
+flip) and the fail-closed paths (a forced build-install or `verify_slot` mismatch leaves `active_config`
+untouched; two applies of one snapshot bump `version` V→V+1→V+2 with identical verdicts). Faults are
+injected through `apply_test_set_fault()`, compiled only under `-DXDPGW_APPLY_TEST`; the helper binary
+has no runtime switch that can force a production apply to fail.
+
+The wire format is the `apply_snapshot.h` v1 contract (magic `XDPGWAP1`, `schema_version`, per-service
+record with service-level VIP and the `dp_id` surrogate). `make apply` runs `build/test_snapshot`
+against the committed `tests/fixtures/apply_snapshot_golden.bin`; the control-plane
+`serialize_node_snapshot` must emit byte-identical output for the matching node, so the fixture binds the
+C parser and the Python serializer. Bump `schema_version` in the header and regenerate the fixture
+(`tests/fixtures/gen_apply_snapshot_golden.py`) together on any layout change — readers reject an unknown
+version before touching a map.
+
+`sudo make applybulk` is the scale gate: it loads the skeleton, generates a 1000-service snapshot, runs
+one apply, and asserts the build/verify/flip completes in under 5 s, that `active_config` flips exactly
+once (slot 0→1, version 1→2), and that the feed-owned `global_blacklist_bloom`/`_lpm` and
+`udp_blocked_port_bitmap` inner ids are carried forward rather than rebuilt. It is not part of
+`make test`; run it when the apply path or the slotted config-map set changes.
+
 ### Data-plane Corpus
 
 `dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
 malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, too-deep
 VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits,
 whitelist scoped-match and VIP ceiling cases, blacklist amp-port, bogon, bitmap, global/service
-bloom-to-LPM, bloom false-positive, and sampling budget cases. The current quick suite has **91**
+bloom-to-LPM, bloom false-positive, sampling budget, and `xdpgw-apply` build/verify/flip, fresh-inner,
+and fail-closed rollback cases. The current quick suite has **122**
 tests. Each verdict task states the expected passing test count to prevent silent deletions or skipped
 coverage.

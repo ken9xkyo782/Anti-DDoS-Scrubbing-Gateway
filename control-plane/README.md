@@ -40,8 +40,24 @@ and Redis configuration as the control plane and processes one job at a time.
 Use the administrator endpoint `GET /jobs?status=` to view worker ledger state
 and filter jobs by status.
 
-## Placeholder applier caveat
+## Configure the apply helper
 
-In v1, `PlaceholderApplier` only logs and succeeds. An `active` state means the
-worker acknowledged the job; it does not mean an XDP map was built or swapped.
-That meaning changes only when M4 #2 replaces `PlaceholderApplier`.
+The worker execs the `xdpgw-apply` data-plane helper to build and swap BPF maps.
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `CONTROL_PLANE_WORKER_APPLY_BINARY_PATH` | `../data-plane/build/xdpgw-apply` | Path to the `xdpgw-apply` helper the worker execs for each apply. |
+| `CONTROL_PLANE_WORKER_APPLY_TIMEOUT_SECONDS` | `5.0` | Caps each helper run; a timeout kills the helper and fails the job, leaving the last-good active slot live. |
+
+## Double-buffer applier
+
+The worker applies each committed job with `DoubleBufferApplier`. It loads one consistent,
+repeatable-read snapshot of every enabled service, serializes it to the `apply_snapshot` wire format in a
+private temporary file, and execs `xdpgw-apply` with the configured timeout. The helper builds the
+inactive slot, verifies it, and performs a single `active_config` flip; the worker itself does no BPF
+work.
+
+Exit `0` means the config was built, verified, and swapped into the XDP hot path, so the job moves to
+`active`. A non-zero exit or a timeout raises `ApplyError` and fails the job, leaving the last-good active
+slot live. An `active` state now means the config actually reached the data plane — not merely that the
+worker acknowledged the job.
