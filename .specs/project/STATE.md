@@ -2,11 +2,30 @@
 
 **Last Updated:** 2026-07-13
 
-**Current Work (authoritative update):** M4 #3 → **Threat intelligence feed sync** — **EXECUTED / VERIFIED** (2026-07-13). All of T1–T15 landed. T1–T13 committed earlier (`021f567..ae33648`); **T14** (`xdpgw-apply` `GLOBAL_DENY` mode + shared pin-dir lock + inverse carry-forward + global-apply smoke/scale) and **T15** (operations docs + final traceability) executed and committed this session. **Gates re-run green this session:** control-plane `ruff check`/`ruff format --check` (128 files)/`mypy app/` (60 files) clean, `pytest -q` → **435 passed** (100 unit + 335 integration, 89 s); data-plane `make bpf skel loader dpstat apply` + `make test` green (test_parse 130 + `test_snapshot` service+global golden self-tests); `make smoke` green (redirect TTL/csum, fairness, apply `active_config` flip in 78 ms — no regression); **`make globalapplysmoke`** → fake feed snapshot reached `blacklist_drop` via the real helper while an unlisted source stayed delivered; **`make globalapplyscale`** → **1,048,576** distinct entries loaded in **6925 ms**, **1,048,577** rejected before flip (helper peak RSS ~17.6 MB; kernel BPF-map footprint via cgroup = n/a in this container). **External gate resolved:** M4 #2 double-buffer (`7fcfb1b..86120bc`) is executed, which unblocked T12–T14. `spec.md` moves all 40 FEED reqs to **Verified**; `tasks.md` Execution Results + Done-when boxes back-filled; ROADMAP marks the feature VERIFIED. **Deviations:** none material — one pre-existing Pydantic `__fields_set__` deprecation warning in `services/feeds.py:407` (non-blocking, fallback branch only). **Next phase:** M4 is complete (agent-worker VERIFIED, double-buffer executed, threat-feed-sync VERIFIED) → resume **M5** Execute (Telemetry & dashboards / Chargeback metering are design+tasks-drafted).
+**Current Work (authoritative update):** M5 → **Telemetry & dashboards P1** —
+**EXECUTING** (2026-07-13). T1–T6 and T10 are complete. T5 is now verified by
+`657cd3d` after its model/migration work in `7ca62db`; the full control-plane
+gate passed **395 tests**. Execute the remaining P1 work in this order:
+T7 → T9 → (T8 ∥ T11) → T12 → T17. Capture fresh control-plane and frontend
+baselines before T7. T13–T15 (P2) and T16 (P3) are deferred and are not part
+of this run.
+
+**P1 defaults:** Telemetry aggregation remains a worker background lane, not a
+`JobType`. `worker_telemetry_interval_seconds` is an integer from 1 through 2,
+with a default of 2 seconds. Production SPA serving is opt-in through
+`CONTROL_PLANE_FRONTEND_STATIC_DIR`: FastAPI serves the built bundle only when
+configured, uses an HTML-only browser-history fallback, and preserves API and
+missing-asset 404 responses. T12 owns that implementation and its focused
+control-plane test. P1 is not complete until the remaining tasks and final
+validation pass.
+
+**Prior current work:** M4 #3 → **Threat intelligence feed sync** — **EXECUTED / VERIFIED** (2026-07-13). All of T1–T15 landed. T1–T13 committed earlier (`021f567..ae33648`); **T14** (`xdpgw-apply` `GLOBAL_DENY` mode + shared pin-dir lock + inverse carry-forward + global-apply smoke/scale) and **T15** (operations docs + final traceability) executed and committed this session. **Gates re-run green this session:** control-plane `ruff check`/`ruff format --check` (128 files)/`mypy app/` (60 files) clean, `pytest -q` → **435 passed** (100 unit + 335 integration, 89 s); data-plane `make bpf skel loader dpstat apply` + `make test` green (test_parse 130 + `test_snapshot` service+global golden self-tests); `make smoke` green (redirect TTL/csum, fairness, apply `active_config` flip in 78 ms — no regression); **`make globalapplysmoke`** → fake feed snapshot reached `blacklist_drop` via the real helper while an unlisted source stayed delivered; **`make globalapplyscale`** → **1,048,576** distinct entries loaded in **6925 ms**, **1,048,577** rejected before flip (helper peak RSS ~17.6 MB; kernel BPF-map footprint via cgroup = n/a in this container). **External gate resolved:** M4 #2 double-buffer (`7fcfb1b..86120bc`) is executed, which unblocked T12–T14. `spec.md` moves all 40 FEED reqs to **Verified**; `tasks.md` Execution Results + Done-when boxes back-filled; ROADMAP marks the feature VERIFIED. **Deviations:** none material — one pre-existing Pydantic `__fields_set__` deprecation warning in `services/feeds.py:407` (non-blocking, fallback branch only). **Next phase:** M4 is complete (agent-worker VERIFIED, double-buffer executed, threat-feed-sync VERIFIED) → resume **M5** Execute (Telemetry & dashboards / Chargeback metering are design+tasks-drafted).
 
 **Prior current work:** M4 #2 → **Double-buffer map build/swap** — Execute underway. **T1 landed (uncommitted)**: `apply_snapshot.h` + `fair_budget.h` (new) + `loader.c` 14 config-map pins; DP quick gate green at **112** (telemetry DP tests raised the live baseline from the stale tasks.md `B_dp=91`). **T2 (helper scaffold/parser/golden fixture) is next**, blocked pending a **contract correction now applied (2026-07-13)** for two T2-blocking seams found in T1's uncommitted wire header — fixed *before* the parser/fixture bake the layout in: **(1) VIP is service-level** — `vip_pps/vip_bps/vip_flags` moved from the per-whitelist record up to the service fixed record (one `vip_config` keyed by `dp_id`, matching `struct vip_config` in `whitelist.h` + `ServiceConfig.vip_pps/vip_bps`); `wl[]` entry is now `{prefixlen, src_be32}` only. Constants `APPLY_SNAPSHOT_SERVICE_FIXED_SIZE` 33→**50**, `WHITELIST_ENTRY_SIZE` 25→**8**. **(2) `dp_id` surrogate** — wire `service_id`→`dp_id` (the AD-030 D-030-4 `u32` surrogate = `ProtectedService.dp_id`, **not** the UUID); `ServiceConfig` gained additive `dp_id: int` populated in `load_service_config` (T6 serializer sources it). Schema stays **v1** (nothing consumed it pre-correction; no bump). Edited: `data-plane/src/apply_snapshot.h`, `design.md` §Data Models (AD-028), `control-plane/app/worker/applier.py`, `tasks.md` T2 note. Verified: DP `make test` **112** unchanged (header inert until T2); `ServiceConfig` imports/parses OK, `dp_id` at field index 1; sole construction site (`load_service_config`) updated, no test constructs it directly. Next: **T2** — parse + `create_inner_like` fresh-inner de-risk + golden fixture against the corrected layout.
 
-**Prior current work:** M5 → **Telemetry & dashboards** — Execute is partially complete. Verified commits: T1 per-service counters (`e77b114`), T2 loader pin/seed (`9b7cecb`), T3 `dpstat snapshot --json` (`5684f63`), T4 `ProtectedService.dp_id` (`bfe4376`), T6 telemetry reader (`7f879c8`), and T10 React SPA shell (`f58903a`). T5 telemetry persistence model/migration/base-test work is present in `7ca62db`, but no final gate ran and index assertions remain unstaged, so it is **not** a satisfied dependency. Next: review/complete T5, then run T7 and T9 serially; T11 follows T9.
+**Prior current work:** M5 → **Telemetry & dashboards** — Execute was partially
+complete. This historical note predates T5 verification; see the authoritative
+update above for the current P1 status.
 
 **Previous current work:** M4 → **Threat intelligence feed sync (M4 #3)** — spec
 **APPROVED**, AD-029 Design **APPROVED**, and `tasks.md` drafted (T1–T15), with 40/40 requirements mapped
@@ -271,9 +290,12 @@ control-plane track can start before M4 #2).
 
 ### L-001: Staged work is not task completion (2026-07-12)
 
-**Context:** Telemetry T5 was interrupted with model, migration, and test changes partially staged; an audit commit included the staged subset.
+**Context:** Telemetry T5 was initially interrupted with model, migration, and
+test changes partially staged; an audit commit included the staged subset.
 **Problem:** A staged diff or partial commit can look complete without a passing gate and a complete test set.
-**Solution:** Record it as partial and keep dependent tasks blocked until verification and the remaining test work finish.
+**Solution:** Record it as partial and keep dependent tasks blocked until
+verification and the remaining test work finish. T5 later completed in
+`657cd3d` after the full gate passed.
 **Prevents:** Incorrect dependency advancement and misleading requirement traceability.
 
 ---
@@ -314,7 +336,8 @@ Open before Pilot (non-engineering, non-blocking — Product/Legal owned):
 - [ ] CM-02: IPv6 hard-drop blackhole warning + checklist in onboarding
 - [ ] CM-06: capacity positioning (single 40G node = small/mid scrubber; absorption depends on upstream)
 - [ ] CM-07: review threat-feed licenses for commercial/internal-paid use
-- [ ] Complete telemetry T5 verification and commit; then resume T7 and T9 serially — captured during: telemetry task review (2026-07-12)
+- [ ] Complete telemetry P1 execution: T7 → T9 → (T8 ∥ T11) → T12 → T17;
+  keep P2/P3 telemetry tasks deferred — updated 2026-07-13
 
 ---
 

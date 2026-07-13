@@ -2,28 +2,52 @@
 
 **Design**: `.specs/features/telemetry-dashboards/design.md` (AD-030)
 **Spec**: `.specs/features/telemetry-dashboards/spec.md` (TEL-01..40)
-**Status**: Executing (reviewed 2026-07-12)
+**Status**: P1 executing (reconciled 2026-07-13)
 
 **Confirmed defaults carried from Design review** (the 3 flags):
 - D-030-6 — aggregation is a **worker background task**, no `TELEMETRY_AGGREGATE` `JobType`. ✅
 - D-030-4 — `dp_id` assigned in `create_service` (touches executed M1 code, additive). ✅
 - D-030-3 — `svc_stat` value uses `drop_by_reason[DROP_REASON_CAP=32]`. ✅
 
-**Baselines (pin live at first Execute gate):** `B_dp` = `make test` count (≥ 91 post-blacklist; +fairness if executed by then); `B_cp` = `pytest -q` count (agent-worker landed 262 + feed-sync tests); `B_fe` = 0 (new project).
+**P1 execution defaults (2026-07-13):**
+- P1 includes T1–T12 and T17. T13–T15 are deferred to P2, and T16 is
+  deferred to P3.
+- `worker_telemetry_interval_seconds` is an integer in the inclusive range
+  1–2 seconds. The default is 2 seconds, so persisted `window_seconds` is
+  exact.
+- Production SPA serving is opt-in through
+  `CONTROL_PLANE_FRONTEND_STATIC_DIR`. FastAPI serves the built bundle only
+  when that directory is configured. Its history fallback returns HTML only
+  for browser routes and preserves 404 responses for API and missing asset
+  paths.
 
-**Execution status (2026-07-12):**
+**Baselines:** Capture fresh control-plane and frontend gate counts before T7.
+Do not use the historic counts below as a current baseline.
 
-| Task | Status | Evidence |
+**Execution status (2026-07-13):**
+
+| Task | Status | Evidence or next action |
 | --- | --- | --- |
 | T1 | Complete | `e77b114`; 112 DP tests reported green |
 | T2 | Complete | `9b7cecb`; 112 DP tests + redirect/fairness smoke + pin lifecycle green |
 | T3 | Complete | `5684f63`; build, offline, live native snapshot, JSON, and pin lifecycle green |
 | T4 | Complete | `bfe4376`; full CP gate: 392 passed |
-| T5 | Partial | `7ca62db` contains model/migration/base test work, but no final gate ran and index assertions remain unstaged |
+| T5 | Complete | `7ca62db` + `657cd3d`; full CP gate: 395 passed |
 | T6 | Complete | `7f879c8`; quick CP gate: 97 passed, 295 deselected |
+| T7 | Ready | Execute first: aggregator, reset recovery, persistence, and pruning |
+| T9 | Queued | Execute after T7 to serialize CP integration work |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
+| T8 | Queued | Execute after T9; runs in parallel with T11 |
+| T11 | Queued | Execute after T9; runs in parallel with T8 |
+| T12 | Queued | Execute after T11, including production SPA serving |
+| T13–T15 | Deferred | P2 is out of the approved P1 execution scope |
+| T16 | Deferred | P3 is out of the approved P1 execution scope |
+| T17 | Queued | Execute after T12 to document shipped surfaces |
 
-T3 additionally pins `active_config` with the established observability lifecycle: the approved `active{slot,version}` snapshot contract is otherwise unreadable by `dpstat`. T7 and T9 remain blocked on T5; T11 remains blocked on T9.
+T3 additionally pins `active_config` with the established observability
+lifecycle: the approved `active{slot,version}` snapshot contract is otherwise
+unreadable by `dpstat`. With T5 complete, execute the remaining P1 sequence as
+T7 → T9 → (T8 ∥ T11) → T12 → T17.
 
 **Tracks:** **DP** (`data-plane/`, C) · **CP** (`control-plane/app`, Python) · **FE** (`control-plane/frontend/`, React/TS). DP and CP/FE are separate dirs with separate gates → **cross-track parallel**. Within CP, only **unit**-typed tasks may be `[P]` (integration shares `compose.test.yml`). FE is a separate toolchain (Vitest, no compose.test) → the FE scaffold is `[P]`, but FE view tasks serialize on the shared project tree.
 
@@ -56,16 +80,16 @@ Phase 4
 Phase 5
   T9,T10,T11 → T12   (FE: admin dashboard)           (after T11 — shared FE tree)
 
-Phase 6 — P2
+Phase 6 — P2 (deferred; not part of P1)
   T3,T7  → T13  (top-talkers backend)
   T7,T9  → T14  (richer-health backend)     [T13,T14 CP-integration → serialize]
   T12,T13,T14 → T15 (P2 frontend panels)
 
-Phase 7 — P3
+Phase 7 — P3 (deferred; not part of P1)
   T9,T12 → T16 (trend chart + export)
 
 Phase 8 — Docs
-  T17 [P] (TESTING.md dp+fe conventions, README/dashboards)
+  T17 (TESTING.md dp+fe conventions, README/dashboards)
 ```
 
 ---
@@ -246,7 +270,7 @@ Phase 8 — Docs
 **Done when**:
 - [ ] `Worker.__init__` takes optional `telemetry`; `run()` spawns `telemetry.run_loop(stop)` before the main loop and awaits/cancels it in `finally` (mirrors feed lane); job processing unaffected when the lane errors
 - [ ] `__main__._run_worker` builds `TelemetryReader`+`TelemetryAggregator` from settings and injects them (skipped when `worker_telemetry_enabled=False`)
-- [ ] `Settings`: `worker_telemetry_enabled=True`, `worker_telemetry_interval_seconds=2.0(gt=0)`, `worker_telemetry_retention_seconds`, `worker_telemetry_binary_path`, `worker_telemetry_ifindex: int|None`, `worker_telemetry_timeout_seconds=5.0`
+- [ ] `Settings`: `worker_telemetry_enabled=True`, integer `worker_telemetry_interval_seconds=2` constrained to 1–2 inclusive, `worker_telemetry_retention_seconds`, `worker_telemetry_binary_path`, `worker_telemetry_ifindex: int|None`, `worker_telemetry_timeout_seconds=5.0`
 - [ ] Integration: runtime with a `FakeTelemetryReader` produces rows on the cadence and cancels cleanly on stop; a raising aggregator does not stop job processing. Unit: settings defaults
 - [ ] Gate passes: `full` — count = prior + N
 
@@ -324,12 +348,18 @@ Phase 8 — Docs
 
 ---
 
-### T12: Admin dashboard (FE)
+### T12: Admin dashboard and production SPA serving (FE + CP)
 
-**What**: Admin node health + node telemetry views, XDP-mode critical flag.
-**Where**: `control-plane/frontend/src/pages/AdminDashboard.tsx`, `src/components/{NodeHealthPanel,NodeTelemetryPanel,XdpModeFlag,ThroughputGauge}.tsx`, `src/hooks/useNodeTelemetry.ts`, `*.test.tsx`
+**What**: Admin node health + node telemetry views, XDP-mode critical flag, and
+opt-in FastAPI serving of the production SPA bundle.
+**Where**: `control-plane/frontend/src/pages/AdminDashboard.tsx`,
+`src/components/{NodeHealthPanel,NodeTelemetryPanel,XdpModeFlag,ThroughputGauge}.tsx`,
+`src/hooks/useNodeTelemetry.ts`, `*.test.tsx`, `control-plane/app/main.py`,
+`control-plane/app/core/config.py`,
+`control-plane/tests/unit/test_frontend_static_serving.py`
 **Depends on**: T9, T10, T11 (shared FE tree — runs after T11)
-**Reuses**: T10 shell; `GET /node/telemetry`, `/node/health`
+**Reuses**: T10 shell; `GET /node/telemetry`, `/node/health`; FastAPI
+`StaticFiles` mount pattern
 **Requirement**: TEL-24, TEL-27, TEL-29, TEL-28
 
 **Tools**: Skill `coding-guidelines`
@@ -338,10 +368,12 @@ Phase 8 — Docs
 - [ ] `AdminDashboard` renders `NodeHealthPanel` (xdp mode, map version, map_error, backlog, feed status, throughput gauge) + `NodeTelemetryPanel` (node counters/distribution), polling ≤2s
 - [ ] XDP mode `generic`/`offline` → visually flagged critical; staleness + loading/empty/error states
 - [ ] Vitest unit: health panel renders from mock; XDP-mode flag critical on generic/offline; throughput gauge computes vs capacity
-- [ ] Gate passes: `fe` — `B_fe + N`
+- [ ] `CONTROL_PLANE_FRONTEND_STATIC_DIR` opt-in config enables FastAPI to serve the built Vite bundle. Browser history routes return `index.html`; existing API routes and missing static assets continue to return 404 rather than the SPA HTML.
+- [ ] Focused CP test covers opt-in serving, a browser history fallback, and preserved API/asset 404 behavior.
+- [ ] Gate passes: `fe` — `B_fe + N`; CP `ruff`, format, `mypy`, and import checks are clean; run the focused static-serving test.
 
-**Tests**: fe-unit
-**Gate**: fe
+**Tests**: fe-unit + cp-unit
+**Gate**: fe + CP lint/type/import + focused static-serving test
 **Commit**: `feat(telemetry): admin node health dashboard`
 
 ---
@@ -469,7 +501,7 @@ Phase 8 — Docs
 | T9 | 1 router + schemas | ✅ |
 | T10 | SPA scaffold (1 cohesive foundation) | ✅ |
 | T11 | 1 dashboard (tenant) | ✅ |
-| T12 | 1 dashboard (admin) | ✅ |
+| T12 | 1 admin release surface (dashboard + production SPA serving) | ✅ |
 | T13–T16 | 1 P2/P3 slice each | ✅ |
 | T17 | docs | ✅ |
 
@@ -512,7 +544,7 @@ No `[P]` task depends on another `[P]` task in its phase (T6, T10 are independen
 | T9 | API router | integration | integration | ✅ |
 | T10 | Frontend (new layer) | — (adds `fe`, T17 documents) | fe-unit | ✅* |
 | T11 | Frontend | fe (new) | fe-unit | ✅* |
-| T12 | Frontend | fe (new) | fe-unit | ✅* |
+| T12 | Frontend + FastAPI static serving | fe + focused CP unit | fe-unit + cp-unit | ✅* |
 | T13 | DP tooling + worker | build + integration | integration | ✅ |
 | T14 | Worker + API | integration | integration | ✅ |
 | T15 | Frontend | fe (new) | fe-unit | ✅* |
@@ -527,10 +559,13 @@ No `[P]` task depends on another `[P]` task in its phase (T6, T10 are independen
 
 1. **dp_id sequence** — dedicated `service_dp_id_seq` (monotonic, no-reuse) chosen; confirm at T4 vs plain autoincrement.
 2. **XDP-mode ifindex** — `worker_telemetry_ifindex` setting feeds `dpstat --ifindex` (T3/T8); alternative = loader pins a "mode" byte.
-3. **Frontend serve** — FastAPI `StaticFiles` (single deployable) vs separate static host — decide before T17 docs.
+3. **Frontend serve** — resolved: FastAPI serves the built Vite bundle only when
+   `CONTROL_PLANE_FRONTEND_STATIC_DIR` is set. An HTML-only history fallback
+   preserves API and missing-asset 404 responses. Implement and document this
+   in T12/T17.
 4. **`bpf_xdp_query`** (T3) and **ringbuf consumer-pos across processes** (T13) are the two design-flagged facts to web-verify at their tasks; T13 has a streaming-lane fallback.
 5. **M4 #2 gate** — true multi-service end-to-end needs the double-buffer applier to write `dp_id` into `service_val.service_id`. P1 tasks are testable now (loader-seed dp_id + `FakeTelemetryReader`); confirm executing ahead of M4 #2 is intended.
 
 **MCPs/Skills**: `coding-guidelines` on all code tasks; `docs-writer` on T17; `context7` (fallback web) on T3/T10/T13 for external-API/version checks; `mermaid-studio` already used in Design. Confirm this mapping.
 
-**Next**: approve → **Execute** (Phase 1: T1, T4 lead their tracks; T6, T10 `[P]`).
+**Next**: capture fresh CP and FE baselines, then **Execute** T7.
