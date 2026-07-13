@@ -39,7 +39,7 @@ Do not use the historic counts below as a current baseline.
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
 | T8 | Complete | full CP gate: 448 passed |
 | T11 | Complete | FE gate: 5 files / 8 tests passed |
-| T12 | Queued | Execute after T11, including production SPA serving |
+| T12 | Complete | FE gate: 9 files / 13 tests; CP static-serving checks: 2 passed |
 | T13–T15 | Deferred | P2 is out of the approved P1 execution scope |
 | T16 | Deferred | P3 is out of the approved P1 execution scope |
 | T17 | Queued | Execute after T12 to document shipped surfaces |
@@ -365,12 +365,12 @@ opt-in FastAPI serving of the production SPA bundle.
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] `AdminDashboard` renders `NodeHealthPanel` (xdp mode, map version, map_error, backlog, feed status, throughput gauge) + `NodeTelemetryPanel` (node counters/distribution), polling ≤2s
-- [ ] XDP mode `generic`/`offline` → visually flagged critical; staleness + loading/empty/error states
-- [ ] Vitest unit: health panel renders from mock; XDP-mode flag critical on generic/offline; throughput gauge computes vs capacity
-- [ ] `CONTROL_PLANE_FRONTEND_STATIC_DIR` opt-in config enables FastAPI to serve the built Vite bundle. Browser history routes return `index.html`; existing API routes and missing static assets continue to return 404 rather than the SPA HTML.
-- [ ] Focused CP test covers opt-in serving, a browser history fallback, and preserved API/asset 404 behavior.
-- [ ] Gate passes: `fe` — `B_fe + N`; CP `ruff`, format, `mypy`, and import checks are clean; run the focused static-serving test.
+- [x] `AdminDashboard` renders `NodeHealthPanel` (xdp mode, map version, map_error, backlog, feed status, throughput gauge) + `NodeTelemetryPanel` (node counters/distribution), polling ≤2s
+- [x] XDP mode `generic`/`offline` → visually flagged critical; staleness + loading/empty/error states
+- [x] Vitest unit: health panel renders from mock; XDP-mode flag critical on generic/offline; throughput gauge computes vs capacity
+- [x] `CONTROL_PLANE_FRONTEND_STATIC_DIR` opt-in config enables FastAPI to serve the built Vite bundle. Browser history routes return `index.html`; existing API routes and missing static assets continue to return 404 rather than the SPA HTML.
+- [x] Focused CP test covers opt-in serving, a browser history fallback, and preserved API/asset 404 behavior.
+- [x] Gate passes: `fe` — 9 files / 13 tests; CP `ruff`, format, `mypy`, import checks, and 2 static-serving tests are clean.
 
 **Tests**: fe-unit + cp-unit
 **Gate**: fe + CP lint/type/import + focused static-serving test

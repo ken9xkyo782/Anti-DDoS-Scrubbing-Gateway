@@ -1,5 +1,6 @@
 from decimal import Decimal
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Anti-DDoS Control Plane"
+    frontend_static_dir: Path | None = None
     database_url: str = (
         "postgresql+asyncpg://control_plane:control_plane@127.0.0.1:55432/control_plane_test"
     )

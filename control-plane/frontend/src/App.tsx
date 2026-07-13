@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { useAuth } from './auth/AuthContext'
 import { AppLayout } from './layout/AppLayout'
+import { AdminDashboard } from './pages/AdminDashboard'
 import { LoginPage } from './pages/LoginPage'
 import { TenantDashboard } from './pages/TenantDashboard'
 import { ProtectedRoute } from './routes/ProtectedRoute'
@@ -10,10 +11,6 @@ function DashboardLanding() {
   const { principal } = useAuth()
 
   return <Navigate to={principal?.role === 'admin' ? '/admin' : '/tenant'} replace />
-}
-
-function AdminDashboardPlaceholder() {
-  return <h1>Admin dashboard</h1>
 }
 
 function ForbiddenPage() {
@@ -32,7 +29,7 @@ export function App() {
             <Route path="/tenant" element={<TenantDashboard />} />
           </Route>
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
-            <Route path="/admin" element={<AdminDashboardPlaceholder />} />
+            <Route path="/admin" element={<AdminDashboard />} />
           </Route>
         </Route>
       </Route>
