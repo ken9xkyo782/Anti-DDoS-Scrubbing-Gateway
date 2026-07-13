@@ -35,7 +35,7 @@ Do not use the historic counts below as a current baseline.
 | T5 | Complete | `7ca62db` + `657cd3d`; full CP gate: 395 passed |
 | T6 | Complete | `7f879c8`; quick CP gate: 97 passed, 295 deselected |
 | T7 | Complete | full CP gate: 441 passed |
-| T9 | Queued | Execute after T7 to serialize CP integration work |
+| T9 | Complete | full CP gate: 444 passed |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
 | T8 | Queued | Execute after T9; runs in parallel with T11 |
 | T11 | Queued | Execute after T9; runs in parallel with T8 |
@@ -291,11 +291,11 @@ Phase 8 — Docs
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] `GET /services/{service_id}/telemetry` via `load_service_for_principal` → latest service window → `ServiceTelemetryResponse` (counts, `drop_by_reason`, pps/bps, `window_start`, `window_seconds`, `stale`); no row → 200 `{has_data:false}` zeroed
-- [ ] `GET /node/telemetry` + `GET /node/health` via `require_admin` → latest node window + `NodeHealthSnapshot` + **live** `AgentJob` backlog (count by status) + `FeedSyncRun`/`ThreatFeedSource` last status + throughput-vs-`node_clean_capacity_gbps`
-- [ ] `stale` computed from `window_start` age vs `2×interval`; router registered in `create_app`
-- [ ] Integration (AsyncClient): owner tenant 200; **non-owner 404**; admin node view 200; empty-state 200; endpoints read-only
-- [ ] Gate passes: `full` — count = prior + N
+- [x] `GET /services/{service_id}/telemetry` via `load_service_for_principal` → latest service window → `ServiceTelemetryResponse` (counts, `drop_by_reason`, pps/bps, `window_start`, `window_seconds`, `stale`); no row → 200 `{has_data:false}` zeroed
+- [x] `GET /node/telemetry` + `GET /node/health` via `require_admin` → latest node window + `NodeHealthSnapshot` + **live** `AgentJob` backlog (count by status) + `FeedSyncRun`/`ThreatFeedSource` last status + throughput-vs-`node_clean_capacity_gbps`
+- [x] `stale` computed from `window_start` age vs `2×interval`; router registered in `create_app`
+- [x] Integration (AsyncClient): owner tenant 200; **non-owner 404**; admin node view 200; empty-state 200; endpoints read-only
+- [x] Gate passes: `full` — 444 passed
 
 **Tests**: integration
 **Gate**: full

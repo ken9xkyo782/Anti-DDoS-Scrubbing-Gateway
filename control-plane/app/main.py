@@ -12,6 +12,7 @@ from app.api.routers import (
     lists,
     rules,
     services,
+    telemetry,
     tenants,
     users,
 )
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(lists.router)
     app.include_router(rules.router)
     app.include_router(services.router)
+    app.include_router(telemetry.router)
     app.include_router(tenants.router)
     app.include_router(users.router)
 
