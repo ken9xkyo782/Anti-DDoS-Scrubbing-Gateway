@@ -40,6 +40,7 @@ static void usage(const char *prog)
 	fprintf(stderr, "usage: %s counters [-w seconds]\n", prog);
 	fprintf(stderr, "       %s tail\n", prog);
 	fprintf(stderr, "       %s rate <per_cpu_rate> <burst>\n", prog);
+	fprintf(stderr, "       %s active_config\n", prog);
 	fprintf(stderr, "       %s snapshot --json [--ifindex N]\n", prog);
 }
 
@@ -714,6 +715,29 @@ out:
 	return err;
 }
 
+static int cmd_active_config(void)
+{
+	struct active_config config;
+	__u32 key = 0;
+	int fd;
+
+	fd = open_pinned_map(ACTIVE_CONFIG_PIN_PATH);
+	if (fd < 0)
+		return 1;
+
+	if (bpf_map_lookup_elem(fd, &key, &config) != 0) {
+		fprintf(stderr, "failed to read active_config[0]: %s\n", strerror(errno));
+		close(fd);
+		return 1;
+	}
+
+	printf("active_config\n");
+	printf("active_slot %u\n", config.active_slot);
+	printf("version %u\n", config.version);
+	close(fd);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *prog = argv[0];
@@ -730,6 +754,8 @@ int main(int argc, char **argv)
 		err = argc == 2 ? cmd_tail() : 2;
 	else if (strcmp(argv[1], "rate") == 0)
 		err = cmd_rate(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "active_config") == 0)
+		err = argc == 2 ? cmd_active_config() : 2;
 	else if (strcmp(argv[1], "snapshot") == 0)
 		err = cmd_snapshot(argc - 2, argv + 2);
 	else
