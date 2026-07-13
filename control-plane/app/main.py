@@ -7,6 +7,7 @@ from app.api.routers import (
     allocations,
     apply_status,
     auth,
+    feeds,
     global_blacklist,
     lists,
     rules,
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(allocations.router)
     app.include_router(apply_status.router)
     app.include_router(auth.router)
+    app.include_router(feeds.router)
     app.include_router(global_blacklist.router)
     app.include_router(lists.router)
     app.include_router(rules.router)
