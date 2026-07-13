@@ -34,7 +34,7 @@ Do not use the historic counts below as a current baseline.
 | T4 | Complete | `bfe4376`; full CP gate: 392 passed |
 | T5 | Complete | `7ca62db` + `657cd3d`; full CP gate: 395 passed |
 | T6 | Complete | `7f879c8`; quick CP gate: 97 passed, 295 deselected |
-| T7 | Ready | Execute first: aggregator, reset recovery, persistence, and pruning |
+| T7 | Complete | full CP gate: 441 passed |
 | T9 | Queued | Execute after T7 to serialize CP integration work |
 | T10 | Complete | `f58903a`; frontend lint/typecheck/build + 5 Vitest tests green |
 | T8 | Queued | Execute after T9; runs in parallel with T11 |
@@ -244,12 +244,12 @@ Phase 8 — Docs
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] `aggregate_once`: reader `None` → write `xdp_mode=offline` health + return; else per-key delta vs in-memory previous; **reset detection** (delta<0 or `active.version` changed → previous=0); first tick seeds baseline (`is_baseline`, no deltas)
-- [ ] `dp_id→(service UUID, tenant)` cache from PG (refresh per tick); unknown dp_id → excluded from per-service rows, still in node totals (TEL-06)
-- [ ] Persist `TelemetryCounter` (service + node scope) with pps/bps=delta÷window; `NodeHealthSnapshot` (mode/slot/version/map_error/clean_bps/capacity); prune windows older than retention
-- [ ] `run_loop(stop)`: loop `aggregate_once` + interruptible sleep(interval); any error → log + continue (never raises out)
-- [ ] Unit (FakeReader): delta correctness, reset→raw value, baseline-first-tick, unknown-dp_id handling. Integration: rows persisted, prune removes old, DB-down tick skipped without crash
-- [ ] Gate passes: `full` — count = prior + N
+- [x] `aggregate_once`: reader `None` → write `xdp_mode=offline` health + return; else per-key delta vs in-memory previous; **reset detection** (delta<0 or `active.version` changed → previous=0); first tick seeds baseline (`is_baseline`, no deltas)
+- [x] `dp_id→(service UUID, tenant)` cache from PG (refresh per tick); unknown dp_id → excluded from per-service rows, still in node totals (TEL-06)
+- [x] Persist `TelemetryCounter` (service + node scope) with pps/bps=delta÷window; `NodeHealthSnapshot` (mode/slot/version/map_error/clean_bps/capacity); prune windows older than retention
+- [x] `run_loop(stop)`: loop `aggregate_once` + interruptible sleep(interval); any error → log + continue (never raises out)
+- [x] Unit (FakeReader): delta correctness, reset→raw value, baseline-first-tick, unknown-dp_id handling. Integration: rows persisted, prune removes old, DB-down tick skipped without crash
+- [x] Gate passes: `full` — 441 passed
 
 **Tests**: integration
 **Gate**: full
