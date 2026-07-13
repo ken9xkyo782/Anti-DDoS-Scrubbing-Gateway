@@ -111,8 +111,6 @@ async def test_telemetry_rows_round_trip_jsonb_and_retain_history_after_service_
 async def test_telemetry_models_expose_native_false_enums_and_required_indexes(
     db_session: AsyncSession,
 ) -> None:
-    del db_session
-
     assert [scope.value for scope in TelemetryScope] == ["service", "node"]
     assert [mode.value for mode in XdpMode] == ["native", "generic", "offline", "unknown"]
     assert TelemetryCounter.__table__.c.scope.type.native_enum is False
@@ -127,6 +125,32 @@ async def test_telemetry_models_expose_native_false_enums_and_required_indexes(
         index.name: str(index.expressions[-1]) for index in NodeHealthSnapshot.__table__.indexes
     } == {"ix_node_health_snapshot_captured_at": "captured_at DESC"}
     assert next(iter(TelemetryCounter.__table__.foreign_keys)).ondelete == "SET NULL"
+
+    indexes = dict(
+        (
+            await db_session.execute(
+                text(
+                    "SELECT indexname, indexdef FROM pg_indexes "
+                    "WHERE schemaname = 'public' AND indexname IN "
+                    "('ix_telemetry_counter_scope_service_window_start', "
+                    "'ix_telemetry_counter_scope_window_start', "
+                    "'ix_node_health_snapshot_captured_at')"
+                )
+            )
+        ).all()
+    )
+
+    assert set(indexes) == {
+        "ix_telemetry_counter_scope_service_window_start",
+        "ix_telemetry_counter_scope_window_start",
+        "ix_node_health_snapshot_captured_at",
+    }
+    assert (
+        "scope, service_id, window_start DESC"
+        in indexes["ix_telemetry_counter_scope_service_window_start"]
+    )
+    assert "scope, window_start DESC" in indexes["ix_telemetry_counter_scope_window_start"]
+    assert "captured_at DESC" in indexes["ix_node_health_snapshot_captured_at"]
 
 
 async def test_telemetry_migration_upgrades_and_downgrades_cleanly(
