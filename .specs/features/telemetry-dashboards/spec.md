@@ -213,10 +213,10 @@ Explicitly excluded. Documented to prevent scope creep.
 | TEL-28 | P1: Dashboard SPA | - | Verified |
 | TEL-29 | P1: Dashboard SPA | - | Verified |
 | TEL-30 | P1: Dashboard SPA | - | Verified |
-| TEL-31 | P2: Richer admin observability | - | Pending |
-| TEL-32 | P2: Richer admin observability | - | Pending |
-| TEL-33 | P2: Richer admin observability | - | Pending |
-| TEL-34 | P2: Richer admin observability | - | Pending |
+| TEL-31 | P2: Richer admin observability | - | Implementing |
+| TEL-32 | P2: Richer admin observability | - | Implementing |
+| TEL-33 | P2: Richer admin observability | - | Implementing |
+| TEL-34 | P2: Richer admin observability | - | Implementing |
 | TEL-35 | P2: Richer admin observability | - | Pending |
 | TEL-36 | P2: Top-talkers view | - | Verified |
 | TEL-37 | P2: Top-talkers view | - | Verified |
@@ -229,8 +229,9 @@ Explicitly excluded. Documented to prevent scope creep.
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
 **Coverage:** 40 total. TEL-01..30 are implemented and verified by the P1
-gates. T13 verifies TEL-36..37; TEL-31..35 and TEL-38 remain pending for P2,
-and TEL-39..40 remain pending for P3.
+gates. T13 verifies TEL-36..37. T14 implements TEL-31..34 and awaits its
+full control-plane gate; TEL-35 and TEL-38 remain pending for P2, and
+TEL-39..40 remain pending for P3.
 
 ---
 

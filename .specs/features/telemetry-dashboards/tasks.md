@@ -41,7 +41,8 @@ Do not use the historic counts below as a current baseline.
 | T11 | Complete | `77753e4`; FE gate: 5 files / 8 tests passed |
 | T12 | Complete | `6e335e8`; FE gate: 9 files / 13 tests; CP static-serving checks: 2 passed |
 | T13 | Complete | DP build and 130 DP tests; CP full gate passed with 452 tests; focused follow-up passed with 19 tests |
-| T14–T15 | Pending | Execute after T13 because the CP integration fixtures serialize these tasks |
+| T14 | Implemented | Focused integration: 3 passed; scoped lint/format and mypy passed. The full CP gate is blocked by unrelated untracked billing tests and a concurrent external pytest run. |
+| T15 | Pending | Execute after T14's full CP gate has a clean shared test database |
 | T16 | Pending | Execute after the P2 work to validate the final dashboard surface together |
 | T17 | Complete | docs render review and final P1 traceability recorded |
 
@@ -420,9 +421,17 @@ opt-in FastAPI serving of the production SPA bundle.
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] Aggregator/health capture bloom hit/FP (`bloom_stats`) and committed-honored (service clean bps vs `committed_clean_gbps`); API exposes backlog+last-apply detail and per-source feed status
-- [ ] Integration: each metric computed/served correctly
-- [ ] Gate passes: `full`
+- [x] Health exposes the persisted `bloom_stats` false-positive counters and
+  the API computes committed-honored from each service's latest clean-BPS and
+  `committed_clean_gbps`. It also exposes backlog, latest non-feed apply
+  detail, and the latest run for every feed source.
+- [x] Integration verifies each metric, including planned services without
+  telemetry, both honored and breached commitments, feed-job exclusion from
+  last-apply selection, and latest-run selection.
+- [ ] The CP `full` gate remains externally blocked: untracked billing tests
+  currently fail lint/collection, and another pytest process owns the shared
+  integration database. Scoped T14 lint/format/mypy and integration checks
+  pass.
 
 **Tests**: integration
 **Gate**: full

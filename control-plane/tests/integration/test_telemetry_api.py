@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from fastapi import FastAPI
@@ -15,12 +16,14 @@ from app.core.sessions import RedisSessionStore
 from app.db.models import (
     AgentJob,
     ChangeTrigger,
+    FeedSyncRun,
     FeedSyncStatus,
     JobStatus,
     JobType,
     NodeHealthSnapshot,
     ProtectedService,
     Role,
+    ServicePlan,
     TelemetryCounter,
     TelemetryScope,
     Tenant,
@@ -152,6 +155,26 @@ async def test_service_telemetry_is_tenant_scoped_and_zeroed_when_empty(
         name="telemetry-api-empty",
         cidr="203.0.113.81/32",
     )
+    planned_empty_service = await create_service(
+        db_session,
+        tenant=owner_tenant,
+        name="telemetry-api-planned-empty",
+        cidr="203.0.113.84/32",
+    )
+    db_session.add_all(
+        [
+            ServicePlan(
+                service_id=service.id,
+                committed_clean_gbps=Decimal("1"),
+                ceiling_clean_gbps=Decimal("1"),
+            ),
+            ServicePlan(
+                service_id=planned_empty_service.id,
+                committed_clean_gbps=Decimal("1"),
+                ceiling_clean_gbps=Decimal("1"),
+            ),
+        ]
+    )
     now = datetime.now(UTC)
     db_session.add_all(
         [
@@ -170,6 +193,7 @@ async def test_service_telemetry_is_tenant_scoped_and_zeroed_when_empty(
         await authenticate(client, store, owner)
         owned = await client.get(f"/services/{service.id}/telemetry")
         empty = await client.get(f"/services/{empty_service.id}/telemetry")
+        planned_empty = await client.get(f"/services/{planned_empty_service.id}/telemetry")
         await authenticate(client, store, other)
         cross_tenant = await client.get(f"/services/{service.id}/telemetry")
 
@@ -185,6 +209,8 @@ async def test_service_telemetry_is_tenant_scoped_and_zeroed_when_empty(
         "bps": 4_000,
         "top_dst_ports": [{"port": 443, "count": 4}],
         "top_src": [{"ip": "198.51.100.10", "count": 4}],
+        "committed_clean_bps": 1_000_000_000,
+        "committed_honored": False,
         "window_start": now.isoformat().replace("+00:00", "Z"),
         "window_seconds": 2,
         "stale": False,
@@ -202,6 +228,26 @@ async def test_service_telemetry_is_tenant_scoped_and_zeroed_when_empty(
         "bps": 0,
         "top_dst_ports": [],
         "top_src": [],
+        "committed_clean_bps": 0,
+        "committed_honored": None,
+        "window_start": None,
+        "window_seconds": 0,
+        "stale": True,
+    }
+    assert planned_empty.status_code == 200
+    assert planned_empty.json() == {
+        "has_data": False,
+        "clean_pkts": 0,
+        "clean_bytes": 0,
+        "drop_pkts": 0,
+        "drop_bytes": 0,
+        "drop_by_reason": {},
+        "pps": 0,
+        "bps": 0,
+        "top_dst_ports": [],
+        "top_src": [],
+        "committed_clean_bps": 1_000_000_000,
+        "committed_honored": None,
         "window_start": None,
         "window_seconds": 0,
         "stale": True,
@@ -233,17 +279,70 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
         name="telemetry-node-edge",
         cidr="203.0.113.82/32",
     )
+    honored_service = await create_service(
+        db_session,
+        tenant=tenant,
+        name="telemetry-node-honored-edge",
+        cidr="203.0.113.83/32",
+    )
     now = datetime.now(UTC)
     feed = ThreatFeedSource(
         name="Telemetry Feed",
         url="https://feeds.example.test/telemetry.txt",
         sync_interval_seconds=3_600,
-        last_status=FeedSyncStatus.success,
+        last_status=FeedSyncStatus.failed,
+        last_error="upstream timeout",
         last_sync_at=now,
+    )
+    db_session.add(feed)
+    await db_session.flush()
+    older_run = FeedSyncRun(
+        feed_source_id=feed.id,
+        source_name=feed.name,
+        sequence=1,
+        trigger=ChangeTrigger.feed_schedule,
+        status=FeedSyncStatus.success,
+        finished_at=now - timedelta(seconds=10),
+    )
+    latest_run = FeedSyncRun(
+        feed_source_id=feed.id,
+        source_name=feed.name,
+        sequence=2,
+        trigger=ChangeTrigger.feed_schedule,
+        status=FeedSyncStatus.failed,
+        started_at=now - timedelta(seconds=3),
+        finished_at=now,
+        duration_ms=3_000,
+        error="upstream timeout",
+        valid=7,
+        added=2,
+        removed=1,
+        skipped_invalid=3,
+        overlap_count=4,
+    )
+    honored_counter = counter(
+        scope=TelemetryScope.service,
+        service=honored_service,
+        window_start=now,
+    )
+    honored_counter.bps = 2_000_000_000
+    latest_apply = AgentJob(
+        target_type="service",
+        target_id=service.id,
+        version=3,
+        job_type=JobType.service_update,
+        trigger=ChangeTrigger.service,
+        status=JobStatus.failed,
+        error="apply helper failed",
+        created_at=now + timedelta(seconds=1),
+        started_at=now + timedelta(seconds=1),
+        finished_at=now + timedelta(seconds=2),
     )
     db_session.add_all(
         [
             counter(scope=TelemetryScope.node, window_start=now),
+            counter(scope=TelemetryScope.service, service=service, window_start=now),
+            honored_counter,
             NodeHealthSnapshot(
                 captured_at=now,
                 window_seconds=2,
@@ -253,7 +352,7 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
                 map_error_count=3,
                 node_clean_bps=4_000,
                 node_capacity_bps=40_000_000_000,
-                bloom_stats=None,
+                bloom_stats={"global_blacklist": 7, "service_blacklist": 2},
             ),
             AgentJob(
                 target_type="service",
@@ -271,8 +370,32 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
                 trigger=ChangeTrigger.service,
                 status=JobStatus.applying,
             ),
-            feed,
+            latest_apply,
+            ServicePlan(
+                service_id=service.id,
+                committed_clean_gbps=Decimal("1"),
+                ceiling_clean_gbps=Decimal("1"),
+            ),
+            ServicePlan(
+                service_id=honored_service.id,
+                committed_clean_gbps=Decimal("2"),
+                ceiling_clean_gbps=Decimal("2"),
+            ),
+            older_run,
+            latest_run,
         ]
+    )
+    await db_session.flush()
+    db_session.add(
+        AgentJob(
+            target_type="feed_sync_run",
+            feed_sync_run_id=latest_run.id,
+            version=latest_run.sequence,
+            job_type=JobType.feed_sync,
+            trigger=ChangeTrigger.feed_schedule,
+            status=JobStatus.queued,
+            created_at=now + timedelta(seconds=3),
+        )
     )
     await db_session.flush()
 
@@ -293,6 +416,25 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
     assert node_telemetry.json()["top_src"] == [{"ip": "198.51.100.10", "count": 4}]
     assert node_telemetry.json()["stale"] is False
     assert node_health.status_code == 200
+    expected_committed_services = sorted(
+        [
+            {
+                "service_id": str(service.id),
+                "observed_clean_bps": 4_000,
+                "committed_clean_bps": 1_000_000_000,
+                "honored": False,
+                "window_start": now.isoformat().replace("+00:00", "Z"),
+            },
+            {
+                "service_id": str(honored_service.id),
+                "observed_clean_bps": 2_000_000_000,
+                "committed_clean_bps": 2_000_000_000,
+                "honored": True,
+                "window_start": now.isoformat().replace("+00:00", "Z"),
+            },
+        ],
+        key=lambda item: item["service_id"],
+    )
     assert node_health.json() == {
         "has_data": True,
         "xdp_mode": "native",
@@ -304,14 +446,40 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
         "window_start": now.isoformat().replace("+00:00", "Z"),
         "window_seconds": 2,
         "stale": False,
-        "job_backlog": {"queued": 1, "applying": 1},
+        "bloom_stats": {"global_blacklist": 7, "service_blacklist": 2},
+        "committed_services": expected_committed_services,
+        "job_backlog": {"queued": 2, "applying": 1},
+        "last_apply": {
+            "id": str(latest_apply.id),
+            "job_type": "SERVICE_UPDATE",
+            "status": "failed",
+            "error": "apply helper failed",
+            "created_at": (now + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+            "started_at": (now + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+            "finished_at": (now + timedelta(seconds=2)).isoformat().replace("+00:00", "Z"),
+        },
         "feed_sources": [
             {
                 "id": str(feed.id),
                 "name": "Telemetry Feed",
                 "enabled": True,
-                "last_status": "success",
+                "last_status": "failed",
+                "last_error": "upstream timeout",
                 "last_sync_at": now.isoformat().replace("+00:00", "Z"),
+                "last_run": {
+                    "id": str(latest_run.id),
+                    "sequence": 2,
+                    "status": "failed",
+                    "started_at": (now - timedelta(seconds=3)).isoformat().replace("+00:00", "Z"),
+                    "finished_at": now.isoformat().replace("+00:00", "Z"),
+                    "duration_ms": 3_000,
+                    "error": "upstream timeout",
+                    "valid": 7,
+                    "added": 2,
+                    "removed": 1,
+                    "skipped_invalid": 3,
+                    "overlap_count": 4,
+                },
             }
         ],
     }
@@ -345,5 +513,8 @@ async def test_node_endpoints_return_stale_zeroed_empty_payloads(
     assert health_response.json()["window_start"] is None
     assert health_response.json()["window_seconds"] == 0
     assert health_response.json()["stale"] is True
+    assert health_response.json()["bloom_stats"] == {}
+    assert health_response.json()["committed_services"] == []
     assert health_response.json()["job_backlog"] == {"queued": 0, "applying": 0}
+    assert health_response.json()["last_apply"] is None
     assert health_response.json()["feed_sources"] == []
