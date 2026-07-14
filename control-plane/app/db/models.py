@@ -127,6 +127,11 @@ class OveragePolicy(StrEnum):
     capped = "capped"
 
 
+class BillingStatus(StrEnum):
+    open = "open"
+    final = "final"
+
+
 class TelemetryScope(StrEnum):
     service = "service"
     node = "node"
@@ -226,6 +231,12 @@ blacklist_source_enum = SAEnum(
 overage_policy_enum = SAEnum(
     OveragePolicy,
     name="overage_policy",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+billing_status_enum = SAEnum(
+    BillingStatus,
+    name="billing_status",
     native_enum=False,
     values_callable=lambda values: [value.value for value in values],
 )
@@ -508,6 +519,69 @@ class ServicePlan(TimestampMixin, Base):
     )
 
     service: Mapped[ProtectedService] = relationship(back_populates="plan")
+
+
+class BillingSample(Base):
+    __tablename__ = "billing_sample"
+    __table_args__ = (
+        UniqueConstraint("service_id", "sample_ts", name="uq_billing_sample_service_ts"),
+        Index("ix_billing_sample_service_ts", "service_id", "sample_ts"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    service_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_service.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    dp_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sample_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    clean_bps: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_reset: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    service: Mapped[ProtectedService] = relationship()
+
+
+class BillingUsage(TimestampMixin, Base):
+    __tablename__ = "billing_usage"
+    __table_args__ = (
+        UniqueConstraint("service_id", "period_start", name="uq_billing_usage_service_period"),
+        Index("ix_billing_usage_tenant_period", "tenant_id", "period_start"),
+        Index("ix_billing_usage_status_end", "status", "period_end"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_service.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    service_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    billing_metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    committed_clean_gbps: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    p95_clean_gbps: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    billed_gbps: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    overage_gbps: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    overage_policy: Mapped[OveragePolicy] = mapped_column(overage_policy_enum, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[BillingStatus] = mapped_column(billing_status_enum, nullable=False)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    service: Mapped[ProtectedService | None] = relationship()
+    tenant: Mapped[Tenant | None] = relationship()
 
 
 class AllowRule(TimestampMixin, Base):
