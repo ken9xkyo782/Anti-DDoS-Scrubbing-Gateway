@@ -1,0 +1,164 @@
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.routers import alerts
+from app.core.config import get_settings
+from app.core.deps import get_session_store
+from app.core.security import hash_password
+from app.core.sessions import RedisSessionStore
+from app.db.models import (
+    Alert,
+    AlertNotification,
+    AlertScope,
+    AlertSeverity,
+    AlertState,
+    ChannelKind,
+    NotificationState,
+    ProtectedService,
+    Role,
+    Tenant,
+    User,
+)
+from app.db.session import get_db
+
+pytestmark = pytest.mark.integration
+
+
+def store(redis_client: Redis) -> RedisSessionStore:
+    return RedisSessionStore(redis_client, idle_seconds=30, absolute_seconds=60)
+
+
+async def client_for(
+    db_session: AsyncSession, session_store: RedisSessionStore
+) -> AsyncGenerator[AsyncClient, None]:
+    app = FastAPI()
+    app.include_router(alerts.router)
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_session_store] = lambda: session_store
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://testserver"
+    ) as client:
+        yield client
+
+
+async def login(client: AsyncClient, session_store: RedisSessionStore, user: User) -> None:
+    sid = await session_store.create(user_id=user.id, session_version=user.session_version, ip=None)
+    client.cookies.set(get_settings().session_cookie_name, sid)
+
+
+async def user(db: AsyncSession, username: str, role: Role, tenant: Tenant | None = None) -> User:
+    value = User(
+        username=username,
+        role=role,
+        tenant=tenant,
+        password_hash=hash_password("alerts-api-password"),
+    )
+    db.add(value)
+    await db.flush()
+    return value
+
+
+async def test_alert_history_is_admin_wide_and_tenant_scoped_with_notification_detail(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
+    tenant_a = Tenant(name="Alerts API A")
+    tenant_b = Tenant(name="Alerts API B")
+    service_a = ProtectedService(tenant=tenant_a, name="alerts-a", cidr_or_ip="203.0.113.90/32")
+    service_b = ProtectedService(tenant=tenant_b, name="alerts-b", cidr_or_ip="203.0.113.91/32")
+    db_session.add_all([tenant_a, tenant_b, service_a, service_b])
+    await db_session.flush()
+    admin = await user(db_session, "alerts-admin", Role.admin)
+    tenant_user = await user(db_session, "alerts-tenant", Role.tenant_user, tenant_a)
+    node = Alert(
+        rule_key="map_error",
+        scope=AlertScope.node,
+        scope_key="node",
+        severity=AlertSeverity.critical,
+        state=AlertState.firing,
+        context={"title": "Map error"},
+        fire_streak=1,
+        clear_streak=0,
+        first_observed_at=datetime(2026, 7, 14, tzinfo=UTC),
+    )
+    own = Alert(
+        rule_key="attack_onset",
+        scope=AlertScope.service,
+        scope_key=str(service_a.id),
+        service_id=service_a.id,
+        tenant_id=tenant_a.id,
+        service_name=service_a.name,
+        severity=AlertSeverity.warning,
+        state=AlertState.firing,
+        context={"title": "Attack"},
+        fire_streak=1,
+        clear_streak=0,
+        first_observed_at=datetime(2026, 7, 14, tzinfo=UTC),
+    )
+    other = Alert(
+        rule_key="attack_onset",
+        scope=AlertScope.service,
+        scope_key=str(service_b.id),
+        service_id=service_b.id,
+        tenant_id=tenant_b.id,
+        service_name=service_b.name,
+        severity=AlertSeverity.warning,
+        state=AlertState.firing,
+        context={"title": "Attack"},
+        fire_streak=1,
+        clear_streak=0,
+        first_observed_at=datetime(2026, 7, 14, tzinfo=UTC),
+    )
+    notification = AlertNotification(
+        alert=own,
+        channel_name="Owner webhook",
+        kind=ChannelKind.webhook,
+        trigger="fire",
+        state=NotificationState.sent,
+        attempts=1,
+    )
+    db_session.add_all([node, own, other, notification])
+    await db_session.flush()
+
+    session_store = store(redis_client)
+    async for client in client_for(db_session, session_store):
+        await login(client, session_store, admin)
+        admin_list = await client.get("/alerts")
+        await login(client, session_store, tenant_user)
+        tenant_list = await client.get("/alerts")
+        own_detail = await client.get(f"/alerts/{own.id}")
+        node_detail = await client.get(f"/alerts/{node.id}")
+        other_detail = await client.get(f"/alerts/{other.id}")
+        service_filter = await client.get(f"/alerts?service_id={service_b.id}")
+
+    assert admin_list.status_code == 200
+    assert len(admin_list.json()["alerts"]) == 3
+    assert tenant_list.json()["has_data"] is True
+    assert [item["id"] for item in tenant_list.json()["alerts"]] == [str(own.id)]
+    assert own_detail.status_code == 200
+    assert own_detail.json()["notifications"][0]["state"] == "sent"
+    assert node_detail.status_code == 404
+    assert other_detail.status_code == 404
+    assert service_filter.status_code == 404
+
+
+async def test_alert_history_returns_empty_state_and_filters_for_admin(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
+    admin = await user(db_session, "alerts-empty-admin", Role.admin)
+    session_store = store(redis_client)
+    async for client in client_for(db_session, session_store):
+        await login(client, session_store, admin)
+        response = await client.get("/alerts?state=resolved&severity=warning&scope=service")
+
+    assert response.status_code == 200
+    assert response.json() == {"alerts": [], "has_data": False}

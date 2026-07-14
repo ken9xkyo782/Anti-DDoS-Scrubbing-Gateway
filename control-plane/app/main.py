@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routers import (
     allocations,
+    alerts,
     apply_status,
     auth,
     billing,
@@ -36,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 _API_PATH_PREFIXES = {
     "allocations",
+    "alerts",
     "auth",
     "billing",
     "feeds",
@@ -53,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.include_router(allocations.router)
+    app.include_router(alerts.router)
     app.include_router(apply_status.router)
     app.include_router(auth.router)
     app.include_router(billing.router)

@@ -1187,6 +1187,10 @@ class Alert(TimestampMixin, Base):
     service: Mapped[ProtectedService | None] = relationship()
     tenant: Mapped[Tenant | None] = relationship()
     acknowledger: Mapped[User | None] = relationship()
+    notifications: Mapped[list["AlertNotification"]] = relationship(
+        back_populates="alert",
+        passive_deletes=True,
+    )
 
 
 class AlertNotification(TimestampMixin, Base):
@@ -1216,5 +1220,5 @@ class AlertNotification(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    alert: Mapped[Alert] = relationship()
+    alert: Mapped[Alert] = relationship(back_populates="notifications")
     channel: Mapped[NotificationChannel | None] = relationship()
