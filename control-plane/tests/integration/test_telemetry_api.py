@@ -485,6 +485,137 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
     }
 
 
+async def test_service_telemetry_history_and_export(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    owner_tenant = Tenant(name="Telemetry History Owner")
+    other_tenant = Tenant(name="Telemetry History Other")
+    db_session.add_all([owner_tenant, other_tenant])
+    await db_session.flush()
+    owner = await create_user(
+        db_session,
+        username="telemetry-history-owner",
+        role=Role.tenant_user,
+        tenant=owner_tenant,
+    )
+    other = await create_user(
+        db_session,
+        username="telemetry-history-other",
+        role=Role.tenant_user,
+        tenant=other_tenant,
+    )
+    service = await create_service(
+        db_session,
+        tenant=owner_tenant,
+        name="telemetry-history-edge",
+        cidr="203.0.113.90/32",
+    )
+    now = datetime.now(UTC)
+    window_starts = [now - timedelta(seconds=4), now - timedelta(seconds=2), now]
+    db_session.add(
+        counter(
+            scope=TelemetryScope.service,
+            service=service,
+            window_start=now - timedelta(seconds=6),
+            baseline=True,
+        )
+    )
+    for window_start in window_starts:
+        db_session.add(
+            counter(scope=TelemetryScope.service, service=service, window_start=window_start)
+        )
+    await db_session.flush()
+
+    expected_iso = [start.isoformat().replace("+00:00", "Z") for start in window_starts]
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, owner)
+        history = await client.get(f"/services/{service.id}/telemetry/history")
+        csv_export = await client.get(
+            f"/services/{service.id}/telemetry/export", params={"format": "csv"}
+        )
+        json_export = await client.get(
+            f"/services/{service.id}/telemetry/export", params={"format": "json"}
+        )
+        await authenticate(client, store, other)
+        cross_history = await client.get(f"/services/{service.id}/telemetry/history")
+        cross_export = await client.get(
+            f"/services/{service.id}/telemetry/export", params={"format": "csv"}
+        )
+
+    assert history.status_code == 200
+    body = history.json()
+    assert body["has_data"] is True
+    # The baseline window is excluded and the rest are chronological.
+    assert [window["window_start"] for window in body["windows"]] == expected_iso
+    assert cross_history.status_code == 404
+    assert cross_export.status_code == 404
+
+    assert json_export.status_code == 200
+    assert json_export.json()["windows"] == body["windows"]
+
+    assert csv_export.status_code == 200
+    assert csv_export.headers["content-type"].startswith("text/csv")
+    csv_lines = csv_export.text.strip().split("\n")
+    assert csv_lines[0] == (
+        "window_start,window_seconds,clean_pkts,clean_bytes,drop_pkts,drop_bytes,pps,bps"
+    )
+    assert len(csv_lines) == 1 + len(window_starts)
+
+
+async def test_node_telemetry_history_and_export_are_admin_only(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    tenant = Tenant(name="Telemetry Node History Tenant")
+    db_session.add(tenant)
+    await db_session.flush()
+    admin = await create_user(
+        db_session,
+        username="telemetry-node-history-admin",
+        role=Role.admin,
+    )
+    tenant_user = await create_user(
+        db_session,
+        username="telemetry-node-history-user",
+        role=Role.tenant_user,
+        tenant=tenant,
+    )
+    now = datetime.now(UTC)
+    window_starts = [now - timedelta(seconds=2), now]
+    db_session.add(
+        counter(
+            scope=TelemetryScope.node,
+            window_start=now - timedelta(seconds=4),
+            baseline=True,
+        )
+    )
+    for window_start in window_starts:
+        db_session.add(counter(scope=TelemetryScope.node, window_start=window_start))
+    await db_session.flush()
+
+    expected_iso = [start.isoformat().replace("+00:00", "Z") for start in window_starts]
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, tenant_user)
+        denied_history = await client.get("/node/telemetry/history")
+        denied_export = await client.get("/node/telemetry/export", params={"format": "csv"})
+        await authenticate(client, store, admin)
+        history = await client.get("/node/telemetry/history")
+        csv_export = await client.get("/node/telemetry/export", params={"format": "csv"})
+
+    assert denied_history.status_code == 403
+    assert denied_export.status_code == 403
+    assert history.status_code == 200
+    assert [window["window_start"] for window in history.json()["windows"]] == expected_iso
+    assert csv_export.status_code == 200
+    csv_lines = csv_export.text.strip().split("\n")
+    assert len(csv_lines) == 1 + len(window_starts)
+
+
 async def test_node_endpoints_return_stale_zeroed_empty_payloads(
     db_session: AsyncSession,
     redis_client: Redis,

@@ -1,9 +1,12 @@
+import csv
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated
+from io import StringIO
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +17,8 @@ from app.api.schemas.telemetry import (
     JobBacklogResponse,
     LastApplyResponse,
     NodeHealthResponse,
+    TelemetryHistoryResponse,
+    TelemetryWindowPoint,
     TelemetryWindowResponse,
 )
 from app.core.deps import Principal, get_current_user, load_service_for_principal, require_admin
@@ -34,6 +39,11 @@ from app.db.session import get_db
 router = APIRouter(tags=["telemetry"])
 
 _STALE_AFTER_SECONDS = 4
+_HISTORY_DEFAULT_LIMIT = 60
+_HISTORY_MAX_LIMIT = 1000
+
+HistoryLimit = Annotated[int, Query(ge=1, le=_HISTORY_MAX_LIMIT)]
+ExportFormat = Annotated[Literal["csv", "json"], Query(alias="format")]
 
 
 @router.get(
@@ -133,6 +143,161 @@ async def get_node_health(
         job_backlog=backlog,
         last_apply=last_apply,
         feed_sources=feed_sources,
+    )
+
+
+@router.get(
+    "/services/{service_id}/telemetry/history",
+    response_model=TelemetryHistoryResponse,
+)
+async def get_service_telemetry_history(
+    service_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: HistoryLimit = _HISTORY_DEFAULT_LIMIT,
+) -> TelemetryHistoryResponse:
+    await load_service_for_principal(db, service_id, principal)
+    windows = await _service_windows(db, service_id, limit)
+    return _history_response(windows)
+
+
+@router.get("/services/{service_id}/telemetry/export", response_model=None)
+async def export_service_telemetry(
+    service_id: uuid.UUID,
+    export_format: ExportFormat,
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: HistoryLimit = _HISTORY_DEFAULT_LIMIT,
+) -> TelemetryHistoryResponse | StreamingResponse:
+    await load_service_for_principal(db, service_id, principal)
+    windows = await _service_windows(db, service_id, limit)
+    return _export(windows, export_format, f"service-{service_id}")
+
+
+@router.get("/node/telemetry/history", response_model=TelemetryHistoryResponse)
+async def get_node_telemetry_history(
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: HistoryLimit = _HISTORY_DEFAULT_LIMIT,
+) -> TelemetryHistoryResponse:
+    require_admin(principal)
+    windows = await _node_windows(db, limit)
+    return _history_response(windows)
+
+
+@router.get("/node/telemetry/export", response_model=None)
+async def export_node_telemetry(
+    export_format: ExportFormat,
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: HistoryLimit = _HISTORY_DEFAULT_LIMIT,
+) -> TelemetryHistoryResponse | StreamingResponse:
+    require_admin(principal)
+    windows = await _node_windows(db, limit)
+    return _export(windows, export_format, "node")
+
+
+async def _service_windows(
+    db: AsyncSession, service_id: uuid.UUID, limit: int
+) -> list[TelemetryCounter]:
+    rows = list(
+        (
+            await db.scalars(
+                select(TelemetryCounter)
+                .where(
+                    TelemetryCounter.scope == TelemetryScope.service,
+                    TelemetryCounter.service_id == service_id,
+                    TelemetryCounter.is_baseline.is_(False),
+                )
+                .order_by(TelemetryCounter.window_start.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    rows.reverse()
+    return rows
+
+
+async def _node_windows(db: AsyncSession, limit: int) -> list[TelemetryCounter]:
+    rows = list(
+        (
+            await db.scalars(
+                select(TelemetryCounter)
+                .where(
+                    TelemetryCounter.scope == TelemetryScope.node,
+                    TelemetryCounter.is_baseline.is_(False),
+                )
+                .order_by(TelemetryCounter.window_start.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    rows.reverse()
+    return rows
+
+
+def _history_response(windows: list[TelemetryCounter]) -> TelemetryHistoryResponse:
+    return TelemetryHistoryResponse(
+        has_data=bool(windows),
+        windows=[_window_point(counter) for counter in windows],
+    )
+
+
+def _window_point(counter: TelemetryCounter) -> TelemetryWindowPoint:
+    return TelemetryWindowPoint(
+        window_start=counter.window_start,
+        window_seconds=counter.window_seconds,
+        clean_pkts=counter.clean_pkts,
+        clean_bytes=counter.clean_bytes,
+        drop_pkts=counter.drop_pkts,
+        drop_bytes=counter.drop_bytes,
+        pps=counter.pps,
+        bps=counter.bps,
+    )
+
+
+def _export(
+    windows: list[TelemetryCounter],
+    export_format: Literal["csv", "json"],
+    label: str,
+) -> TelemetryHistoryResponse | StreamingResponse:
+    if export_format == "csv":
+        return _csv_windows(windows, label)
+    return _history_response(windows)
+
+
+def _csv_windows(windows: list[TelemetryCounter], label: str) -> StreamingResponse:
+    output = StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(
+        [
+            "window_start",
+            "window_seconds",
+            "clean_pkts",
+            "clean_bytes",
+            "drop_pkts",
+            "drop_bytes",
+            "pps",
+            "bps",
+        ]
+    )
+    for counter in windows:
+        writer.writerow(
+            [
+                counter.window_start.isoformat(),
+                counter.window_seconds,
+                counter.clean_pkts,
+                counter.clean_bytes,
+                counter.drop_pkts,
+                counter.drop_bytes,
+                counter.pps,
+                counter.bps,
+            ]
+        )
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="telemetry-{label}.csv"'},
     )
 
 

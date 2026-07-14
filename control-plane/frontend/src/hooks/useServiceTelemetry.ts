@@ -30,10 +30,35 @@ export interface ServiceTelemetry {
   stale: boolean
 }
 
+export interface TelemetryWindowPoint {
+  window_start: string
+  window_seconds: number
+  clean_pkts: number
+  clean_bytes: number
+  drop_pkts: number
+  drop_bytes: number
+  pps: number
+  bps: number
+}
+
+export interface TelemetryHistory {
+  has_data: boolean
+  windows: TelemetryWindowPoint[]
+}
+
 export function useServiceTelemetry(serviceId: string | null) {
   return useQuery({
     queryKey: ['service-telemetry', serviceId],
     queryFn: () => apiClient<ServiceTelemetry>(`/services/${serviceId}/telemetry`),
+    enabled: serviceId !== null,
+    refetchInterval: 2_000,
+  })
+}
+
+export function useServiceTelemetryHistory(serviceId: string | null) {
+  return useQuery({
+    queryKey: ['service-telemetry-history', serviceId],
+    queryFn: () => apiClient<TelemetryHistory>(`/services/${serviceId}/telemetry/history`),
     enabled: serviceId !== null,
     refetchInterval: 2_000,
   })

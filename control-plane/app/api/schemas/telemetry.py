@@ -24,6 +24,22 @@ class TelemetryWindowResponse(BaseModel):
     stale: bool
 
 
+class TelemetryWindowPoint(BaseModel):
+    window_start: datetime
+    window_seconds: int
+    clean_pkts: int
+    clean_bytes: int
+    drop_pkts: int
+    drop_bytes: int
+    pps: int
+    bps: int
+
+
+class TelemetryHistoryResponse(BaseModel):
+    has_data: bool
+    windows: list[TelemetryWindowPoint]
+
+
 class FeedSyncRunStatusResponse(BaseModel):
     id: UUID
     sequence: int

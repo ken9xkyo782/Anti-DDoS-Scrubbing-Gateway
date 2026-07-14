@@ -3,7 +3,14 @@ import { CommittedHonoredPanel } from '../components/CommittedHonoredPanel'
 import { FeedStatusPanel } from '../components/FeedStatusPanel'
 import { NodeHealthPanel } from '../components/NodeHealthPanel'
 import { NodeTelemetryPanel } from '../components/NodeTelemetryPanel'
-import { useNodeHealth, useNodeTelemetry } from '../hooks/useNodeTelemetry'
+import { TrendChart } from '../components/TrendChart'
+import { useNodeHealth, useNodeTelemetry, useNodeTelemetryHistory } from '../hooks/useNodeTelemetry'
+
+function NodeTrend() {
+  const historyQuery = useNodeTelemetryHistory()
+
+  return <TrendChart windows={historyQuery.data?.windows ?? []} />
+}
 
 export function AdminDashboard() {
   const telemetryQuery = useNodeTelemetry()
@@ -29,6 +36,7 @@ export function AdminDashboard() {
       <CommittedHonoredPanel services={healthQuery.data.committed_services ?? []} />
       <FeedStatusPanel feedSources={healthQuery.data.feed_sources} />
       <NodeTelemetryPanel telemetry={telemetryQuery.data} />
+      <NodeTrend />
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { apiClient } from '../api/client'
-import type { TopPort, TopSource } from './useServiceTelemetry'
+import type { TelemetryHistory, TopPort, TopSource } from './useServiceTelemetry'
 
 export interface NodeTelemetry {
   has_data: boolean
@@ -84,6 +84,14 @@ export function useNodeHealth() {
   return useQuery({
     queryKey: ['node-health'],
     queryFn: () => apiClient<NodeHealth>('/node/health'),
+    refetchInterval: 2_000,
+  })
+}
+
+export function useNodeTelemetryHistory() {
+  return useQuery({
+    queryKey: ['node-telemetry-history'],
+    queryFn: () => apiClient<TelemetryHistory>('/node/telemetry/history'),
     refetchInterval: 2_000,
   })
 }

@@ -4,6 +4,14 @@ import { useState } from 'react'
 import { apiClient } from '../api/client'
 import { ServiceList, type ServiceListItem } from '../components/ServiceList'
 import { ServiceTelemetryPanel } from '../components/ServiceTelemetryPanel'
+import { TrendChart } from '../components/TrendChart'
+import { useServiceTelemetryHistory } from '../hooks/useServiceTelemetry'
+
+function ServiceTrend({ serviceId }: { serviceId: string }) {
+  const historyQuery = useServiceTelemetryHistory(serviceId)
+
+  return <TrendChart windows={historyQuery.data?.windows ?? []} />
+}
 
 export function TenantDashboard() {
   const servicesQuery = useQuery({
@@ -32,6 +40,7 @@ export function TenantDashboard() {
       <h1>Tenant dashboard</h1>
       <ServiceList services={services} selectedId={selectedService.id} onSelect={setRequestedId} />
       <ServiceTelemetryPanel serviceId={selectedService.id} />
+      <ServiceTrend serviceId={selectedService.id} />
     </div>
   )
 }
