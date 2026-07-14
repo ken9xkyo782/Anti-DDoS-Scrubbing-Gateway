@@ -5,14 +5,25 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import BillingSample, ProtectedService, ServicePlan, utc_now
+from app.db.models import (
+    BillingSample,
+    BillingStatus,
+    BillingUsage,
+    OveragePolicy,
+    ProtectedService,
+    ServicePlan,
+    utc_now,
+)
+from app.services.billing_metrics import bps_to_gbps, p95_nearest_rank
+from app.services.billing_period import month_period
 from app.worker.telemetry_reader import TelemetrySnapshot
 
 _NANOSECONDS_PER_SECOND = 1_000_000_000
@@ -118,6 +129,100 @@ class BillingMeter:
             return
 
         self._set_previous(snapshot)
+
+    async def refresh_open_periods(self) -> None:
+        """Refresh the current month's provisional usage for every active service."""
+        now = self._now()
+        period_start, period_end = month_period(now)
+
+        try:
+            async with self.session_factory() as db:
+                await self._refresh_service_cache(db)
+
+                for cached_service in self._services.values():
+                    samples = list(
+                        (
+                            await db.scalars(
+                                select(BillingSample.clean_bps).where(
+                                    BillingSample.service_id == cached_service.service.id,
+                                    BillingSample.sample_ts >= period_start,
+                                    BillingSample.sample_ts < period_end,
+                                )
+                            )
+                        ).all()
+                    )
+                    plan = cached_service.plan
+                    committed_clean_gbps = (
+                        plan.committed_clean_gbps if plan is not None else Decimal("0")
+                    )
+                    billing_metric = plan.billing_metric if plan is not None else "p95_clean_bps"
+                    overage_policy = (
+                        plan.overage_policy if plan is not None else OveragePolicy.billed
+                    )
+                    p95_clean_gbps = bps_to_gbps(p95_nearest_rank(samples))
+                    billed_gbps = max(committed_clean_gbps, p95_clean_gbps)
+                    overage_gbps = max(Decimal("0"), p95_clean_gbps - committed_clean_gbps)
+
+                    usage = await db.scalar(
+                        select(BillingUsage).where(
+                            BillingUsage.service_id == cached_service.service.id,
+                            BillingUsage.period_start == period_start,
+                        )
+                    )
+                    if usage is None:
+                        db.add(
+                            BillingUsage(
+                                service_id=cached_service.service.id,
+                                tenant_id=cached_service.tenant_id,
+                                service_name=cached_service.service.name,
+                                period_start=period_start,
+                                period_end=period_end,
+                                billing_metric=billing_metric,
+                                committed_clean_gbps=committed_clean_gbps,
+                                p95_clean_gbps=p95_clean_gbps,
+                                billed_gbps=billed_gbps,
+                                overage_gbps=overage_gbps,
+                                overage_policy=overage_policy,
+                                sample_count=len(samples),
+                                status=BillingStatus.open,
+                            )
+                        )
+                    elif usage.status == BillingStatus.open:
+                        usage.tenant_id = cached_service.tenant_id
+                        usage.service_name = cached_service.service.name
+                        usage.period_end = period_end
+                        usage.billing_metric = billing_metric
+                        usage.committed_clean_gbps = committed_clean_gbps
+                        usage.p95_clean_gbps = p95_clean_gbps
+                        usage.billed_gbps = billed_gbps
+                        usage.overage_gbps = overage_gbps
+                        usage.overage_policy = overage_policy
+                        usage.sample_count = len(samples)
+
+                await db.commit()
+        except SQLAlchemyError:
+            logger.exception("Billing usage refresh database operation failed")
+
+    async def finalize_due_periods(self) -> None:
+        """Finalize due or orphaned provisional usage without changing prior final rows."""
+        now = self._now()
+
+        try:
+            async with self.session_factory() as db:
+                await db.execute(
+                    update(BillingUsage)
+                    .where(
+                        BillingUsage.status == BillingStatus.open,
+                        or_(
+                            BillingUsage.period_end <= now,
+                            BillingUsage.service_id.is_(None),
+                        ),
+                    )
+                    .values(status=BillingStatus.final, finalized_at=now)
+                )
+                await db.commit()
+        except SQLAlchemyError:
+            logger.exception("Billing usage finalization database operation failed")
 
     async def _refresh_service_cache(self, db: AsyncSession) -> None:
         rows = (
