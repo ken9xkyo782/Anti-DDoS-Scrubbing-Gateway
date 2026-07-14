@@ -1,11 +1,15 @@
 import asyncio
 import logging
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.db.session import get_session_factory
 from app.services.feed_fetch import create_feed_client
+from app.worker.alert_dispatch import NotificationDispatcher
+from app.worker.alert_evaluator import AlertEvaluator
+from app.worker.alert_sources import AlertSources
 from app.worker.applier import DoubleBufferApplier, GlobalDenyApplier
 from app.worker.billing import BillingMeter
 from app.worker.feed_runner import FeedRunner
@@ -54,6 +58,31 @@ def build_billing_meter(
     )
 
 
+def build_alert_evaluator(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AlertEvaluator | None:
+    if not settings.worker_alert_enabled:
+        return None
+    return AlertEvaluator(
+        sources=AlertSources(
+            telemetry_stale_seconds=settings.worker_alert_telemetry_stale_seconds,
+            stuck_applying_seconds=settings.worker_alert_stuck_applying_seconds,
+        ),
+        dispatcher=NotificationDispatcher(
+            client=httpx.AsyncClient(timeout=settings.worker_alert_delivery_timeout_seconds),
+            max_attempts=settings.worker_alert_max_attempts,
+            smtp_timeout_seconds=settings.worker_alert_delivery_timeout_seconds,
+        ),
+        session_factory=session_factory,
+        fire_ticks=settings.worker_alert_fire_ticks,
+        clear_ticks=settings.worker_alert_clear_ticks,
+        renotify_seconds=settings.worker_alert_renotify_seconds,
+        interval_seconds=settings.worker_alert_interval_seconds,
+        history_retention_days=settings.worker_alert_history_retention_days,
+    )
+
+
 async def _run_worker() -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -77,6 +106,7 @@ async def _run_worker() -> None:
         feed_runner=runner,
         telemetry=build_telemetry_aggregator(settings, session_factory),
         billing=build_billing_meter(settings, session_factory),
+        alerts=build_alert_evaluator(settings, session_factory),
     ).run()
 
 

@@ -41,6 +41,10 @@ class NodeControlLane(Protocol):
     async def run_loop(self, stop: asyncio.Event) -> None: ...
 
 
+class AlertLane(Protocol):
+    async def run_loop(self, stop: asyncio.Event) -> None: ...
+
+
 class Worker:
     def __init__(
         self,
@@ -53,6 +57,7 @@ class Worker:
         telemetry: TelemetryLane | None = None,
         billing: BillingLane | None = None,
         node_control: NodeControlLane | None = None,
+        alerts: AlertLane | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
@@ -62,6 +67,7 @@ class Worker:
         self.telemetry = telemetry
         self.billing = billing
         self.node_control = node_control
+        self.alerts = alerts
         self._reconcile_requested = asyncio.Event()
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
@@ -101,6 +107,11 @@ class Worker:
             if node_control is not None
             else None
         )
+        alert_task = (
+            asyncio.create_task(self.alerts.run_loop(stop_event))
+            if self.alerts is not None
+            else None
+        )
         inflight: asyncio.Task[object] | None = None
         backoff: float | None = None
         redis_degraded = False
@@ -117,6 +128,7 @@ class Worker:
                 "telemetry_enabled": self.telemetry is not None,
                 "billing_enabled": self.billing is not None,
                 "node_control_enabled": node_control is not None,
+                "alerts_enabled": self.alerts is not None,
             },
         )
 
@@ -290,6 +302,7 @@ class Worker:
                 await self._finish_background_lane(telemetry_task)
                 await self._finish_background_lane(billing_task)
                 await self._finish_background_lane(node_control_task)
+                await self._finish_background_lane(alert_task)
                 await self._finish_inflight(
                     feed_coordinator.inflight_task if feed_coordinator is not None else None
                 )

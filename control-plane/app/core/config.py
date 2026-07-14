@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     worker_billing_interval_seconds: float = Field(default=300.0, gt=0)
     worker_billing_sample_retention_days: int = Field(default=400, gt=0)
     worker_billing_period: Literal["monthly"] = "monthly"
+    worker_alert_enabled: bool = True
+    worker_alert_interval_seconds: float = Field(default=15.0, gt=0)
+    worker_alert_fire_ticks: int = Field(default=2, ge=1)
+    worker_alert_clear_ticks: int = Field(default=2, ge=1)
+    worker_alert_renotify_seconds: float = Field(default=1800.0, gt=0)
+    worker_alert_max_attempts: int = Field(default=3, ge=1)
+    worker_alert_delivery_timeout_seconds: float = Field(default=10.0, gt=0)
+    worker_alert_history_retention_days: int = Field(default=90, gt=0)
+    worker_alert_backlog_threshold: int = Field(default=100, ge=1)
+    worker_alert_stuck_applying_seconds: float = Field(default=300.0, gt=0)
+    worker_alert_telemetry_stale_seconds: float = Field(default=60.0, gt=0)
 
     feed_fetch_connect_timeout_seconds: float = Field(default=5.0, gt=0)
     feed_fetch_read_timeout_seconds: float = Field(default=10.0, gt=0)

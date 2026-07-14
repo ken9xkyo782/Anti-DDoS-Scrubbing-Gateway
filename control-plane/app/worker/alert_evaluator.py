@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Alert, AlertRule, AlertScope, AlertSeverity, AlertState
@@ -51,6 +51,7 @@ class AlertEvaluator:
         clear_ticks: int,
         renotify_seconds: float,
         interval_seconds: float,
+        history_retention_days: int = 90,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.sources = sources
@@ -60,6 +61,7 @@ class AlertEvaluator:
         self.clear_ticks = clear_ticks
         self.renotify_seconds = renotify_seconds
         self.interval_seconds = interval_seconds
+        self.history_retention_days = history_retention_days
         self.clock = clock or (lambda: datetime.now(UTC))
 
     async def tick(self) -> None:
@@ -78,6 +80,7 @@ class AlertEvaluator:
                     effective=effective,
                     silence_in_maintenance=silence_in_maintenance,
                 )
+                await self.prune_history(db, now)
                 await self.dispatcher.dispatch_pending(db)
                 await db.commit()
             except Exception:
@@ -149,6 +152,17 @@ class AlertEvaluator:
                 await asyncio.wait_for(stop.wait(), timeout=self.interval_seconds)
             except TimeoutError:
                 continue
+
+    async def prune_history(self, db: AsyncSession, now: datetime) -> None:
+        """Delete expired resolved history (and its cascading notifications)."""
+        cutoff = now - timedelta(days=self.history_retention_days)
+        await db.execute(
+            delete(Alert).where(
+                Alert.state == AlertState.resolved,
+                Alert.resolved_at.is_not(None),
+                Alert.resolved_at < cutoff,
+            )
+        )
 
     async def _load_rules(
         self,

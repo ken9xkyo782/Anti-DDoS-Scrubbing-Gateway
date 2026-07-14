@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.db.models import (
     AgentJob,
+    Alert,
+    AlertNotification,
+    AlertScope,
+    AlertSeverity,
+    AlertState,
     ApplyStatus,
     BillingSample,
     BillingStatus,
@@ -31,6 +36,7 @@ from app.db.models import (
 from app.db.session import session_scope
 from app.services.apply import enqueue_service_update
 from app.services.feeds import create_source, enqueue_sync
+from app.worker.alert_evaluator import AlertEvaluator
 from app.worker.applier import GlobalDenyApplyResult, ServiceConfig
 from app.worker.billing import BillingMeter
 from app.worker.feed_runner import FeedRunner
@@ -436,6 +442,103 @@ async def test_telemetry_lane_failure_does_not_stop_job_processing(
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2)
+
+
+async def test_worker_stops_the_alert_lane_and_alert_evaluator_prunes_only_expired_history(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    started = asyncio.Event()
+
+    class BlockingAlerts:
+        async def run_loop(self, stop: asyncio.Event) -> None:
+            started.set()
+            await stop.wait()
+
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(),
+        redis=redis_client,
+        session_factory=committed_db,
+        alerts=BlockingAlerts(),
+    )
+    task = asyncio.create_task(worker.run(stop))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
+
+    class UnusedSources:
+        async def load(self, db: AsyncSession, now: datetime) -> object:
+            del db, now
+            raise AssertionError("prune does not load sources")
+
+    class UnusedDispatcher:
+        async def enqueue(self, db: AsyncSession, alert: Alert, trigger: str) -> None:
+            del db, alert, trigger
+
+        async def dispatch_pending(self, db: AsyncSession) -> None:
+            del db
+
+    now = datetime(2026, 7, 14, tzinfo=UTC)
+    async with committed_db() as db:
+        await db.execute(delete(AlertNotification))
+        await db.execute(delete(Alert))
+        old = Alert(
+            rule_key="old",
+            scope=AlertScope.node,
+            scope_key="old",
+            severity=AlertSeverity.warning,
+            state=AlertState.resolved,
+            context={},
+            fire_streak=1,
+            clear_streak=1,
+            first_observed_at=now,
+            resolved_at=datetime(2026, 4, 1, tzinfo=UTC),
+        )
+        recent = Alert(
+            rule_key="recent",
+            scope=AlertScope.node,
+            scope_key="recent",
+            severity=AlertSeverity.warning,
+            state=AlertState.resolved,
+            context={},
+            fire_streak=1,
+            clear_streak=1,
+            first_observed_at=now,
+            resolved_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        firing = Alert(
+            rule_key="firing",
+            scope=AlertScope.node,
+            scope_key="firing",
+            severity=AlertSeverity.warning,
+            state=AlertState.firing,
+            context={},
+            fire_streak=1,
+            clear_streak=0,
+            first_observed_at=now,
+        )
+        db.add_all([old, recent, firing])
+        await db.flush()
+        evaluator = AlertEvaluator(
+            sources=UnusedSources(),  # type: ignore[arg-type]
+            dispatcher=UnusedDispatcher(),  # type: ignore[arg-type]
+            session_factory=committed_db,
+            fire_ticks=1,
+            clear_ticks=1,
+            renotify_seconds=1,
+            interval_seconds=1,
+            history_retention_days=90,
+        )
+        await evaluator.prune_history(db, now)
+        await db.commit()
+
+    async with committed_db() as db:
+        remaining = set((await db.scalars(select(Alert.rule_key))).all())
+    assert remaining == {"recent", "firing"}
 
 
 async def test_billing_meter_prunes_only_samples_for_old_finalized_periods(
