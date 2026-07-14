@@ -52,6 +52,8 @@ struct {
 	__type(value, __u32);
 } tx_devmap SEC(".maps");
 
+#include "node_control.h"
+
 #ifdef PKT_TEST_HOOKS
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -215,6 +217,8 @@ int xdp_gateway(struct xdp_md *ctx)
 		res = parse_l4(&cur, data_end, &meta);
 		if (res != PARSE_OK)
 			return record_drop(&meta, DR_MALFORMED_IPV4);
+		if (node_control_bypass())
+			return redirect_out_bypass(&meta);
 
 		return service_lookup_redirect(ctx, &meta);
 	default:

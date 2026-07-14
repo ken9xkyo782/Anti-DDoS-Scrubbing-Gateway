@@ -48,11 +48,11 @@ $(BUILD_DIR):
 
 bpf: $(BPF_OBJ)
 
-$(BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/sample.h $(SRC_DIR)/parse.h $(SRC_DIR)/service.h $(SRC_DIR)/rules.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h | $(BUILD_DIR)
+$(BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/sample.h $(SRC_DIR)/parse.h $(SRC_DIR)/service.h $(SRC_DIR)/rules.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SRC_DIR)/node_control.h | $(BUILD_DIR)
 	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@
 	$(LLVM_STRIP) -g $@
 
-$(TEST_BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/sample.h $(SRC_DIR)/parse.h $(SRC_DIR)/service.h $(SRC_DIR)/rules.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h | $(BUILD_DIR)
+$(TEST_BPF_OBJ): $(BPF_SRC) $(SRC_DIR)/pkt_meta.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/sample.h $(SRC_DIR)/parse.h $(SRC_DIR)/service.h $(SRC_DIR)/rules.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SRC_DIR)/node_control.h | $(BUILD_DIR)
 	$(BPF_CLANG) $(BPF_CFLAGS) -DPKT_TEST_HOOKS -c $< -o $@
 	$(LLVM_STRIP) -g $@
 
@@ -101,7 +101,7 @@ smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_fairness.sh
 	$(TEST_DIR)/smoke_apply.sh
 
-$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
+$(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SRC_DIR)/node_control.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 blbulk: $(BULK_BIN)

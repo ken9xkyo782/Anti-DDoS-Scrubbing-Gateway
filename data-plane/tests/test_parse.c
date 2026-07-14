@@ -15,6 +15,7 @@
 #include "drop_reason.h"
 #include "drop_event.h"
 #include "fairness.h"
+#include "node_control.h"
 #include "pkt_build.h"
 #include "pkt_meta.h"
 #include "rules.h"
@@ -88,6 +89,8 @@ struct test_env {
 	int rl_config_fd;
 	int active_config_fd;
 	int tx_devmap_fd;
+	int node_control_fd;
+	int bypass_counter_fd;
 	int trigger_fd;
 	int ringbuf_fd;
 	int sample_config_fd;
@@ -201,6 +204,8 @@ static int env_open(struct test_env *env)
 	env->rl_config_fd = bpf_map__fd(env->skel->maps.rl_config);
 	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
 	env->tx_devmap_fd = bpf_map__fd(env->skel->maps.tx_devmap);
+	env->node_control_fd = bpf_map__fd(env->skel->maps.node_control);
+	env->bypass_counter_fd = bpf_map__fd(env->skel->maps.bypass_counter);
 	env->trigger_fd = bpf_map__fd(env->skel->maps.test_trigger_map);
 	env->ringbuf_fd = bpf_map__fd(env->skel->maps.drop_ringbuf);
 	env->sample_config_fd = bpf_map__fd(env->skel->maps.sample_config);
@@ -240,6 +245,7 @@ static int env_open(struct test_env *env)
 	    env->service_ingress_cap_state_fd < 0 ||
 	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
 	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
+	    env->node_control_fd < 0 || env->bypass_counter_fd < 0 ||
 	    env->trigger_fd < 0 ||
 	    env->ringbuf_fd < 0 || env->sample_config_fd < 0 ||
 	    env->sample_bucket_fd < 0 || env->sample_stats_fd < 0 ||
@@ -255,6 +261,32 @@ static int env_open(struct test_env *env)
 static void env_close(struct test_env *env)
 {
 	xdp_gateway_test_bpf__destroy(env->skel);
+}
+
+static int set_node_bypass(struct test_env *env, __u32 bypass)
+{
+	struct node_control control = {
+		.bypass = bypass,
+	};
+	__u32 key = 0;
+
+	return bpf_map_update_elem(env->node_control_fd, &key, &control,
+				   BPF_ANY);
+}
+
+static int reset_bypass_counter(struct test_env *env)
+{
+	struct bypass_stat *zero;
+	__u32 key = 0;
+	int err;
+
+	zero = calloc(env->possible_cpus, sizeof(*zero));
+	if (!zero)
+		return -1;
+
+	err = bpf_map_update_elem(env->bypass_counter_fd, &key, zero, BPF_ANY);
+	free(zero);
+	return err;
 }
 
 static int reset_observability(struct test_env *env)
@@ -284,6 +316,10 @@ static int reset_observability(struct test_env *env)
 		}
 	}
 	if (!err && clear_u32_hash_map(env->svc_stat_fd) != 0)
+		err = -1;
+	if (!err && set_node_bypass(env, 0) != 0)
+		err = -1;
+	if (!err && reset_bypass_counter(env) != 0)
 		err = -1;
 
 	key = 0;
@@ -1137,6 +1173,29 @@ static int read_svc_stat(struct test_env *env, __u32 dp_id,
 	return err;
 }
 
+static int read_bypass_counter(struct test_env *env, struct bypass_stat *sum)
+{
+	struct bypass_stat *values;
+	__u32 key = 0;
+	int err;
+
+	values = calloc(env->possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(env->bypass_counter_fd, &key, values);
+	if (err == 0) {
+		memset(sum, 0, sizeof(*sum));
+		for (int cpu = 0; cpu < env->possible_cpus; cpu++) {
+			sum->pkts += values[cpu].pkts;
+			sum->bytes += values[cpu].bytes;
+		}
+	}
+
+	free(values);
+	return err;
+}
+
 static int read_sample_stat(struct test_env *env, enum sample_stat stat,
 			    __u64 *sum)
 {
@@ -1506,6 +1565,20 @@ static int expect_counter(struct test_env *env, enum drop_reason reason,
 	fprintf(stderr, "counter[%u]: got %llu, want %llu\n", reason,
 		(unsigned long long)got, (unsigned long long)want);
 	return -1;
+}
+
+static int expect_bypass_counter(struct test_env *env, __u64 pkts,
+				 __u64 bytes)
+{
+	struct bypass_stat stat;
+
+	if (read_bypass_counter(env, &stat) != 0) {
+		fprintf(stderr, "bypass_counter: read failed: %s\n", strerror(errno));
+		return -1;
+	}
+	if (expect_u64("bypass pkts", stat.pkts, pkts) != 0)
+		return -1;
+	return expect_u64("bypass bytes", stat.bytes, bytes);
 }
 
 static int expect_sample_stat(struct test_env *env, enum sample_stat stat,
@@ -2920,6 +2993,145 @@ static int test_service_miss_drops(void)
 		err = expect_counter(&env, DR_SERVICE_MISS, 1);
 	if (!err)
 		err = expect_svc_stats_empty(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_bypass_service_miss_redirects_and_counts(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_node_bypass(&env, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, 0, 0);
+	if (!err)
+		err = expect_bypass_counter(&env, 1, frame.len);
+	if (!err)
+		err = expect_all_drop_counters_zero(&env);
+	if (!err)
+		err = expect_svc_stats_empty(&env);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_bypass_preserves_parse_drops(void)
+{
+	struct pkt_frame ipv6;
+	struct pkt_frame malformed;
+	struct pkt_frame fragment;
+	struct test_env env;
+	struct iphdr *iph;
+	__u32 retval = 0;
+	int err;
+
+	pkt_frame_init(&ipv6);
+	if (build_eth(&ipv6, ETH_P_IPV6) != 0 || build_ipv6(&ipv6) != 0)
+		return -1;
+
+	pkt_frame_init(&malformed);
+	if (build_eth(&malformed, ETH_P_IP) != 0 ||
+	    build_ipv4(&malformed, IPPROTO_UDP, 0, 5) != 0)
+		return -1;
+	iph = (struct iphdr *)(malformed.data + malformed.ipv4_off);
+	iph->version = 5;
+
+	pkt_frame_init(&fragment);
+	if (build_eth(&fragment, ETH_P_IP) != 0 ||
+	    build_ipv4(&fragment, IPPROTO_UDP, IPV4_MF, 5) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_node_bypass(&env, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &ipv6, &retval);
+	if (!err)
+		err = expect_u32("IPv6 retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_IPV6_UNSUPPORTED, 1);
+	if (!err)
+		err = expect_bypass_counter(&env, 0, 0);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err)
+		err = set_node_bypass(&env, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &malformed, &retval);
+	if (!err)
+		err = expect_u32("malformed retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_MALFORMED_IPV4, 1);
+	if (!err)
+		err = expect_bypass_counter(&env, 0, 0);
+
+	if (!err)
+		err = reset_maps(&env);
+	if (!err)
+		err = set_node_bypass(&env, 1);
+	if (!err)
+		err = run_frame_current_maps(&env, &fragment, &retval);
+	if (!err)
+		err = expect_u32("fragment retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_FRAGMENT_UNSUPPORTED, 1);
+	if (!err)
+		err = expect_bypass_counter(&env, 0, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_bypass_off_uses_normal_service_lookup(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	struct pkt_meta meta;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_node_bypass(&env, 0);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+	if (!err)
+		err = expect_bypass_counter(&env, 0, 0);
+	if (!err)
+		err = expect_svc_stat(&env, DEFAULT_SERVICE_ID, 1, frame.len,
+				      0, 0, DR_SERVICE_MISS, 0);
 
 	env_close(&env);
 	return err;
@@ -7194,6 +7406,11 @@ int main(void)
 		{ "bad reason clamps to map_error",
 		  test_bad_reason_clamps_to_map_error },
 		{ "service miss drops", test_service_miss_drops },
+		{ "bypass service miss redirects and counts",
+		  test_bypass_service_miss_redirects_and_counts },
+		{ "bypass preserves parse drops", test_bypass_preserves_parse_drops },
+		{ "bypass off uses normal service lookup",
+		  test_bypass_off_uses_normal_service_lookup },
 		{ "service disabled drops", test_service_disabled_drops },
 			{ "enabled service sets redirect meta",
 			  test_enabled_service_sets_redirect_meta },
