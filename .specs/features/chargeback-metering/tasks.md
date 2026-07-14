@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/chargeback-metering/design.md` (AD-031)
 **Spec**: `.specs/features/chargeback-metering/spec.md` (CHG-01..33)
-**Status**: Draft
+**Status**: Executed (2026-07-14) — all task commits landed and task-scoped gates pass.
 
 > **Track:** single **control-plane / worker** track — **zero data-plane work** (the byte source is
 > telemetry-owned). Per `.specs/codebase/TESTING.md`, only **unit** tasks may be `[P]`; every
@@ -298,6 +298,39 @@ tests)
 
 **Tests**: none · **Gate**: build
 **Commit**: `docs(billing): document billing test layers and metering conventions`
+
+---
+
+## Execution Record (2026-07-14)
+
+| Task | Commit | Verification |
+| --- | --- | --- |
+| T1 | `9a8d1f8` | Quick gate: 120 unit passed; 344 deselected. |
+| T2 | `965c1ec` | Quick gate: 120 unit passed; 344 deselected. |
+| T3 | `2a08aa6` | 7 billing-model tests, ruff, format, mypy, and Alembic head upgrade passed. |
+| T4 | `33419cb` | 7 billing-meter sampling tests, ruff, format, and mypy passed. |
+| T5 | `9a4520a` | 15 billing-meter rollup/finalization tests, ruff, format, and mypy passed. |
+| T6 | `ab4d05b` | 24 meter/runtime focused tests, ruff, format, and mypy passed. |
+| T7 | `6a980d7` | 6 billing API tests, ruff, format, and mypy passed. |
+| T8 | `07a31c6` | 8 billing API tests, ruff, format, and mypy passed. |
+| T9 | `1166a3a` | Frontend lint, typecheck, 18 Vitest tests, and production build passed. |
+| T10 | `ffd2496` | `python -c "import app.main"` import smoke passed. |
+
+### Final targeted verification
+
+- Control plane: `ruff check .`, `ruff format --check .`, and `mypy app/` passed
+  (149 files formatted; 68 mypy sources).
+- Billing-focused control-plane suite: 50 passed across the period, metrics,
+  models, meter, API, and worker-runtime tests.
+- Frontend: lint, typecheck, 18 Vitest tests, and the production Vite build passed.
+
+### Repository-wide full-suite note
+
+Several required `pytest -q` attempts reached the repository's known
+order/isolation/reporting issue: the tool detached before the terminal summary,
+and the existing `test_global_deny_applier.py` last-failed entries remained.
+The billing-focused suite above ran cleanly in one serialized process; no
+unrelated global-deny or allocation/auth tests were modified for this feature.
 
 ---
 
