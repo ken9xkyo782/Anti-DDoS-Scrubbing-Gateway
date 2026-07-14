@@ -29,6 +29,10 @@ class TelemetryLane(Protocol):
     async def run_loop(self, stop: asyncio.Event) -> None: ...
 
 
+class BillingLane(Protocol):
+    async def run_loop(self, stop: asyncio.Event) -> None: ...
+
+
 class Worker:
     def __init__(
         self,
@@ -39,6 +43,7 @@ class Worker:
         applier: Applier | None = None,
         feed_runner: FeedRunner | None = None,
         telemetry: TelemetryLane | None = None,
+        billing: BillingLane | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
@@ -46,6 +51,7 @@ class Worker:
         self.applier = applier or PlaceholderApplier()
         self.feed_runner = feed_runner
         self.telemetry = telemetry
+        self.billing = billing
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         stop_event = stop or asyncio.Event()
@@ -62,6 +68,11 @@ class Worker:
             if self.telemetry is not None
             else None
         )
+        billing_task = (
+            asyncio.create_task(self.billing.run_loop(stop_event))
+            if self.billing is not None
+            else None
+        )
         inflight: asyncio.Task[object] | None = None
         backoff: float | None = None
         redis_degraded = False
@@ -76,6 +87,7 @@ class Worker:
                 "backoff_initial_seconds": self.settings.worker_backoff_initial_seconds,
                 "backoff_max_seconds": self.settings.worker_backoff_max_seconds,
                 "telemetry_enabled": self.telemetry is not None,
+                "billing_enabled": self.billing is not None,
             },
         )
 
@@ -241,6 +253,7 @@ class Worker:
             await self._finish_inflight(inflight)
             try:
                 await self._finish_background_lane(telemetry_task)
+                await self._finish_background_lane(billing_task)
                 await self._finish_inflight(
                     feed_coordinator.inflight_task if feed_coordinator is not None else None
                 )
@@ -448,12 +461,12 @@ class Worker:
                     timeout=self.settings.worker_shutdown_grace_seconds,
                 )
             except TimeoutError:
-                logger.warning("Telemetry lane did not stop during worker shutdown")
+                logger.warning("Background lane did not stop during worker shutdown")
                 task.cancel()
                 await self._discard_cancelled(task)
                 return
             except Exception:
-                logger.exception("Telemetry lane stopped with an error")
+                logger.exception("Background lane stopped with an error")
                 return
 
         try:
@@ -461,7 +474,7 @@ class Worker:
         except asyncio.CancelledError:
             pass
         except Exception:
-            logger.exception("Telemetry lane stopped with an error")
+            logger.exception("Background lane stopped with an error")
 
     @staticmethod
     async def _discard_cancelled(task: asyncio.Task[object]) -> None:

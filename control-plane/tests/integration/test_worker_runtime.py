@@ -2,23 +2,28 @@ import asyncio
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
 import pytest
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.db.models import (
     AgentJob,
     ApplyStatus,
+    BillingSample,
+    BillingStatus,
+    BillingUsage,
     ChangeTrigger,
     FeedSyncRun,
     FeedSyncStatus,
     JobStatus,
     NodeHealthSnapshot,
+    OveragePolicy,
     ProtectedService,
     Tenant,
     XdpMode,
@@ -27,6 +32,7 @@ from app.db.session import session_scope
 from app.services.apply import enqueue_service_update
 from app.services.feeds import create_source, enqueue_sync
 from app.worker.applier import GlobalDenyApplyResult, ServiceConfig
+from app.worker.billing import BillingMeter
 from app.worker.feed_runner import FeedRunner
 from app.worker.telemetry import TelemetryAggregator
 from app.worker.telemetry_reader import FakeTelemetryReader, NodeCounters, TelemetrySnapshot
@@ -430,6 +436,203 @@ async def test_telemetry_lane_failure_does_not_stop_job_processing(
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2)
+
+
+async def test_billing_meter_prunes_only_samples_for_old_finalized_periods(
+    committed_db: async_sessionmaker[AsyncSession],
+) -> None:
+    old_finalized_service = ProtectedService(
+        tenant=Tenant(name="billing-prune-old-tenant"),
+        name="billing-prune-old",
+        cidr_or_ip="203.0.113.240/32",
+    )
+    recent_finalized_service = ProtectedService(
+        tenant=Tenant(name="billing-prune-recent-tenant"),
+        name="billing-prune-recent",
+        cidr_or_ip="203.0.113.241/32",
+    )
+    old_open_service = ProtectedService(
+        tenant=Tenant(name="billing-prune-open-tenant"),
+        name="billing-prune-open",
+        cidr_or_ip="203.0.113.242/32",
+    )
+    now = datetime(2026, 7, 14, tzinfo=UTC)
+
+    async with committed_db() as db:
+        db.add_all([old_finalized_service, recent_finalized_service, old_open_service])
+        await db.flush()
+        db.add_all(
+            [
+                BillingUsage(
+                    service_id=old_finalized_service.id,
+                    tenant_id=old_finalized_service.tenant_id,
+                    service_name=old_finalized_service.name,
+                    period_start=datetime(2025, 5, 1, tzinfo=UTC),
+                    period_end=datetime(2025, 6, 1, tzinfo=UTC),
+                    billing_metric="p95_clean_bps",
+                    committed_clean_gbps=Decimal("1.00"),
+                    p95_clean_gbps=Decimal("1.00"),
+                    billed_gbps=Decimal("1.00"),
+                    overage_gbps=Decimal("0.00"),
+                    overage_policy=OveragePolicy.billed,
+                    sample_count=1,
+                    status=BillingStatus.final,
+                    finalized_at=datetime(2025, 6, 1, tzinfo=UTC),
+                ),
+                BillingUsage(
+                    service_id=recent_finalized_service.id,
+                    tenant_id=recent_finalized_service.tenant_id,
+                    service_name=recent_finalized_service.name,
+                    period_start=datetime(2026, 6, 1, tzinfo=UTC),
+                    period_end=datetime(2026, 7, 1, tzinfo=UTC),
+                    billing_metric="p95_clean_bps",
+                    committed_clean_gbps=Decimal("1.00"),
+                    p95_clean_gbps=Decimal("1.00"),
+                    billed_gbps=Decimal("1.00"),
+                    overage_gbps=Decimal("0.00"),
+                    overage_policy=OveragePolicy.billed,
+                    sample_count=1,
+                    status=BillingStatus.final,
+                    finalized_at=datetime(2026, 7, 1, tzinfo=UTC),
+                ),
+                BillingUsage(
+                    service_id=old_open_service.id,
+                    tenant_id=old_open_service.tenant_id,
+                    service_name=old_open_service.name,
+                    period_start=datetime(2025, 4, 1, tzinfo=UTC),
+                    period_end=datetime(2025, 5, 1, tzinfo=UTC),
+                    billing_metric="p95_clean_bps",
+                    committed_clean_gbps=Decimal("1.00"),
+                    p95_clean_gbps=Decimal("1.00"),
+                    billed_gbps=Decimal("1.00"),
+                    overage_gbps=Decimal("0.00"),
+                    overage_policy=OveragePolicy.billed,
+                    sample_count=1,
+                    status=BillingStatus.open,
+                ),
+                BillingSample(
+                    service_id=old_finalized_service.id,
+                    dp_id=old_finalized_service.dp_id,
+                    sample_ts=datetime(2025, 5, 15, tzinfo=UTC),
+                    clean_bps=10,
+                    window_seconds=300,
+                    is_reset=False,
+                ),
+                BillingSample(
+                    service_id=recent_finalized_service.id,
+                    dp_id=recent_finalized_service.dp_id,
+                    sample_ts=datetime(2026, 6, 15, tzinfo=UTC),
+                    clean_bps=20,
+                    window_seconds=300,
+                    is_reset=False,
+                ),
+                BillingSample(
+                    service_id=old_open_service.id,
+                    dp_id=old_open_service.dp_id,
+                    sample_ts=datetime(2025, 4, 15, tzinfo=UTC),
+                    clean_bps=30,
+                    window_seconds=300,
+                    is_reset=False,
+                ),
+            ]
+        )
+        await db.commit()
+
+    try:
+        meter = BillingMeter(
+            reader=FakeTelemetryReader(snapshots=[]),
+            session_factory=committed_db,
+            now=lambda: now,
+            sample_retention_days=400,
+        )
+
+        await meter.prune_samples()
+
+        async with committed_db() as db:
+            retained_service_ids = set((await db.scalars(select(BillingSample.service_id))).all())
+
+        assert retained_service_ids == {recent_finalized_service.id, old_open_service.id}
+    finally:
+        async with committed_db() as db:
+            await db.execute(
+                delete(BillingUsage).where(
+                    BillingUsage.service_id.in_(
+                        [
+                            old_finalized_service.id,
+                            recent_finalized_service.id,
+                            old_open_service.id,
+                        ]
+                    )
+                )
+            )
+            await db.commit()
+
+
+async def test_billing_meter_run_loop_recovers_after_a_failed_tick(
+    committed_db: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    meter = BillingMeter(
+        reader=FakeTelemetryReader(snapshots=[]),
+        session_factory=committed_db,
+        interval_seconds=0.01,
+    )
+    calls = 0
+    continued = asyncio.Event()
+
+    async def fail_once_then_continue() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("billing tick failed")
+        continued.set()
+
+    monkeypatch.setattr(meter, "tick", fail_once_then_continue)
+    stop = asyncio.Event()
+    task = asyncio.create_task(meter.run_loop(stop))
+
+    try:
+        await asyncio.wait_for(continued.wait(), timeout=2)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    assert calls >= 2
+
+
+async def test_worker_cancels_the_billing_lane_on_stop(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class BlockingBilling:
+        async def run_loop(self, _stop: asyncio.Event) -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(),
+        redis=redis_client,
+        session_factory=committed_db,
+        billing=BlockingBilling(),
+    )
+    task = asyncio.create_task(worker.run(stop))
+
+    await asyncio.wait_for(started.wait(), timeout=2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert cancelled.is_set()
 
 
 async def _noop() -> None:

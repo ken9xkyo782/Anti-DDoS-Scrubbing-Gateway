@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -50,14 +51,41 @@ class BillingMeter:
         reader: SnapshotReader,
         session_factory: async_sessionmaker[AsyncSession],
         now: Callable[[], datetime] = utc_now,
+        interval_seconds: float = 300.0,
+        sample_retention_days: int = 400,
+        billing_period: str = "monthly",
     ) -> None:
+        if billing_period != "monthly":
+            raise ValueError("Only monthly billing periods are supported")
         self.reader = reader
         self.session_factory = session_factory
         self._now = now
+        self.interval_seconds = interval_seconds
+        self.sample_retention_days = sample_retention_days
         self._previous: dict[int, int] = {}
         self._previous_ts_ns: int | None = None
         self._previous_version: int | None = None
         self._services: dict[int, _ServiceCacheEntry] = {}
+
+    async def run_loop(self, stop: asyncio.Event) -> None:
+        """Run billing metering until stopped, continuing after a failed iteration."""
+        while not stop.is_set():
+            try:
+                await self.tick()
+            except Exception:
+                logger.exception("Billing metering iteration failed")
+
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self.interval_seconds)
+            except TimeoutError:
+                continue
+
+    async def tick(self) -> None:
+        """Run one independently committed sample, rollup, finalization, and prune cycle."""
+        await self.sample_once()
+        await self.refresh_open_periods()
+        await self.finalize_due_periods()
+        await self.prune_samples()
 
     async def sample_once(self) -> None:
         """Read one snapshot and persist the elapsed clean-byte rate for each active service."""
@@ -223,6 +251,28 @@ class BillingMeter:
                 await db.commit()
         except SQLAlchemyError:
             logger.exception("Billing usage finalization database operation failed")
+
+    async def prune_samples(self) -> None:
+        """Discard samples only after their corresponding finalized period has expired."""
+        cutoff = self._now() - timedelta(days=self.sample_retention_days)
+        finalized_period = (
+            select(BillingUsage.id)
+            .where(
+                BillingUsage.service_id == BillingSample.service_id,
+                BillingUsage.status == BillingStatus.final,
+                BillingUsage.period_end <= cutoff,
+                BillingSample.sample_ts >= BillingUsage.period_start,
+                BillingSample.sample_ts < BillingUsage.period_end,
+            )
+            .exists()
+        )
+
+        try:
+            async with self.session_factory() as db:
+                await db.execute(delete(BillingSample).where(finalized_period))
+                await db.commit()
+        except SQLAlchemyError:
+            logger.exception("Billing sample pruning database operation failed")
 
     async def _refresh_service_cache(self, db: AsyncSession) -> None:
         rows = (

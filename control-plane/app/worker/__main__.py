@@ -7,6 +7,7 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_session_factory
 from app.services.feed_fetch import create_feed_client
 from app.worker.applier import DoubleBufferApplier, GlobalDenyApplier
+from app.worker.billing import BillingMeter
 from app.worker.feed_runner import FeedRunner
 from app.worker.telemetry import TelemetryAggregator
 from app.worker.telemetry_reader import TelemetryReader
@@ -34,6 +35,25 @@ def build_telemetry_aggregator(
     )
 
 
+def build_billing_meter(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> BillingMeter | None:
+    if not settings.worker_billing_enabled:
+        return None
+    return BillingMeter(
+        reader=TelemetryReader(
+            binary=settings.worker_telemetry_binary_path,
+            ifindex=settings.worker_telemetry_ifindex,
+            timeout_seconds=settings.worker_telemetry_timeout_seconds,
+        ),
+        session_factory=session_factory,
+        interval_seconds=settings.worker_billing_interval_seconds,
+        sample_retention_days=settings.worker_billing_sample_retention_days,
+        billing_period=settings.worker_billing_period,
+    )
+
+
 async def _run_worker() -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -56,6 +76,7 @@ async def _run_worker() -> None:
         ),
         feed_runner=runner,
         telemetry=build_telemetry_aggregator(settings, session_factory),
+        billing=build_billing_meter(settings, session_factory),
     ).run()
 
 
