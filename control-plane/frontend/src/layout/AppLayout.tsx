@@ -21,6 +21,7 @@ export function AppLayout() {
         <nav aria-label="Primary navigation">
           <NavLink to={dashboardPath}>Dashboard</NavLink>
           <NavLink to="/billing">Billing</NavLink>
+          <NavLink to="/alerts">Alerts</NavLink>
           <span>{principal?.username}</span>
           <button type="button" onClick={() => void handleLogout()}>
             Sign out

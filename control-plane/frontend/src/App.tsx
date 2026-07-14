@@ -4,6 +4,7 @@ import { useAuth } from './auth/AuthContext'
 import { AppLayout } from './layout/AppLayout'
 import { AdminDashboard } from './pages/AdminDashboard'
 import { BillingPanel } from './components/BillingPanel'
+import { AlertsPanel } from './components/AlertsPanel'
 import { LoginPage } from './pages/LoginPage'
 import { TenantDashboard } from './pages/TenantDashboard'
 import { ProtectedRoute } from './routes/ProtectedRoute'
@@ -27,6 +28,7 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route index element={<DashboardLanding />} />
           <Route path="/billing" element={<BillingPanel />} />
+          <Route path="/alerts" element={<AlertsPanel />} />
           <Route element={<ProtectedRoute allowedRoles={['tenant_user']} />}>
             <Route path="/tenant" element={<TenantDashboard />} />
           </Route>
