@@ -29,6 +29,9 @@ No mocking of the DB/Redis for integration tests — use the real services (PG-s
 | User service | `app/services/users.py` | integration |
 | Auth service | `app/services/auth.py` | integration |
 | API routers | `app/api/routers/*.py` | integration (API via AsyncClient) |
+| Billing period and metrics helpers | `app/services/billing_period.py`, `app/services/billing_metrics.py` | unit: `tests/unit/test_billing_period.py`, `tests/unit/test_billing_metrics.py` |
+| Billing meter | `app/worker/billing.py` | integration: `tests/integration/test_billing_meter.py` |
+| Billing API router | `app/api/routers/billing.py` | integration: `tests/integration/test_billing_api.py` |
 | Bootstrap CLI | `app/cli.py` | integration |
 | Worker backoff and Redis-pop helper | `app/worker/worker.py` | unit: `tests/unit/test_worker_backoff.py` |
 | Worker processor and reconciliation | `app/worker/processor.py` | integration: `tests/integration/test_worker_processor.py` |
@@ -76,6 +79,21 @@ panel.
   processor and runtime tests. These appliers make acknowledgments, failures,
   and mid-apply coordination deterministic without touching the data plane.
 - Secrets: tests never assert on plaintext passwords; a log-capture fixture asserts **no** credential material is emitted (Success Criteria).
+
+### Billing conventions
+
+- Use `FakeTelemetryReader` from `app/worker/telemetry_reader.py` for billing-meter
+  integration tests. Feed it deterministic telemetry snapshots rather than
+  invoking the data-plane reader.
+- Calculate p95 with the nearest-rank method: sort the period's `clean_bps`
+  samples, select rank `ceil(0.95 * n)`, and return `0` for no samples.
+- Convert clean bytes per second to Gbps with `bytes_per_second * 8 /
+  1_000_000_000`; the `* 8` converts bytes to bits. Quantize the result to two
+  decimal places before comparing it with a plan's committed Gbps.
+- Treat billing periods as UTC calendar months, with bounds from the first day
+  at `00:00:00Z` through, but excluding, the first day of the next month.
+- Refresh only `open` usage rows. The meter finalizes an `open` row when its
+  period ends and never changes a `final` row.
 
 ### Redis-down worker verification
 

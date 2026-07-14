@@ -62,6 +62,46 @@ cd ../control-plane && python -m app.worker
 The data-plane loader must be running and must own the pinned observability
 maps. See the data-plane README for the `dpstat snapshot --json` contract.
 
+## Billing metering and usage
+
+The worker runs billing metering as an independent background lane. It reuses
+the telemetry reader's `dpstat` binary path, optional ingress ifindex, and
+subprocess timeout. The lane takes coarse per-service samples, refreshes the
+current billing-period rollup, finalizes due periods, and prunes old samples.
+
+Configure the lane with these environment variables:
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `CONTROL_PLANE_WORKER_BILLING_ENABLED` | `true` | Enables the billing background lane. |
+| `CONTROL_PLANE_WORKER_BILLING_INTERVAL_SECONDS` | `300.0` | Sets the interval between billing-meter iterations. |
+| `CONTROL_PLANE_WORKER_BILLING_SAMPLE_RETENTION_DAYS` | `400` | Prunes samples only after their finalized billing period reaches this age. |
+| `CONTROL_PLANE_WORKER_BILLING_PERIOD` | `monthly` | Selects the only supported billing period. |
+
+Billing periods are UTC calendar months. A period begins at `00:00:00Z` on the
+first day and ends, exclusively, at the first day of the following month. The
+meter calculates p95 with the nearest-rank method over clean-byte-per-second
+samples. It converts that value to Gbps by multiplying by `8` before dividing
+by `1_000_000_000`, then rounds to two decimal places. The resulting `open`
+usage is provisional; when the period ends, the worker marks it `final` and no
+longer updates it.
+
+### Billing APIs and exports
+
+Authenticated users can call `GET /billing/usage` for current or finalized
+usage. You can filter by `service_id`, `period` (`YYYY-MM`), and `status`
+(`open` or `final`). Tenant users see only their tenant's usage and can query
+only services they own. Administrators can retrieve all tenant usage or filter
+it with `tenant_id`.
+
+`GET /billing/usage/history` returns finalized usage only, newest first. It
+accepts an optional `service_id` and a `limit` from `1` through `100` (default
+`12`), with the same tenant service scope.
+
+Administrators export a finalized calendar month with
+`GET /billing/usage/export?period=YYYY-MM&format=csv` or `format=json`. The
+endpoint excludes provisional `open` usage for both formats.
+
 ## Telemetry APIs and SPA deployment
 
 Tenant users can read `GET /services/{service_id}/telemetry` only for services
