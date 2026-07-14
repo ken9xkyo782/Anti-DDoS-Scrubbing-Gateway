@@ -2,7 +2,85 @@
 
 **Last Updated:** 2026-07-14
 
-**Current Work (authoritative update):** M5 → **Telemetry & dashboards** —
+**Current Work (authoritative update):** M6 #2 → **Alerting** — **SPEC + CONTEXT
++ DESIGN (AD-033) + TASKS DRAFTED** (2026-07-14, awaiting approval → Execute).
+`tasks.md` (T1–T12; all 42 reqs mapped) landed: **T1** extract `telemetry_math`
+committed-bps helper (re-point telemetry router) · **T2** `[P]` `alert_rules`
+§9.3 catalog + pure predicates · **T3** 4 models + 5 enums + migration
+`20260714_0011_alerting` · **T4** `AlertSources`→`AlertInputs` reader · **T5**
+`AlertEvaluator` lifecycle (pending→firing→resolved debounce/hysteresis/dedup/
+re-notify/auto-resolve + run_loop + critical→audit + maintenance-silence gate) ·
+**T6** `NotificationDispatcher` + email(stdlib smtplib/to_thread)/webhook(httpx)
+channels + scoped routing/isolation + min-severity + test-send · **T7** worker
+wiring + `worker_alert_*` settings + history retention prune · **T8** `/alerts`
+tenant-scoped history read · **T9** `/alerts/rules`+`/alerts/channels` admin
+config (secret write-only, audited) + test-send · **T10** SPA `AlertsPanel`
+(P2, fe, gated telemetry FE) · **T11** P3 ack + export · **T12** `[P]` docs.
+Single CP/worker track, **zero DP work**; only **T2** (unit) + **T12** (docs) +
+**T10** (fe toolchain) are `[P]`, all other tasks are integration → serialize on
+`compose.test.yml`. All 3 mandatory pre-approval checks pass (granularity,
+diagram↔`Depends on`, test co-location per TESTING.md matrix). Tools:
+`coding-guidelines` (code), `docs-writer` (T12), no MCPs. Baselines pinned live at
+Execute: `B_cp` = `pytest -q` head total (≥507), `B_fe` = telemetry Vitest total
+(≥34). Execute is CP/worker-only and buildable now (telemetry executed;
+`NodeControl` table exists at `_0010`; fixture source rows for tests). **Next:**
+approve tasks → **Execute** (Phase 1: T2 `[P]` alongside T1 then T3).
+
+**Prior sub-step (superseded above):** SPEC + CONTEXT + DESIGN (AD-033) drafted
+earlier this session (awaiting approval → Tasks) — now advanced to tasks. `design.md`
++ 2 rendered diagrams (`diagrams/alerting-architecture.{mmd,svg}`,
+`diagrams/alerting-sequence.{mmd,svg}`) landed. **Control-plane/worker only, zero
+DP surface** — reads existing persisted sources. AD-033 key decisions: **D-033-1**
+rules bind to structured source rows (not audit-log parsing; `AuditEvent` = the
+critical-alert *write* target); **D-033-2** routing/isolation keyed by
+`NotificationChannel.tenant_id` (**no email column exists** on User/Tenant — node
+alerts→NULL-scope channels, service→owner+NULL; §5.2 structural); **D-033-3**
+single `Alert` row per `(rule,scope)` walking `pending→firing→resolved` with all
+streak/notify state in-row (restart-safe) + partial-unique dedup index;
+**D-033-4** new `AlertEvaluator` worker lane (15 s tick, `fire_ticks`/`clear_ticks`
+= 2), not a Redis `JobType`; **D-033-5** webhook=httpx (existing dep), email=stdlib
+`smtplib`/`to_thread` (no new dep); **D-033-6** thresholds mirror
+`frontend/theme/thresholds.ts` §9.1 + per-rule admin override; **D-033-7** in-worker
+lane detects backlog/stuck-applying/telemetry-staleness — **full worker-process
+death is a documented external-monitor gap** (can't self-detect); **D-033-8** 4
+new tables (`alert_rule`/`notification_channel`/`alert`/`alert_notification`) +
+migration `20260714_0011_alerting` (down_revision = current head `_0010_node_control`),
+SET-NULL durable history + name snapshots. Refactor: extract
+`_committed_clean_bps` (telemetry router L460) → `services/telemetry_math.py`
+(import-only, no logic fork). **8 open flags for Tasks** (tick cadence, email
+transport, helper extraction, attack-onset metric, rule-catalog upsert, config-UI
+scope, worker-death gap, migration pin). All 42 reqs mapped to components. Grounding
+verified live in-tree (worker lane Protocol, `record_event`/`scrub_metadata`,
+source model fields, RBAC guards, httpx dep, no SMTP lib, migration head `_0010`).
+ROADMAP updated. **Next:** approve design → **Tasks** (single CP/worker track:
+models → `alert_rules` unit `[P]` → `AlertSources` → `AlertEvaluator` → dispatcher
+→ `/alerts` API → worker wiring; P2 SPA panel gated on telemetry FE; DP work = zero).
+
+**Prior sub-step (superseded above):** SPEC + CONTEXT drafted earlier this session
+(awaiting approval → Design) — now advanced to design. New feature dir
+`.specs/features/alerting/` with `spec.md` (ALRT-01..42; P1=01..34 MVP, P2=35..39,
+P3=40..42) and `context.md` (D-ALRT-1..4, A-ALRT-1..8). Four gray areas resolved
+via AskUserQuestion (all recommended options): **D-ALRT-1** evaluation = a new
+dedicated `AlertEvaluator` worker background lane (so counter-derived alerts —
+attack onset / near-capacity / bloom-FP / fairness — exist, not event-only);
+**D-ALRT-2** stateful lifecycle tables `AlertRule`/`Alert`/`AlertNotification`/
+`NotificationChannel` (dedup key `(rule,scope)`, firing→resolved, restart-safe —
+supersedes bypass-maintenance's "no alert table" note; critical alerts *also*
+write `AuditEvent`); **D-ALRT-3** admin-global channels (SMTP + generic webhook) +
+§9.1-seeded tunable thresholds (mirror `frontend/theme/thresholds.ts`) + ownership
+routing (service→owning tenant+admin, node→admin only, §5.2); **D-ALRT-4**
+for-duration (N ticks) firing + separate lower clear-threshold hysteresis band +
+dedup + re-notify window + auto-resolve (M ticks). Whole feature is **worker/
+control-plane only, zero hot-path change** — reads existing `NodeHealthSnapshot`/
+`TelemetryCounter`/`AgentJob`/`FeedSyncRun`/`NodeControl`/`AuditEvent`. **Execute
+gate = Telemetry & dashboards executed (satisfied — VERIFIED 2026-07-14)** +
+agent-worker (satisfied); bypass-maintenance = soft coordination only (ALRT-19
+fires once M6 #1 lands). ROADMAP Alerting entry updated PLANNED→IN PROGRESS.
+**Next:** approve spec+context → **Design** (AD-0xx: lane + 4 models + migration +
+`/alerts` & `/alert-channels` routers + SPA panel P2). Other M6 #1
+bypass-maintenance tasks remain drafted/awaiting Execute.
+
+**Prior current work:** M5 → **Telemetry & dashboards** —
 **FULLY EXECUTED / VERIFIED** (P1 2026-07-13; P2/P3 2026-07-14). All 40 TEL
 requirements are verified. This 2026-07-14 run closed the feature: **T14** full
 CP gate re-run green after billing landed (`pytest -q` → 507 passed), **T15**

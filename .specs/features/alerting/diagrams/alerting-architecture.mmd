@@ -1,0 +1,64 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+graph LR
+    subgraph SRC["Persisted sources (existing, read-only — no new DP surface)"]
+        NH[("NodeHealthSnapshot<br/>xdp_mode · map_error<br/>clean/capacity · bloom_stats")]
+        TC[("TelemetryCounter<br/>service drop/clean · bps")]
+        AJ[("AgentJob<br/>queued / applying / failed")]
+        FR[("FeedSyncRun + FeedSyncOverlap")]
+        NC[("NodeControl<br/>bypass / maintenance")]
+    end
+
+    subgraph WK["Python worker — new AlertEvaluator lane (D-ALRT-1)"]
+        SRCR["AlertSources.load()<br/>→ AlertInputs snapshot"]
+        RULES["alert_rules catalog<br/>pure predicates + §9.1 defaults"]
+        EVAL["AlertEvaluator.reconcile()<br/>debounce · hysteresis<br/>dedup · auto-resolve"]
+        DISP["NotificationDispatcher<br/>route by channel.tenant_id<br/>+ min_severity"]
+        EM["EmailChannel<br/>smtplib / to_thread"]
+        WH["WebhookChannel<br/>httpx"]
+    end
+
+    subgraph ST["Stateful lifecycle tables (D-ALRT-2)"]
+        AL[("alert<br/>pending | firing | resolved<br/>fire_streak · clear_streak")]
+        AN[("alert_notification<br/>per-channel status")]
+        AU[("audit_events<br/>(reused — critical only)")]
+    end
+
+    subgraph CFG["Admin config"]
+        CH[("notification_channel<br/>kind · tenant_id · min_severity · secret")]
+        RC[("alert_rule<br/>enabled · threshold · severity override")]
+    end
+
+    NH --> SRCR
+    TC --> SRCR
+    AJ --> SRCR
+    FR --> SRCR
+    NC --> SRCR
+    SRCR --> EVAL
+    RULES --> EVAL
+    RC --> RULES
+    EVAL <-->|"open / update / resolve"| AL
+    EVAL -->|"fire / resolve / re-notify"| DISP
+    EVAL -->|"critical → record_event"| AU
+    CH --> DISP
+    DISP --> EM
+    DISP --> WH
+    DISP -->|"attempt + status"| AN
+
+    subgraph API["FastAPI /alerts (new router)"]
+        GA["GET /alerts<br/>admin all · tenant own-service (404 cross-tenant)"]
+        CFGR["/alerts/rules · /alerts/channels<br/>(require_admin · secret write-only)"]
+        TEST["POST /alerts/channels/{id}/test"]
+    end
+
+    AL --> GA
+    AN --> GA
+    CH --> CFGR
+    RC --> CFGR

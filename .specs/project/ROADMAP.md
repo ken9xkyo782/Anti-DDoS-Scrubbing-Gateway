@@ -243,9 +243,47 @@
 - Design `design.md` (**AD-032**) + 2 rendered diagrams (`diagrams/bypass-architecture.{mmd,svg}` component, `diagrams/bypass-sequence.{mmd,svg}` toggle-propagation + maintenance hold/drain). **Gating correction:** because **D-032-1** stores the bypass indicator in a **dedicated `node_control` BPF `ARRAY[1]` map** (not a field in `active_config`), the whole feature is **buildable on the current executed base** (M1+M2+M4 #1+in-progress M5) — **NOT hard-gated on M4 #2** (supersedes the spec's assumption + removes A-BYP-3's field-preserving contract on the applier). Key decisions: **D-032-2** hot-path short-circuit = post-parse `if (node_control_bypass()) redirect_out_bypass()` before `service_lookup_redirect` (ARP unchanged; IPv6/malformed/fragment still drop) · **D-032-3** `bypass_counter` `PERCPU_ARRAY[1]` outside frozen `counter_map` (like `bloom_stats`), `svc_stat` untouched · **D-032-4** maintenance = worker **apply-dispatch gate** (`_maintenance_active` before `mark_applying` → jobs stay `queued`, drain on clear; applier stays maintenance-agnostic; works today with `PlaceholderApplier`, the real slot-swap it defers arrives with M4 #2) · **D-032-5** propagation = new `NodeControlReconciler` background asyncio lane (separate task, 1 s tick, execs `dpstat set-bypass` on drift, re-asserts on restart; no `NODE_CONTROL` JobType) · **D-032-6** DP writer = extend **`dpstat`** with a `set-bypass 0|1` subcommand (not the M4 #2 `xdpgw-apply` binary) · **D-032-7** `NodeControl` = **singleton** table (`CheckConstraint id=1`) desired-state · **D-032-8** `/node/health` reuses **`TelemetryReader.snapshot()`** extended with a bypass block (desired ⊕ effective); alerts = `AuditEvent` + health state for M6 *Alerting* (no dedicated alert table). New DP: `src/node_control.h` (+`node_control`/`bypass_counter` maps, loader pins+seed, dpstat `set-bypass`/snapshot bypass block); new CP: `NodeControl` model + migration, `services/node_control.py`, `api/routers/node.py` (`/node/bypass`|`/node/maintenance`|`/node/health`), `worker/node_control_reconciler.py`, processor maintenance gate, `worker_node_control_*` settings; P2 SPA banner on the M5 shell. **Soft coordination (not hard gates):** M4 #2 applier (what maintenance defers), M5 telemetry `/node/health`+`TelemetryReader` (extend not duplicate), M5 chargeback (A-CHG-8 reads the counter), M5 SPA shell (banner). 6 flags for Tasks (node-health router ownership; dpstat set-bypass privilege; singleton idiom; maintenance gate FEED_SYNC scope; DP-unit bypass seam via real `node_control` map; migration down_revision pinned live). Plan-ahead M6 artifact — current execution front is M4/M5
 - Tasks `tasks.md` (T1–T11; all 33 reqs mapped; 3 tracks DP∥CP∥FE): **DP** T1 `node_control.h`+hot-path branch+dp-unit (quick) · T2 loader pins/seed+dpstat `set-bypass`/snapshot bypass (build) · T3 live veth bypass smoke (dp-integration) · **CP** T4 `NodeControl` singleton model+migration · T5 `services/node_control.py` toggles+audit · T6 `TelemetryReader` bypass ext (**unit `[P]`**) · T7 `/node` router (bypass/maintenance/health)+schemas · T8 maintenance apply-dispatch gate (processor) · T9 `NodeControlReconciler` lane+`DpstatBypassWriter`+settings+worker spawn · **FE** T10 SPA banner (P2, fe gate, gated on M5 shell) `[P]` · T11 docs+OLA runbook `[P]`. Serial within CP (shared `compose.test.yml`): T4→T5→T8→T7→T9; only T6/T10/T11 `[P]`; DP T1→T2→T3 serial. All 3 pre-approval checks pass (granularity — T2/T7/T9 flagged cohesive-not-split; diagram↔`Depends on`; test co-location — T2 loader/dpstat build-gated, covered by the privileged T3 smoke per the DP-established pattern). Tools: `coding-guidelines` code, `docs-writer` T11, no MCPs. Baselines pinned live at Execute (B_dp≥91+telemetry, B_cp≥262+feed+telemetry, B_fe). Next: **approve tasks → Execute** (Phase 1: T1+T4 track leads, T6 `[P]`)
 
-**Alerting** - PLANNED
-- Email + generic webhook; severity + hysteresis + dedup + auto-resolve
-- Events: attack onset, `map_error`, XDP native→generic, feed/apply failures, worker/backlog, fairness breach; per-tenant isolation
+**Alerting** - IN PROGRESS (spec + context + design + tasks drafted; awaiting approval → Execute)
+- Worker-side `AlertEvaluator` lane turns the mandated §9.3 events into **email + generic-webhook**
+  notifications; ≥3 severities (info/warning/critical); **for-duration + hysteresis + dedup + auto-resolve**;
+  per-tenant isolation (service→owning tenant+admin, node→admin only); critical→audit; queryable history —
+  **zero hot-path change** (reads existing telemetry/health/job/feed/node-control/audit sources, no new DP surface/counter)
+- Events wired: attack onset, `map_error`, XDP native→generic, near-capacity, apply `failed`, worker/backlog,
+  feed-sync fail, committed/fairness breach, bloom-FP, bypass/maintenance active, whitelist-overlaps-feed
+- Spec `spec.md` (ALRT-01..42; P1=01..34 MVP, P2=35..39, P3=40..42); context `context.md` (D-ALRT-1..4, A-ALRT-1..8)
+- 4 gray areas resolved (AskUserQuestion): **D-ALRT-1** new dedicated worker lane (counter-derived alerts
+  exist, not event-only) · **D-ALRT-2** stateful `AlertRule`/`Alert`/`AlertNotification`/`NotificationChannel`
+  lifecycle tables (supersedes bypass-maintenance's "no alert table" note) · **D-ALRT-3** admin-global
+  channels + §9.1-seeded tunable thresholds + ownership routing · **D-ALRT-4** for-duration + hysteresis-band
+  + dedup + re-notify window + auto-resolve
+- Execute-gated on **Telemetry & dashboards executed** (satisfied — VERIFIED 2026-07-14) + agent-worker
+  (satisfied); bypass-maintenance (M6 #1) = **soft coordination** (its `NodeControl` table already exists at
+  migration `_0010`, so ALRT-19 fires today; ALRT-09 fail-safe skips any absent source)
+- Design `design.md` (**AD-033**) + rendered diagrams (`diagrams/alerting-architecture.{mmd,svg}` component,
+  `diagrams/alerting-sequence.{mmd,svg}` evaluate→debounce→dispatch→auto-resolve). **Control-plane/worker
+  only, zero DP surface.** Key decisions: **D-033-1** rules bind to structured source rows (not audit-log
+  parsing; `AuditEvent` = critical-alert *write* target) · **D-033-2** routing/isolation keyed by
+  `NotificationChannel.tenant_id` (no email column exists on User/Tenant — node→NULL-scope channels,
+  service→owner+NULL; §5.2 structural) · **D-033-3** single `Alert` row per `(rule,scope)` walking
+  `pending→firing→resolved` with all streak/notify state in-row (restart-safe) + partial-unique dedup index ·
+  **D-033-4** new `AlertEvaluator` worker lane, 15 s tick, not a Redis `JobType` · **D-033-5** webhook=httpx
+  (existing dep), email=stdlib `smtplib`/`to_thread` (no new dep) · **D-033-6** thresholds mirror
+  `theme/thresholds.ts` §9.1 + per-rule admin override · **D-033-7** in-worker lane detects
+  backlog/stuck/telemetry-staleness; full worker-death = documented external-monitor gap · **D-033-8** 4
+  tables (`alert_rule`/`notification_channel`/`alert`/`alert_notification`) + migration `_0011` (after
+  `_0010`), SET-NULL durable history. Extracts `_committed_clean_bps`→`services/telemetry_math.py` (import
+  refactor). 8 flags for Tasks. All 42 reqs mapped.
+- Tasks `tasks.md` (T1–T12; all 42 reqs mapped): **T1** extract `telemetry_math` committed-bps helper ·
+  **T2** `[P]` `alert_rules` §9.3 catalog + pure predicates · **T3** 4 models + 5 enums + migration `_0011` ·
+  **T4** `AlertSources`→`AlertInputs` · **T5** `AlertEvaluator` lifecycle (debounce/hysteresis/dedup/
+  auto-resolve + run_loop + critical→audit + maintenance silence) · **T6** dispatcher + email/webhook
+  channels + scoped routing/isolation + test-send · **T7** worker wiring + `worker_alert_*` settings +
+  retention prune · **T8** `/alerts` history read (tenant-scoped) · **T9** `/alerts/rules`+`/alerts/channels`
+  admin config + test-send · **T10** SPA panel (P2, fe, gated telemetry FE) · **T11** P3 ack + export ·
+  **T12** `[P]` docs. Single CP/worker track, **zero DP work**; only **T2** (unit) + **T12** (docs) + **T10**
+  (fe toolchain) are `[P]`, all else integration→serial on `compose.test.yml`. All 3 pre-approval checks pass
+  (granularity, diagram↔deps, test co-location). Tools: `coding-guidelines` code, `docs-writer` T12, no MCPs.
+  Baselines pinned live at Execute (`B_cp`≥507, `B_fe`≥34). Next: **approve tasks → Execute**
 
 **SLA/OLA reporting & audit** - PLANNED
 - Per-tenant periodic SLA report (met/missed per dimension) tied to `BillingUsage`

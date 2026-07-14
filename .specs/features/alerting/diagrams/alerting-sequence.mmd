@@ -1,0 +1,63 @@
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    autonumber
+    participant T as AlertEvaluator tick<br/>(every ~15 s)
+    participant S as AlertSources
+    participant R as alert_rules (pure)
+    participant DB as alert table
+    participant D as NotificationDispatcher
+    participant CH as Channels (email/webhook)
+    participant AU as audit_events
+
+    Note over T: one tick = one session_scope
+    T->>S: load(now)
+    S-->>T: AlertInputs (health, telemetry, jobs, feed, node_control)
+    T->>R: evaluate(inputs, effective_rules)
+    R-->>T: RuleObservation[] (firing? per rule+scope)
+    T->>DB: load non-resolved alerts by (rule_key, scope_key)
+
+    rect rgb(235,244,255)
+        Note over T,DB: For-duration debounce (D-ALRT-4)
+        alt firing & no active alert
+            T->>DB: INSERT alert(state=pending, fire_streak=1)
+        else firing & pending & fire_streak+1 ≥ N
+            T->>DB: UPDATE state=firing, fired_at=now
+            T->>D: enqueue "fire" notification
+        else firing & already firing
+            Note over T,DB: dedup — update metric only
+            alt now − last_notified ≥ renotify_window & not acked
+                T->>D: enqueue "reminder"
+            end
+        else not-firing & pending
+            T->>DB: reset fire_streak (silent — never notified)
+        end
+    end
+
+    rect rgb(235,255,240)
+        Note over T,DB: Hysteresis band + auto-resolve
+        alt below clear_threshold & firing & clear_streak+1 ≥ M
+            T->>DB: UPDATE state=resolved, resolved_at=now
+            T->>D: enqueue "resolve" notification
+        else metric in [clear, fire) band
+            Note over T,DB: hold state — no flap
+        end
+    end
+
+    T->>D: dispatch_pending()
+    D->>D: select_channels(alert) — node→NULL-scope · service→owner+NULL (D-ALRT-3)
+    loop each routed, enabled channel where min_severity ≤ severity
+        D->>CH: deliver (bounded retry, per-channel isolated)
+        CH-->>D: sent | failed
+        D->>DB: AlertNotification(status, attempts)
+    end
+    alt severity == critical
+        T->>AU: record_event(action="alert.fired", outcome="critical")
+    end
