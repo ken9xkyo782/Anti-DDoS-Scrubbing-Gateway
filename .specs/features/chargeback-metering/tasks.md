@@ -67,11 +67,11 @@ T6, T7 ─→ T10 [P]
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `month_period(at)` returns tz-aware UTC `(period_start = 1st 00:00:00Z of at's month, period_end = 1st of next month)`; `previous_period(period_start)` returns the prior month.
-- [ ] Handles month/year rollover (Dec→Jan), leap Feb, and is DST-free (UTC); a non-`"monthly"` `worker_billing_period` is rejected at the call site (documented forward-compat).
-- [ ] Unit tests cover: mid-month instant, month-end boundary, Dec→Jan rollover, leap-year Feb, `previous_period` inverse.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
-- [ ] Test count: `B_cp` unit + ~5 new pass (cite live).
+- [x] `month_period(at)` returns tz-aware UTC `(period_start = 1st 00:00:00Z of at's month, period_end = 1st of next month)`; `previous_period(period_start)` returns the prior month.
+- [x] Handles month/year rollover (Dec→Jan), leap Feb, and is DST-free (UTC); a non-`"monthly"` `worker_billing_period` is rejected at the call site (documented forward-compat).
+- [x] Unit tests cover: mid-month instant, month-end boundary, Dec→Jan rollover, leap-year Feb, `previous_period` inverse.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
+- [x] Test count: `B_cp` unit + ~5 new pass (cite live).
 
 **Tests**: unit · **Gate**: quick
 **Commit**: `feat(billing): add UTC calendar-month period helper`
@@ -87,11 +87,11 @@ T6, T7 ─→ T10 [P]
 **Requirement**: CHG-09, CHG-10 (p95, billed/overage math), D-031-2
 
 **Done when**:
-- [ ] `p95_nearest_rank(samples: list[int]) -> int` = value at index `ceil(0.95*n)-1` on ascending sort; `[]` → `0`; single-element → that element.
-- [ ] `bps_to_gbps(bytes_per_sec: int) -> Decimal` = `Decimal(bytes_per_sec) * 8 / 1_000_000_000` quantized to 2 dp (**the ×8 bytes→bits fix is asserted** so p95 is comparable to gigabit `committed_clean_gbps`).
-- [ ] Unit tests cover: empty/single/exact-percentile lists, nearest-rank index rounding, and a `bps_to_gbps` case proving ×8 (e.g. `1_250_000_000 B/s → 10.00 Gbps`).
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
-- [ ] Test count: `B_cp` unit + ~6 new pass (cite live).
+- [x] `p95_nearest_rank(samples: list[int]) -> int` = value at index `ceil(0.95*n)-1` on ascending sort; `[]` → `0`; single-element → that element.
+- [x] `bps_to_gbps(bytes_per_sec: int) -> Decimal` = `Decimal(bytes_per_sec) * 8 / 1_000_000_000` quantized to 2 dp (**the ×8 bytes→bits fix is asserted** so p95 is comparable to gigabit `committed_clean_gbps`).
+- [x] Unit tests cover: empty/single/exact-percentile lists, nearest-rank index rounding, and a `bps_to_gbps` case proving ×8 (e.g. `1_250_000_000 B/s → 10.00 Gbps`).
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
+- [x] Test count: `B_cp` unit + ~6 new pass (cite live).
 
 **Tests**: unit · **Gate**: quick
 **Commit**: `feat(billing): add nearest-rank p95 and bytes-to-Gbps helpers`
@@ -112,13 +112,13 @@ migration (down_revision pinned live at Execute); `OveragePolicy` enum reused ve
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `BillingSample(service_id FK CASCADE NOT NULL, dp_id, sample_ts, clean_bps BigInteger, window_seconds, is_reset, created_at)` with `UNIQUE(service_id, sample_ts)` + `Index(service_id, sample_ts)`.
-- [ ] `BillingUsage(TimestampMixin; service_id FK SET NULL nullable, tenant_id FK SET NULL nullable, service_name, period_start, period_end, billing_metric, committed/p95/billed/overage_gbps Numeric(10,2), overage_policy, sample_count, status, finalized_at)` with `UNIQUE(service_id, period_start)` + indexes `(tenant_id, period_start)` and `(status, period_end)`.
-- [ ] `BillingStatus{open,final}` + `billing_status_enum` follow the `native_enum=False` pattern.
-- [ ] Migration `upgrade`/`downgrade` are reversible; `alembic upgrade head` applies clean on the test DB.
-- [ ] Integration tests assert: both unique constraints, FK `CASCADE` (sample dies with service), FK `SET NULL` (usage survives service delete), enum round-trip, and that multiple `SET NULL` (service_id=NULL) usage rows for the same `period_start` coexist (NULLs distinct).
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (compose up); `alembic upgrade head` on test DB.
-- [ ] Test count: `B_cp` + ~7 new pass (cite live).
+- [x] `BillingSample(service_id FK CASCADE NOT NULL, dp_id, sample_ts, clean_bps BigInteger, window_seconds, is_reset, created_at)` with `UNIQUE(service_id, sample_ts)` + `Index(service_id, sample_ts)`.
+- [x] `BillingUsage(TimestampMixin; service_id FK SET NULL nullable, tenant_id FK SET NULL nullable, service_name, period_start, period_end, billing_metric, committed/p95/billed/overage_gbps Numeric(10,2), overage_policy, sample_count, status, finalized_at)` with `UNIQUE(service_id, period_start)` + indexes `(tenant_id, period_start)` and `(status, period_end)`.
+- [x] `BillingStatus{open,final}` + `billing_status_enum` follow the `native_enum=False` pattern.
+- [x] Migration `upgrade`/`downgrade` are reversible; `alembic upgrade head` applies clean on the test DB.
+- [x] Integration tests assert: both unique constraints, FK `CASCADE` (sample dies with service), FK `SET NULL` (usage survives service delete), enum round-trip, and that multiple `SET NULL` (service_id=NULL) usage rows for the same `period_start` coexist (NULLs distinct).
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (compose up); `alembic upgrade head` on test DB.
+- [x] Test count: `B_cp` + ~7 new pass (cite live).
 
 **Tests**: integration · **Gate**: full (+ build: `alembic upgrade head`)
 **Commit**: `feat(billing): add BillingSample and BillingUsage models and migration`
@@ -139,13 +139,13 @@ detection, upsert idempotent `BillingSample` rows; maintain the `dp_id → (serv
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `sample_once()` reads `reader.snapshot()`; `None` (offline) → skip, no fabricated sample.
-- [ ] Per active `dp_id`: `clean_bps = (clean_bytes − prev[dp_id]) // elapsed`; reset (Δ<0 or version change) → `is_reset=True`, use post-reset value, never negative; first tick seeds `prev` and emits no sample.
-- [ ] Services with no counter this interval get an explicit `0`-bps sample; unknown/deleted `dp_id` ignored.
-- [ ] Upsert is idempotent on `(service_id, sample_ts)`.
-- [ ] Integration tests (with `FakeTelemetryReader`): delta correctness, reset→no-negative, zero-bps sample, first-tick baseline skip, unknown-dp_id ignored, idempotent re-run.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `B_cp` + ~6 new pass (cite live).
+- [x] `sample_once()` reads `reader.snapshot()`; `None` (offline) → skip, no fabricated sample.
+- [x] Per active `dp_id`: `clean_bps = (clean_bytes − prev[dp_id]) // elapsed`; reset (Δ<0 or version change) → `is_reset=True`, use post-reset value, never negative; first tick seeds `prev` and emits no sample.
+- [x] Services with no counter this interval get an explicit `0`-bps sample; unknown/deleted `dp_id` ignored.
+- [x] Upsert is idempotent on `(service_id, sample_ts)`.
+- [x] Integration tests (with `FakeTelemetryReader`): delta correctness, reset→no-negative, zero-bps sample, first-tick baseline skip, unknown-dp_id ignored, idempotent re-run.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `B_cp` + ~6 new pass (cite live).
 
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(billing): sample per-service clean-bps with reset detection`
@@ -165,12 +165,12 @@ the plan snapshot from T4's cache.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `refresh_open_periods()`: ensure an `open` `BillingUsage` for `month_period(now)` per active service; set `p95_clean_gbps = bps_to_gbps(p95_nearest_rank(period samples))`, `billed_gbps = max(committed, p95)`, `overage_gbps = max(0, p95 − committed)`, `sample_count`; snapshot `committed_clean_gbps`/`billing_metric`/`overage_policy`.
-- [ ] `finalize_due_periods()`: flip `open→final` (+ `finalized_at`) where `period_end ≤ now` **or** `service_id IS NULL` (deleted); idempotent (skip `final`); `UNIQUE(service_id, period_start)` blocks dups.
-- [ ] Zero-sample period → p95=0, billed=committed (floor); `capped`/`billed` both store `overage_gbps`.
-- [ ] Integration tests: p95→`billed=max(committed,p95)`, overage, open-estimate refresh, finalize at boundary (immutable), orphan (service-deleted) finalize, zero-sample committed floor, idempotent re-run, committed-snapshot-at-close.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `B_cp` + ~8 new pass (cite live).
+- [x] `refresh_open_periods()`: ensure an `open` `BillingUsage` for `month_period(now)` per active service; set `p95_clean_gbps = bps_to_gbps(p95_nearest_rank(period samples))`, `billed_gbps = max(committed, p95)`, `overage_gbps = max(0, p95 − committed)`, `sample_count`; snapshot `committed_clean_gbps`/`billing_metric`/`overage_policy`.
+- [x] `finalize_due_periods()`: flip `open→final` (+ `finalized_at`) where `period_end ≤ now` **or** `service_id IS NULL` (deleted); idempotent (skip `final`); `UNIQUE(service_id, period_start)` blocks dups.
+- [x] Zero-sample period → p95=0, billed=committed (floor); `capped`/`billed` both store `overage_gbps`.
+- [x] Integration tests: p95→`billed=max(committed,p95)`, overage, open-estimate refresh, finalize at boundary (immutable), orphan (service-deleted) finalize, zero-sample committed floor, idempotent re-run, committed-snapshot-at-close.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `B_cp` + ~8 new pass (cite live).
 
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(billing): roll up p95 into open and finalized BillingUsage`
@@ -192,13 +192,13 @@ settings.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `prune_samples()` deletes `BillingSample` for finalized periods older than `worker_billing_sample_retention_days`.
-- [ ] `run_loop(stop)`: `tick()` (sample→refresh→finalize→prune, each own `session_scope`) then interruptible sleep `worker_billing_interval_seconds`; catch-log-continue on any error (never crashes the worker).
-- [ ] `Worker.__init__(billing=None)`; `run()` spawns `run_loop(stop_event)` before the loop and awaits/cancels in `finally` alongside existing lanes; `__main__` builds `TelemetryReader`+`BillingMeter` and injects when `worker_billing_enabled`.
-- [ ] `Settings`: `worker_billing_enabled=True`, `worker_billing_interval_seconds=Field(300.0, gt=0)`, `worker_billing_sample_retention_days=Field(400, gt=0)`, `worker_billing_period: Literal["monthly"]="monthly"` (reuses telemetry reader knobs; no new reader settings).
-- [ ] Integration tests: prune removes only finalized-old samples; `run_loop` survives a raising tick and continues; worker spawns/cancels the lane cleanly on stop.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `B_cp` + ~5 new pass (cite live).
+- [x] `prune_samples()` deletes `BillingSample` for finalized periods older than `worker_billing_sample_retention_days`.
+- [x] `run_loop(stop)`: `tick()` (sample→refresh→finalize→prune, each own `session_scope`) then interruptible sleep `worker_billing_interval_seconds`; catch-log-continue on any error (never crashes the worker).
+- [x] `Worker.__init__(billing=None)`; `run()` spawns `run_loop(stop_event)` before the loop and awaits/cancels in `finally` alongside existing lanes; `__main__` builds `TelemetryReader`+`BillingMeter` and injects when `worker_billing_enabled`.
+- [x] `Settings`: `worker_billing_enabled=True`, `worker_billing_interval_seconds=Field(300.0, gt=0)`, `worker_billing_sample_retention_days=Field(400, gt=0)`, `worker_billing_period: Literal["monthly"]="monthly"` (reuses telemetry reader knobs; no new reader settings).
+- [x] Integration tests: prune removes only finalized-old samples; `run_loop` survives a raising tick and continues; worker spawns/cancels the lane cleanly on stop.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `B_cp` + ~5 new pass (cite live).
 
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(billing): run the metering lane in the worker with pruning and settings`
@@ -220,12 +220,12 @@ settings.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `GET /billing/usage?service_id=&period=&status=`: tenant → rows where `tenant_id == principal.tenant_id`; with `service_id` → `load_service_for_principal` (404 cross-tenant); admin → all, filterable; `open` rows marked provisional; empty → `200 {usage:[], has_data:false}`.
-- [ ] `GET /billing/usage/export?period=&format=csv|json`: `require_admin`; **finalized** rows only; CSV via `StreamingResponse` (service, tenant, period, committed, p95, billed, overage, overage_policy, sample_count); open periods omitted/marked provisional.
-- [ ] Read-only (no mutation); Gbps serialized as `Numeric(10,2)` Decimal.
-- [ ] Integration tests (AsyncClient): tenant own, 404 cross-tenant, admin all, empty state, export CSV + JSON, open-provisional labeling.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `B_cp` + ~7 new pass (cite live).
+- [x] `GET /billing/usage?service_id=&period=&status=`: tenant → rows where `tenant_id == principal.tenant_id`; with `service_id` → `load_service_for_principal` (404 cross-tenant); admin → all, filterable; `open` rows marked provisional; empty → `200 {usage:[], has_data:false}`.
+- [x] `GET /billing/usage/export?period=&format=csv|json`: `require_admin`; **finalized** rows only; CSV via `StreamingResponse` (service, tenant, period, committed, p95, billed, overage, overage_policy, sample_count); open periods omitted/marked provisional.
+- [x] Read-only (no mutation); Gbps serialized as `Numeric(10,2)` Decimal.
+- [x] Integration tests (AsyncClient): tenant own, 404 cross-tenant, admin all, empty state, export CSV + JSON, open-provisional labeling.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `B_cp` + ~7 new pass (cite live).
 
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(billing): add /billing usage read and export endpoints`
@@ -244,10 +244,10 @@ settings.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `GET /billing/usage/history?service_id=&limit=` returns finalized periods (newest-first) with tenant scoping (404 cross-tenant on `service_id`).
-- [ ] Integration tests: history list + ordering + isolation.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `B_cp` + ~2 new pass (cite live).
+- [x] `GET /billing/usage/history?service_id=&limit=` returns finalized periods (newest-first) with tenant scoping (404 cross-tenant on `service_id`).
+- [x] Integration tests: history list + ordering + isolation.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `B_cp` + ~2 new pass (cite live).
 
 **Tests**: integration · **Gate**: full
 **Commit**: `feat(billing): add finalized-period history endpoint`
@@ -268,11 +268,11 @@ tests)
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Tenant view: per-service current running billed-Gbps vs committed + finalized-period list; admin view: node/tenant-wide billed vs committed with `overage_gbps` flagged; open periods labeled **provisional**.
-- [ ] Tenant never sees another tenant's usage (API-enforced; UI honors it).
-- [ ] Vitest component tests for the panel states (loading/empty/data/provisional).
-- [ ] Gate check passes: `fe` gate — `npm run lint && npm run typecheck && npm run test --run && npm run build`.
-- [ ] Test count: `B_fe` + new pass (cite live).
+- [x] Tenant view: per-service current running billed-Gbps vs committed + finalized-period list; admin view: node/tenant-wide billed vs committed with `overage_gbps` flagged; open periods labeled **provisional**.
+- [x] Tenant never sees another tenant's usage (API-enforced; UI honors it).
+- [x] Vitest component tests for the panel states (loading/empty/data/provisional).
+- [x] Gate check passes: `fe` gate — `npm run lint && npm run typecheck && npm run test --run && npm run build`.
+- [x] Test count: `B_fe` + new pass (cite live).
 
 **Tests**: fe (frontend — telemetry-established layer) · **Gate**: fe
 **Commit**: `feat(billing): add billing showback panel to the SPA`
@@ -291,10 +291,10 @@ tests)
 **Tools**: MCP: NONE · Skill: `docs-writer`
 
 **Done when**:
-- [ ] TESTING.md Coverage Matrix gains `app/worker/billing.py` (integration), `app/services/billing_period.py` / `billing_metrics.py` (unit), `app/api/routers/billing.py` (integration).
-- [ ] A "Billing conventions" note records: nearest-rank p95, bytes/sec→Gbps ×8, UTC calendar-month periods, `open→final` immutability, `FakeTelemetryReader` reuse for meter tests.
-- [ ] Gate check passes: `python -c "import app.main"` (import smoke — confirms no code drift).
-- [ ] No test count change (docs only).
+- [x] TESTING.md Coverage Matrix gains `app/worker/billing.py` (integration), `app/services/billing_period.py` / `billing_metrics.py` (unit), `app/api/routers/billing.py` (integration).
+- [x] A "Billing conventions" note records: nearest-rank p95, bytes/sec→Gbps ×8, UTC calendar-month periods, `open→final` immutability, `FakeTelemetryReader` reuse for meter tests.
+- [x] Gate check passes: `python -c "import app.main"` (import smoke — confirms no code drift).
+- [x] No test count change (docs only).
 
 **Tests**: none · **Gate**: build
 **Commit**: `docs(billing): document billing test layers and metering conventions`
