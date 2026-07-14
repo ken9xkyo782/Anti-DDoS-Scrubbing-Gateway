@@ -1,3 +1,6 @@
+import { BloomFpPanel } from '../components/BloomFpPanel'
+import { CommittedHonoredPanel } from '../components/CommittedHonoredPanel'
+import { FeedStatusPanel } from '../components/FeedStatusPanel'
 import { NodeHealthPanel } from '../components/NodeHealthPanel'
 import { NodeTelemetryPanel } from '../components/NodeTelemetryPanel'
 import { useNodeHealth, useNodeTelemetry } from '../hooks/useNodeTelemetry'
@@ -22,6 +25,9 @@ export function AdminDashboard() {
     <div>
       <h1>Admin dashboard</h1>
       <NodeHealthPanel health={healthQuery.data} />
+      <BloomFpPanel bloomStats={healthQuery.data.bloom_stats ?? {}} />
+      <CommittedHonoredPanel services={healthQuery.data.committed_services ?? []} />
+      <FeedStatusPanel feedSources={healthQuery.data.feed_sources} />
       <NodeTelemetryPanel telemetry={telemetryQuery.data} />
     </div>
   )

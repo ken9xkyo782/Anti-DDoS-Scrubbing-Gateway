@@ -3,6 +3,7 @@ import { CleanVsDropChart } from './CleanVsDropChart'
 import { DropReasonChart } from './DropReasonChart'
 import { RateTiles } from './RateTiles'
 import { StalenessBadge } from './StalenessBadge'
+import { TopTalkersPanel } from './TopTalkersPanel'
 
 interface NodeTelemetryPanelProps {
   telemetry: NodeTelemetry
@@ -27,6 +28,10 @@ export function NodeTelemetryPanel({ telemetry }: NodeTelemetryPanelProps) {
             droppedPackets={telemetry.drop_pkts}
           />
           <DropReasonChart dropByReason={telemetry.drop_by_reason} />
+          <TopTalkersPanel
+            topDstPorts={telemetry.top_dst_ports ?? []}
+            topSrc={telemetry.top_src ?? []}
+          />
         </>
       )}
     </section>

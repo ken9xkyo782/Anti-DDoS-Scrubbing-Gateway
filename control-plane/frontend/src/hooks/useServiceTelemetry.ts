@@ -2,6 +2,16 @@ import { useQuery } from '@tanstack/react-query'
 
 import { apiClient } from '../api/client'
 
+export interface TopPort {
+  port: number
+  count: number
+}
+
+export interface TopSource {
+  ip: string
+  count: number
+}
+
 export interface ServiceTelemetry {
   has_data: boolean
   clean_pkts: number
@@ -11,6 +21,10 @@ export interface ServiceTelemetry {
   drop_by_reason: Record<string, number>
   pps: number
   bps: number
+  top_dst_ports: TopPort[]
+  top_src: TopSource[]
+  committed_clean_bps: number
+  committed_honored: boolean | null
   window_start: string | null
   window_seconds: number
   stale: boolean

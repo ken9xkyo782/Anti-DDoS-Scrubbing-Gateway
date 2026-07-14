@@ -1,7 +1,9 @@
 import { CleanVsDropChart } from './CleanVsDropChart'
+import { CommittedHonoredPanel } from './CommittedHonoredPanel'
 import { DropReasonChart } from './DropReasonChart'
 import { RateTiles } from './RateTiles'
 import { StalenessBadge } from './StalenessBadge'
+import { TopTalkersPanel } from './TopTalkersPanel'
 import { useServiceTelemetry } from '../hooks/useServiceTelemetry'
 
 interface ServiceTelemetryPanelProps {
@@ -45,6 +47,22 @@ export function ServiceTelemetryPanel({ serviceId }: ServiceTelemetryPanelProps)
       <RateTiles pps={telemetry.pps} bps={telemetry.bps} />
       <CleanVsDropChart cleanPackets={telemetry.clean_pkts} droppedPackets={telemetry.drop_pkts} />
       <DropReasonChart dropByReason={telemetry.drop_by_reason} />
+      <TopTalkersPanel
+        topDstPorts={telemetry.top_dst_ports ?? []}
+        topSrc={telemetry.top_src ?? []}
+      />
+      {(telemetry.committed_clean_bps ?? 0) > 0 ? (
+        <CommittedHonoredPanel
+          services={[
+            {
+              service_id: serviceId,
+              observed_clean_bps: telemetry.bps,
+              committed_clean_bps: telemetry.committed_clean_bps,
+              honored: telemetry.committed_honored,
+            },
+          ]}
+        />
+      ) : null}
     </section>
   )
 }

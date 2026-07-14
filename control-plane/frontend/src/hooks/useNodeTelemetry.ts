@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { apiClient } from '../api/client'
+import type { TopPort, TopSource } from './useServiceTelemetry'
 
 export interface NodeTelemetry {
   has_data: boolean
@@ -11,9 +12,44 @@ export interface NodeTelemetry {
   drop_by_reason: Record<string, number>
   pps: number
   bps: number
+  top_dst_ports: TopPort[]
+  top_src: TopSource[]
   window_start: string | null
   window_seconds: number
   stale: boolean
+}
+
+export interface CommittedService {
+  service_id: string
+  observed_clean_bps: number
+  committed_clean_bps: number
+  honored: boolean | null
+  window_start: string | null
+}
+
+export interface FeedSyncRunStatus {
+  id: string
+  sequence: number
+  status: string
+  started_at: string | null
+  finished_at: string | null
+  duration_ms: number | null
+  error: string | null
+  valid: number
+  added: number
+  removed: number
+  skipped_invalid: number
+  overlap_count: number
+}
+
+export interface FeedSource {
+  id: string
+  name: string
+  enabled: boolean
+  last_status: string | null
+  last_error?: string | null
+  last_sync_at: string | null
+  last_run?: FeedSyncRunStatus | null
 }
 
 export interface NodeHealth {
@@ -27,17 +63,13 @@ export interface NodeHealth {
   window_start: string | null
   window_seconds: number
   stale: boolean
+  bloom_stats?: Record<string, number>
+  committed_services?: CommittedService[]
   job_backlog: {
     queued: number
     applying: number
   }
-  feed_sources: Array<{
-    id: string
-    name: string
-    enabled: boolean
-    last_status: string | null
-    last_sync_at: string | null
-  }>
+  feed_sources: FeedSource[]
 }
 
 export function useNodeTelemetry() {
