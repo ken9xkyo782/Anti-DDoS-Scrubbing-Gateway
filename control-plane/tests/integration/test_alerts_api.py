@@ -5,6 +5,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers import alerts
@@ -18,6 +19,7 @@ from app.db.models import (
     AlertScope,
     AlertSeverity,
     AlertState,
+    AuditEvent,
     ChannelKind,
     NotificationState,
     ProtectedService,
@@ -162,3 +164,45 @@ async def test_alert_history_returns_empty_state_and_filters_for_admin(
 
     assert response.status_code == 200
     assert response.json() == {"alerts": [], "has_data": False}
+
+
+async def test_alert_admin_rule_and_channel_configuration_is_audited_and_secrets_are_write_only(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
+    admin = await user(db_session, "alerts-config-admin", Role.admin)
+    tenant = Tenant(name="Alerts config tenant")
+    db_session.add(tenant)
+    tenant_user = await user(db_session, "alerts-config-tenant", Role.tenant_user, tenant)
+    session_store = store(redis_client)
+    async for client in client_for(db_session, session_store):
+        await login(client, session_store, admin)
+        defaults = await client.get("/alerts/rules")
+        patch = await client.patch(
+            "/alerts/rules/map_error",
+            json={"enabled": False, "fire_threshold": 2},
+        )
+        created = await client.post(
+            "/alerts/channels",
+            json={
+                "name": "Admin webhook",
+                "kind": "webhook",
+                "config": {"url": "https://alerts.test/hook"},
+                "secret": "never-return-this",
+            },
+        )
+        channels = await client.get("/alerts/channels")
+        await login(client, session_store, tenant_user)
+        forbidden = await client.get("/alerts/channels")
+
+    assert defaults.status_code == 200
+    assert any(rule["key"] == "map_error" for rule in defaults.json()["rules"])
+    assert patch.status_code == 200
+    assert patch.json()["enabled"] is False
+    assert created.status_code == 201
+    assert "secret" not in created.json()
+    assert channels.json()["channels"][0]["name"] == "Admin webhook"
+    assert "never-return-this" not in str(channels.json())
+    assert forbidden.status_code == 403
+    assert await db_session.scalar(
+        select(AuditEvent.id).where(AuditEvent.action == "alert.channel.create")
+    )
