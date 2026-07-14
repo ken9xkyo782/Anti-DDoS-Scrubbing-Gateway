@@ -1,7 +1,6 @@
 import csv
 import uuid
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from io import StringIO
 from typing import Annotated, Literal
 
@@ -41,6 +40,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.services import node_control
+from app.services.telemetry_math import committed_clean_bps, committed_honored
 from app.worker.telemetry_reader import TelemetryReader, TelemetrySnapshot
 
 router = APIRouter(tags=["telemetry"])
@@ -419,7 +419,7 @@ def _telemetry_response(
     counter: TelemetryCounter | None,
     plan: ServicePlan | None,
 ) -> TelemetryWindowResponse:
-    committed_clean_bps = _committed_clean_bps(plan)
+    clean_bps_commitment = committed_clean_bps(plan)
     if counter is None:
         return TelemetryWindowResponse(
             has_data=False,
@@ -432,7 +432,7 @@ def _telemetry_response(
             bps=0,
             top_dst_ports=[],
             top_src=[],
-            committed_clean_bps=committed_clean_bps,
+            committed_clean_bps=clean_bps_commitment,
             committed_honored=None,
             window_start=None,
             window_seconds=0,
@@ -449,18 +449,12 @@ def _telemetry_response(
         bps=counter.bps,
         top_dst_ports=counter.top_dst_ports or [],
         top_src=counter.top_src or [],
-        committed_clean_bps=committed_clean_bps,
-        committed_honored=counter.bps >= committed_clean_bps if plan is not None else None,
+        committed_clean_bps=clean_bps_commitment,
+        committed_honored=committed_honored(counter.bps, plan),
         window_start=counter.window_start,
         window_seconds=counter.window_seconds,
         stale=_is_stale(counter.window_start),
     )
-
-
-def _committed_clean_bps(plan: ServicePlan | None) -> int:
-    if plan is None:
-        return 0
-    return int(plan.committed_clean_gbps * Decimal("1000000000"))
 
 
 async def _job_backlog(db: AsyncSession) -> JobBacklogResponse:
@@ -532,8 +526,8 @@ async def _committed_services(db: AsyncSession) -> list[CommittedServiceResponse
         CommittedServiceResponse(
             service_id=plan.service_id,
             observed_clean_bps=counter.bps if counter is not None else 0,
-            committed_clean_bps=_committed_clean_bps(plan),
-            honored=(counter.bps >= _committed_clean_bps(plan)) if counter is not None else None,
+            committed_clean_bps=committed_clean_bps(plan),
+            honored=committed_honored(counter.bps, plan) if counter is not None else None,
             window_start=counter.window_start if counter is not None else None,
         )
         for plan, counter in rows
