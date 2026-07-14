@@ -32,6 +32,7 @@ from app.db.models import (
     XdpMode,
 )
 from app.db.session import get_db
+from app.worker.telemetry_reader import FakeTelemetryReader
 
 pytestmark = pytest.mark.integration
 
@@ -52,6 +53,9 @@ async def make_client(
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_session_store] = lambda: store
+    app.dependency_overrides[telemetry.get_telemetry_reader] = lambda: FakeTelemetryReader(
+        snapshots=[]
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -482,6 +486,20 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
                 },
             }
         ],
+        "bypass": {
+            "desired": False,
+            "effective": False,
+            "activated_at": None,
+            "active_seconds": 0,
+        },
+        "maintenance": {
+            "desired": False,
+            "effective": False,
+            "activated_at": None,
+            "active_seconds": 0,
+        },
+        "bypass_pkts": 0,
+        "bypass_bytes": 0,
     }
 
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.models import FeedSyncStatus, JobStatus, JobType, XdpMode
 
@@ -88,6 +88,21 @@ class CommittedServiceResponse(BaseModel):
     window_start: datetime | None
 
 
+class NodeControlRequest(BaseModel):
+    enabled: bool
+
+
+class BypassControlRequest(NodeControlRequest):
+    reason: str | None = Field(default=None, max_length=512)
+
+
+class NodeControlStateResponse(BaseModel):
+    desired: bool
+    effective: bool
+    activated_at: datetime | None
+    active_seconds: int
+
+
 class NodeHealthResponse(BaseModel):
     has_data: bool
     xdp_mode: XdpMode
@@ -104,3 +119,7 @@ class NodeHealthResponse(BaseModel):
     job_backlog: JobBacklogResponse
     last_apply: LastApplyResponse | None
     feed_sources: list[FeedSourceStatusResponse]
+    bypass: NodeControlStateResponse
+    maintenance: NodeControlStateResponse
+    bypass_pkts: int
+    bypass_bytes: int

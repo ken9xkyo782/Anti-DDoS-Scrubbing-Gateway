@@ -5,22 +5,26 @@ from decimal import Decimal
 from io import StringIO
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.telemetry import (
+    BypassControlRequest,
     CommittedServiceResponse,
     FeedSourceStatusResponse,
     FeedSyncRunStatusResponse,
     JobBacklogResponse,
     LastApplyResponse,
+    NodeControlRequest,
+    NodeControlStateResponse,
     NodeHealthResponse,
     TelemetryHistoryResponse,
     TelemetryWindowPoint,
     TelemetryWindowResponse,
 )
+from app.core.config import get_settings
 from app.core.deps import Principal, get_current_user, load_service_for_principal, require_admin
 from app.db.models import (
     AgentJob,
@@ -32,9 +36,12 @@ from app.db.models import (
     TelemetryCounter,
     TelemetryScope,
     ThreatFeedSource,
+    User,
     XdpMode,
 )
 from app.db.session import get_db
+from app.services import node_control
+from app.worker.telemetry_reader import TelemetryReader, TelemetrySnapshot
 
 router = APIRouter(tags=["telemetry"])
 
@@ -44,6 +51,15 @@ _HISTORY_MAX_LIMIT = 1000
 
 HistoryLimit = Annotated[int, Query(ge=1, le=_HISTORY_MAX_LIMIT)]
 ExportFormat = Annotated[Literal["csv", "json"], Query(alias="format")]
+
+
+def get_telemetry_reader() -> TelemetryReader:
+    settings = get_settings()
+    return TelemetryReader(
+        binary=settings.worker_telemetry_binary_path,
+        ifindex=settings.worker_telemetry_ifindex,
+        timeout_seconds=settings.worker_telemetry_timeout_seconds,
+    )
 
 
 @router.get(
@@ -92,12 +108,62 @@ async def get_node_telemetry(
     return _telemetry_response(counter, None)
 
 
+@router.post("/node/bypass", response_model=NodeControlStateResponse)
+async def set_node_bypass(
+    payload: BypassControlRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    reader: Annotated[TelemetryReader, Depends(get_telemetry_reader)],
+) -> NodeControlStateResponse:
+    require_admin(principal)
+    actor = await db.get(User, principal.user_id)
+    control = await node_control.set_bypass(
+        db,
+        actor=actor,
+        enabled=payload.enabled,
+        reason=payload.reason,
+        ip=_client_ip(request),
+    )
+    snapshot = await reader.snapshot()
+    return _control_state(
+        desired=control.bypass_enabled,
+        effective=snapshot.bypass_active if snapshot is not None else False,
+        activated_at=control.bypass_activated_at,
+    )
+
+
+@router.post("/node/maintenance", response_model=NodeControlStateResponse)
+async def set_node_maintenance(
+    payload: NodeControlRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NodeControlStateResponse:
+    require_admin(principal)
+    actor = await db.get(User, principal.user_id)
+    control = await node_control.set_maintenance(
+        db,
+        actor=actor,
+        enabled=payload.enabled,
+        ip=_client_ip(request),
+    )
+    return _control_state(
+        desired=control.maintenance_enabled,
+        effective=control.maintenance_enabled,
+        activated_at=control.maintenance_activated_at,
+    )
+
+
 @router.get("/node/health", response_model=NodeHealthResponse)
 async def get_node_health(
     principal: Annotated[Principal, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    reader: Annotated[TelemetryReader, Depends(get_telemetry_reader)],
 ) -> NodeHealthResponse:
     require_admin(principal)
+    control = await node_control.get_node_control(db)
+    snapshot = await reader.snapshot()
     health = (
         await db.scalars(
             select(NodeHealthSnapshot).order_by(NodeHealthSnapshot.captured_at.desc()).limit(1)
@@ -107,13 +173,23 @@ async def get_node_health(
     committed_services = await _committed_services(db)
     last_apply = await _last_apply(db)
     feed_sources = await _feed_sources(db)
+    bypass = _control_state(
+        desired=control.bypass_enabled,
+        effective=snapshot.bypass_active if snapshot is not None else False,
+        activated_at=control.bypass_activated_at,
+    )
+    maintenance = _control_state(
+        desired=control.maintenance_enabled,
+        effective=control.maintenance_enabled,
+        activated_at=control.maintenance_activated_at,
+    )
 
     if health is None:
         return NodeHealthResponse(
             has_data=False,
-            xdp_mode=XdpMode.offline,
-            active_slot=None,
-            map_version=None,
+            xdp_mode=_snapshot_xdp_mode(snapshot, XdpMode.offline),
+            active_slot=snapshot.active_slot if snapshot is not None else None,
+            map_version=snapshot.active_version if snapshot is not None else None,
             map_error_count=0,
             node_clean_bps=0,
             node_capacity_bps=0,
@@ -125,13 +201,17 @@ async def get_node_health(
             job_backlog=backlog,
             last_apply=last_apply,
             feed_sources=feed_sources,
+            bypass=bypass,
+            maintenance=maintenance,
+            bypass_pkts=snapshot.bypass_pkts if snapshot is not None else 0,
+            bypass_bytes=snapshot.bypass_bytes if snapshot is not None else 0,
         )
 
     return NodeHealthResponse(
         has_data=True,
-        xdp_mode=health.xdp_mode,
-        active_slot=health.active_slot,
-        map_version=health.map_version,
+        xdp_mode=_snapshot_xdp_mode(snapshot, health.xdp_mode),
+        active_slot=snapshot.active_slot if snapshot is not None else health.active_slot,
+        map_version=snapshot.active_version if snapshot is not None else health.map_version,
         map_error_count=health.map_error_count,
         node_clean_bps=health.node_clean_bps,
         node_capacity_bps=health.node_capacity_bps,
@@ -143,7 +223,41 @@ async def get_node_health(
         job_backlog=backlog,
         last_apply=last_apply,
         feed_sources=feed_sources,
+        bypass=bypass,
+        maintenance=maintenance,
+        bypass_pkts=snapshot.bypass_pkts if snapshot is not None else 0,
+        bypass_bytes=snapshot.bypass_bytes if snapshot is not None else 0,
     )
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client is not None else None
+
+
+def _control_state(
+    *,
+    desired: bool,
+    effective: bool,
+    activated_at: datetime | None,
+) -> NodeControlStateResponse:
+    active_seconds = 0
+    if activated_at is not None:
+        active_seconds = max(0, int((datetime.now(UTC) - activated_at).total_seconds()))
+    return NodeControlStateResponse(
+        desired=desired,
+        effective=effective,
+        activated_at=activated_at,
+        active_seconds=active_seconds,
+    )
+
+
+def _snapshot_xdp_mode(snapshot: TelemetrySnapshot | None, fallback: XdpMode) -> XdpMode:
+    if snapshot is None:
+        return fallback
+    try:
+        return XdpMode(snapshot.xdp_mode)
+    except ValueError:
+        return XdpMode.unknown
 
 
 @router.get(
