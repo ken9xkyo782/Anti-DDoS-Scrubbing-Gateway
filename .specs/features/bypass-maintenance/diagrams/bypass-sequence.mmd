@@ -1,0 +1,47 @@
+%% Diagram: Bypass toggle propagation + maintenance hold/drain (AD-032)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#eef2ff', 'primaryTextColor': '#1e293b',
+  'primaryBorderColor': '#4f46e5', 'lineColor': '#94a3b8',
+  'secondaryColor': '#ecfdf5', 'background': '#ffffff',
+  'titleColor': '#1e293b', 'textColor': '#334155',
+  'actorBkg': '#eef2ff', 'actorBorder': '#4f46e5',
+  'noteBkgColor': '#fff7ed', 'noteBorderColor': '#f59e0b'
+}}}%%
+sequenceDiagram
+    autonumber
+    actor Admin
+    participant API as CP API
+    participant DB as node_control row
+    participant Rec as NodeControlReconciler<br/>(fast lane)
+    participant Dpstat as dpstat
+    participant Map as node_control map
+    participant Hot as XDP hot path
+    participant Proc as apply dispatch
+
+    Note over Admin,Hot: Emergency bypass — jumps the service-apply backlog
+    Admin->>API: POST /node/bypass {enabled:true, reason}
+    API->>DB: set bypass_enabled=true, activated_at, actor
+    API->>API: record_event(node.bypass.enabled)
+    API-->>Admin: 200 {desired:on, effective:off}
+    loop every ~1s (independent of process_job)
+        Rec->>DB: read desired
+        alt bypass desired != asserted
+            Rec->>Dpstat: set-bypass 1
+            Dpstat->>Map: bpf_map_update_elem(bypass=1)
+        end
+    end
+    Hot->>Map: per-packet read bypass
+    Note over Hot: parsed IPv4 → redirect_out_bypass()<br/>skip pipeline, count bypass_counter,<br/>IPv6/malformed/fragment still drop
+
+    Note over Admin,Proc: Maintenance — hold swaps, drain on exit
+    Admin->>API: POST /node/maintenance {enabled:true}
+    API->>DB: maintenance_enabled=true + audit
+    Admin->>API: (config mutation) → M1 auto-enqueue
+    API-->>Admin: 202 queued
+    Proc->>DB: _maintenance_active? = true
+    Note over Proc: leave SERVICE_UPDATE job queued<br/>(no mark_applying → no build → no flip)
+    Admin->>API: POST /node/maintenance {enabled:false}
+    API->>DB: maintenance_enabled=false + audit
+    Rec->>DB: detect maintenance-clear edge
+    Rec->>Proc: kick reconcile
+    Note over Proc: drain queued backlog →<br/>build + single flip (latest wins, version-guarded)
