@@ -6,7 +6,7 @@ import json
 import logging
 from collections import deque
 from collections.abc import AsyncIterator, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +143,17 @@ class TelemetrySnapshot:
     xdp_ifindex: int
     node: NodeCounters
     services: tuple[ServiceCounters, ...]
+    bypass_active: bool = False
+    bypass_pkts: int = 0
+    bypass_bytes: int = 0
+    _has_bypass_blocks: bool = field(default=False, repr=False, compare=False)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> TelemetrySnapshot:
         active = _mapping(payload["active"])
         xdp = _mapping(payload["xdp"])
+        node_control = _mapping(payload.get("node_control", {}))
+        bypass = _mapping(payload.get("bypass", {}))
         services = payload["services"]
         if not isinstance(services, list):
             raise ValueError("expected services list")
@@ -165,10 +171,14 @@ class TelemetrySnapshot:
             xdp_ifindex=_integer(xdp["ifindex"]),
             node=NodeCounters.from_dict(_mapping(payload["node"])),
             services=tuple(ServiceCounters.from_dict(_mapping(service)) for service in services),
+            bypass_active=bool(_integer(node_control.get("bypass", 0))),
+            bypass_pkts=_integer(bypass.get("pkts", 0)),
+            bypass_bytes=_integer(bypass.get("bytes", 0)),
+            _has_bypass_blocks="node_control" in payload or "bypass" in payload,
         )
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "ts_ns": self.ts_ns,
             "active": {"slot": self.active_slot, "version": self.active_version},
             "xdp": {
@@ -179,6 +189,10 @@ class TelemetrySnapshot:
             "node": self.node.to_dict(),
             "services": [service.to_dict() for service in self.services],
         }
+        if self._has_bypass_blocks or self.bypass_active or self.bypass_pkts or self.bypass_bytes:
+            payload["node_control"] = {"bypass": int(self.bypass_active)}
+            payload["bypass"] = {"pkts": self.bypass_pkts, "bytes": self.bypass_bytes}
+        return payload
 
 
 class TelemetryReader:

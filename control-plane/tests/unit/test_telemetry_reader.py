@@ -83,6 +83,9 @@ async def test_snapshot_parses_and_round_trips_golden_fixture(
     monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
 
     expected = TelemetrySnapshot.from_dict(golden_payload)
+    assert expected.bypass_active is False
+    assert expected.bypass_pkts == 0
+    assert expected.bypass_bytes == 0
     assert expected.to_dict() == golden_payload
 
     reader = TelemetryReader(binary="/opt/dpstat", ifindex=7, timeout_seconds=0.1)
@@ -100,13 +103,41 @@ async def test_snapshot_parses_and_round_trips_golden_fixture(
 
 
 @pytest.mark.unit
+def test_snapshot_parses_and_round_trips_bypass_state(
+    golden_payload: dict[str, object],
+) -> None:
+    payload = {
+        **golden_payload,
+        "node_control": {"bypass": 1},
+        "bypass": {"pkts": 42, "bytes": 4_200},
+    }
+
+    snapshot = TelemetrySnapshot.from_dict(payload)
+
+    assert snapshot.bypass_active is True
+    assert snapshot.bypass_pkts == 42
+    assert snapshot.bypass_bytes == 4_200
+    assert snapshot.to_dict() == payload
+
+
+@pytest.mark.unit
 async def test_fake_telemetry_reader_returns_canned_snapshots(
     golden_payload: dict[str, object],
 ) -> None:
-    snapshot = TelemetrySnapshot.from_dict(golden_payload)
+    snapshot = TelemetrySnapshot.from_dict(
+        {
+            **golden_payload,
+            "node_control": {"bypass": 1},
+            "bypass": {"pkts": 42, "bytes": 4_200},
+        }
+    )
     reader = FakeTelemetryReader(snapshots=[snapshot, None])
 
-    assert await reader.snapshot() is snapshot
+    returned_snapshot = await reader.snapshot()
+    assert returned_snapshot is snapshot
+    assert returned_snapshot.bypass_active is True
+    assert returned_snapshot.bypass_pkts == 42
+    assert returned_snapshot.bypass_bytes == 4_200
     assert await reader.snapshot() is None
     assert await reader.snapshot() is None
 
