@@ -98,6 +98,7 @@ test: $(TEST_BIN) $(TEST_SNAPSHOT_BIN)
 
 smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_redirect.sh
+	$(TEST_DIR)/smoke_bypass.sh
 	$(TEST_DIR)/smoke_fairness.sh
 	$(TEST_DIR)/smoke_apply.sh
 
