@@ -385,3 +385,109 @@ async def test_export_json_returns_only_finalized_rows_and_requires_admin(
     assert [entry["service_id"] for entry in exported.json()["usage"]] == [str(final_service.id)]
     assert exported.json()["usage"][0]["status"] == "final"
     assert exported.json()["usage"][0]["provisional"] is False
+
+
+async def test_history_returns_finalized_periods_newest_first_with_a_limit(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    tenant = Tenant(name="Billing API History")
+    db_session.add(tenant)
+    await db_session.flush()
+    tenant_user = await create_user(
+        db_session,
+        username="billing-api-history-user",
+        role=Role.tenant_user,
+        tenant=tenant,
+    )
+    service = await create_service(
+        db_session,
+        tenant=tenant,
+        name="history-edge",
+        cidr="203.0.113.189/32",
+    )
+    db_session.add_all(
+        [
+            usage(
+                service=service,
+                status=BillingStatus.final,
+                period_start=datetime(2026, 5, 1, tzinfo=UTC),
+            ),
+            usage(
+                service=service,
+                status=BillingStatus.final,
+                period_start=datetime(2026, 7, 1, tzinfo=UTC),
+            ),
+            usage(
+                service=service,
+                status=BillingStatus.open,
+                period_start=datetime(2026, 8, 1, tzinfo=UTC),
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, tenant_user)
+        response = await client.get(
+            "/billing/usage/history",
+            params={"service_id": service.id, "limit": 2},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["has_data"] is True
+    assert [(entry["status"], entry["period_start"]) for entry in response.json()["usage"]] == [
+        ("final", "2026-07-01T00:00:00Z"),
+        ("final", "2026-05-01T00:00:00Z"),
+    ]
+
+
+async def test_history_is_tenant_scoped_and_hides_cross_tenant_services(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    owner_tenant = Tenant(name="Billing API History Owner")
+    other_tenant = Tenant(name="Billing API History Other")
+    db_session.add_all([owner_tenant, other_tenant])
+    await db_session.flush()
+    owner = await create_user(
+        db_session,
+        username="billing-api-history-owner",
+        role=Role.tenant_user,
+        tenant=owner_tenant,
+    )
+    owner_service = await create_service(
+        db_session,
+        tenant=owner_tenant,
+        name="history-owner-edge",
+        cidr="203.0.113.190/32",
+    )
+    other_service = await create_service(
+        db_session,
+        tenant=other_tenant,
+        name="history-other-edge",
+        cidr="203.0.113.191/32",
+    )
+    db_session.add_all(
+        [
+            usage(service=owner_service, status=BillingStatus.final),
+            usage(service=other_service, status=BillingStatus.final),
+        ]
+    )
+    await db_session.flush()
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, owner)
+        scoped = await client.get("/billing/usage/history")
+        denied = await client.get(
+            "/billing/usage/history",
+            params={"service_id": other_service.id},
+        )
+
+    assert scoped.status_code == 200
+    assert scoped.json()["has_data"] is True
+    assert [entry["service_id"] for entry in scoped.json()["usage"]] == [str(owner_service.id)]
+    assert denied.status_code == 404
+    assert denied.json() == {"detail": "Service not found"}

@@ -67,6 +67,39 @@ async def list_usage(
     )
 
 
+@router.get("/usage/history", response_model=BillingUsageListResponse)
+async def usage_history(
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    service_id: uuid.UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 12,
+) -> BillingUsageListResponse:
+    if service_id is not None:
+        await load_service_for_principal(db, service_id, principal)
+
+    statement = select(BillingUsage).where(BillingUsage.status == BillingStatus.final)
+    if principal.role is not Role.admin:
+        if principal.tenant_id is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        statement = statement.where(BillingUsage.tenant_id == principal.tenant_id)
+    if service_id is not None:
+        statement = statement.where(BillingUsage.service_id == service_id)
+
+    usages = list(
+        (
+            await db.scalars(
+                statement.order_by(
+                    BillingUsage.period_start.desc(), BillingUsage.service_name, BillingUsage.id
+                ).limit(limit)
+            )
+        ).all()
+    )
+    return BillingUsageListResponse(
+        usage=[_usage_response(usage) for usage in usages],
+        has_data=bool(usages),
+    )
+
+
 @router.get("/usage/export", response_model=None)
 async def export_usage(
     period: Annotated[str, Query(pattern=_PERIOD_PATTERN)],
