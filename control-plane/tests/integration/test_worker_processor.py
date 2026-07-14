@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.db.session import session_scope
 from app.services.apply import APPLY_QUEUE_KEY, enqueue_service_update, mark_applying, retry
+from app.services.node_control import set_maintenance
 from app.services.services import bump_version
 from app.worker.applier import ServiceConfig
 from app.worker.processor import process_job, reconcile_once
@@ -255,6 +256,95 @@ async def test_reconcile_once_processes_committed_undispatched_job(
     assert count == 1
     assert service.active_version == 1
     assert job.status == JobStatus.succeeded
+
+
+async def test_maintenance_holds_service_update_until_reconciliation(
+    committed_db: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_scope() as db:
+        await set_maintenance(db, actor=None, enabled=True, ip=None)
+    service_id, job_id = await enqueue_job(
+        name="processor-maintenance-hold",
+        cidr_or_ip="203.0.113.52/32",
+    )
+    applier = RecordingApplier()
+
+    await process_job(job_id, session_factory=committed_db, applier=applier)
+
+    service, job = await get_service_and_job(committed_db, service_id, job_id)
+    assert service.apply_status == ApplyStatus.queued
+    assert service.active_version is None
+    assert job.status == JobStatus.queued
+    assert job.attempts == 0
+    assert applier.versions == []
+
+    async with session_scope() as db:
+        await set_maintenance(db, actor=None, enabled=False, ip=None)
+    count = await reconcile_once(
+        session_factory=committed_db,
+        applier=applier,
+        include_orphans=False,
+    )
+
+    service, job = await get_service_and_job(committed_db, service_id, job_id)
+    assert count == 1
+    assert service.apply_status == ApplyStatus.active
+    assert service.active_version == 1
+    assert job.status == JobStatus.succeeded
+    assert applier.versions == [1]
+
+
+async def test_maintenance_release_applies_latest_held_service_update(
+    committed_db: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_scope() as db:
+        await set_maintenance(db, actor=None, enabled=True, ip=None)
+    service_id, stale_job_id = await enqueue_job(
+        name="processor-maintenance-superseded",
+        cidr_or_ip="203.0.113.53/32",
+    )
+    async with session_scope() as db:
+        service = await db.get(ProtectedService, service_id)
+        assert service is not None
+        await bump_version(db, service_id)
+        current_job = await enqueue_service_update(
+            db,
+            service,
+            actor=None,
+            trigger=ChangeTrigger.rule,
+        )
+    applier = RecordingApplier()
+
+    held_count = await reconcile_once(
+        session_factory=committed_db,
+        applier=applier,
+        include_orphans=False,
+    )
+
+    service, stale_job = await get_service_and_job(committed_db, service_id, stale_job_id)
+    _, current_job_state = await get_service_and_job(committed_db, service_id, current_job.id)
+    assert held_count == 2
+    assert service.apply_status == ApplyStatus.queued
+    assert stale_job.status == JobStatus.queued
+    assert current_job_state.status == JobStatus.queued
+    assert applier.versions == []
+
+    async with session_scope() as db:
+        await set_maintenance(db, actor=None, enabled=False, ip=None)
+    released_count = await reconcile_once(
+        session_factory=committed_db,
+        applier=applier,
+        include_orphans=False,
+    )
+
+    service, stale_job = await get_service_and_job(committed_db, service_id, stale_job_id)
+    _, current_job_state = await get_service_and_job(committed_db, service_id, current_job.id)
+    assert released_count == 2
+    assert service.apply_status == ApplyStatus.active
+    assert service.active_version == 2
+    assert stale_job.status == JobStatus.superseded
+    assert current_job_state.status == JobStatus.succeeded
+    assert applier.versions == [2]
 
 
 async def test_reconcile_once_recovers_orphan_with_system_retry_audit(

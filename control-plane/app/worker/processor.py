@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import AgentJob, JobStatus, JobType
 from app.db.session import session_scope
+from app.services.node_control import maintenance_active
 from app.worker.applier import Applier
 from app.worker.feed_jobs import JOB_LIFECYCLES
 from app.worker.handlers import HANDLERS, NoHandlerError
@@ -23,6 +24,8 @@ async def claim_job(job_id: uuid.UUID) -> AgentJob | None:
         job = await db.get(AgentJob, job_id)
         if job is None:
             logger.warning("Apply job missing from ledger", extra={"job_id": str(job_id)})
+            return None
+        if job.job_type == JobType.service_update and await maintenance_active(db):
             return None
 
         lifecycle = JOB_LIFECYCLES[job.job_type]
