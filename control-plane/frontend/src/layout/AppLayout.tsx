@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/AuthContext'
+import { NodeControlBanner } from '../components/NodeControlBanner'
 
 export function AppLayout() {
   const { logout, principal } = useAuth()
@@ -15,6 +16,7 @@ export function AppLayout() {
 
   return (
     <div>
+      <NodeControlBanner />
       <header>
         <nav aria-label="Primary navigation">
           <NavLink to={dashboardPath}>Dashboard</NavLink>

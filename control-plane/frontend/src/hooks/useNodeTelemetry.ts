@@ -52,6 +52,13 @@ export interface FeedSource {
   last_run?: FeedSyncRunStatus | null
 }
 
+export interface NodeControlState {
+  desired: boolean
+  effective: boolean
+  activated_at: string | null
+  active_seconds: number
+}
+
 export interface NodeHealth {
   has_data: boolean
   xdp_mode: 'native' | 'generic' | 'offline' | 'unknown'
@@ -70,6 +77,10 @@ export interface NodeHealth {
     applying: number
   }
   feed_sources: FeedSource[]
+  bypass: NodeControlState
+  maintenance: NodeControlState
+  bypass_pkts: number
+  bypass_bytes: number
 }
 
 export function useNodeTelemetry() {

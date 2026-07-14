@@ -20,6 +20,10 @@ describe('NodeHealthPanel', () => {
           stale: false,
           job_backlog: { queued: 3, applying: 1 },
           feed_sources: [{ id: 'feed-1', name: 'Threat feed', enabled: true, last_status: 'success', last_sync_at: '2026-07-13T12:00:00Z' }],
+          bypass: { desired: false, effective: false, activated_at: null, active_seconds: 0 },
+          maintenance: { desired: false, effective: false, activated_at: null, active_seconds: 0 },
+          bypass_pkts: 0,
+          bypass_bytes: 0,
         }}
       />,
     )
