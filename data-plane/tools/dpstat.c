@@ -16,10 +16,13 @@
 #include "drop_event.h"
 #include "drop_reason.h"
 #include "blacklist.h"
+#include "node_control.h"
 #include "service.h"
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
 #define ACTIVE_CONFIG_PIN_PATH PIN_DIR "/active_config"
+#define NODE_CONTROL_PIN_PATH PIN_DIR "/node_control"
+#define BYPASS_COUNTER_PIN_PATH PIN_DIR "/bypass_counter"
 #define COUNTER_PIN_PATH PIN_DIR "/counter_map"
 #define RINGBUF_PIN_PATH PIN_DIR "/drop_ringbuf"
 #define SAMPLE_CONFIG_PIN_PATH PIN_DIR "/sample_config"
@@ -41,6 +44,7 @@ static void usage(const char *prog)
 	fprintf(stderr, "       %s tail [--json]\n", prog);
 	fprintf(stderr, "       %s rate <per_cpu_rate> <burst>\n", prog);
 	fprintf(stderr, "       %s active_config\n", prog);
+	fprintf(stderr, "       %s set-bypass 0|1\n", prog);
 	fprintf(stderr, "       %s snapshot --json [--ifindex N]\n", prog);
 }
 
@@ -109,6 +113,29 @@ static int read_percpu_svc_stat(int fd, __u32 key, int possible_cpus,
 			for (__u32 reason = 0; reason < DROP_REASON_CAP; reason++)
 				sum->drop_by_reason[reason] +=
 					values[cpu].drop_by_reason[reason];
+		}
+	}
+
+	free(values);
+	return err;
+}
+
+static int read_percpu_bypass_stat(int fd, __u32 key, int possible_cpus,
+				   struct bypass_stat *sum)
+{
+	struct bypass_stat *values;
+	int err;
+
+	values = calloc(possible_cpus, sizeof(*values));
+	if (!values)
+		return -1;
+
+	err = bpf_map_lookup_elem(fd, &key, values);
+	if (err == 0) {
+		memset(sum, 0, sizeof(*sum));
+		for (int cpu = 0; cpu < possible_cpus; cpu++) {
+			sum->pkts += values[cpu].pkts;
+			sum->bytes += values[cpu].bytes;
 		}
 	}
 
@@ -400,13 +427,18 @@ static int parse_snapshot_args(int argc, char **argv, int *ifindex)
 static int cmd_snapshot(int argc, char **argv)
 {
 	struct active_config active;
+	struct node_control control;
 	struct node_snapshot node;
+	struct bypass_stat bypass;
 	struct service_snapshots services = {};
 	const char *xdp_mode;
 	__u32 active_key = 0;
+	__u32 node_control_key = 0;
 	__u32 xdp_prog_id;
 	__u64 timestamp_ns;
 	int active_fd = -1;
+	int node_control_fd = -1;
+	int bypass_fd = -1;
 	int counter_fd = -1;
 	int stats_fd = -1;
 	int bloom_fd = -1;
@@ -427,6 +459,12 @@ static int cmd_snapshot(int argc, char **argv)
 	active_fd = open_pinned_map(ACTIVE_CONFIG_PIN_PATH);
 	if (active_fd < 0)
 		goto out;
+	node_control_fd = open_pinned_map(NODE_CONTROL_PIN_PATH);
+	if (node_control_fd < 0)
+		goto out;
+	bypass_fd = open_pinned_map(BYPASS_COUNTER_PIN_PATH);
+	if (bypass_fd < 0)
+		goto out;
 	counter_fd = open_pinned_map(COUNTER_PIN_PATH);
 	if (counter_fd < 0)
 		goto out;
@@ -444,7 +482,13 @@ static int cmd_snapshot(int argc, char **argv)
 		fprintf(stderr, "failed to read active_config[0]: %s\n", strerror(errno));
 		goto out;
 	}
-	if (read_node_snapshot(counter_fd, stats_fd, bloom_fd, possible_cpus,
+	if (bpf_map_lookup_elem(node_control_fd, &node_control_key, &control) != 0) {
+		fprintf(stderr, "failed to read node_control[0]: %s\n", strerror(errno));
+		goto out;
+	}
+	if (read_percpu_bypass_stat(bypass_fd, node_control_key, possible_cpus,
+				    &bypass) != 0 ||
+	    read_node_snapshot(counter_fd, stats_fd, bloom_fd, possible_cpus,
 			       &node) != 0 ||
 	    read_service_snapshots(svc_fd, possible_cpus, &services) != 0 ||
 	    query_xdp(ifindex, &xdp_mode, &xdp_prog_id) != 0 ||
@@ -459,8 +503,11 @@ static int cmd_snapshot(int argc, char **argv)
 	       "\"xdp\":{\"mode\":",
 	       (unsigned long long)timestamp_ns, active.active_slot, active.version);
 	print_json_string(xdp_mode);
-	printf(",\"prog_id\":%u,\"ifindex\":%d},\"node\":{\"counters\":",
-	       xdp_prog_id, ifindex);
+	printf(",\"prog_id\":%u,\"ifindex\":%d},\"node_control\":{\"bypass\":%u},"
+	       "\"bypass\":{\"pkts\":%llu,\"bytes\":%llu},\"node\":{\"counters\":",
+	       xdp_prog_id, ifindex, control.bypass ? 1 : 0,
+	       (unsigned long long)bypass.pkts,
+	       (unsigned long long)bypass.bytes);
 	print_named_u64_object(drop_reason_name, node.counters, DROP_REASON_COUNT);
 	fputs(",\"sample_stats\":", stdout);
 	print_named_u64_object(snapshot_sample_stat_name, node.sample_stats,
@@ -481,6 +528,10 @@ out:
 	free(services.items);
 	if (active_fd >= 0)
 		close(active_fd);
+	if (node_control_fd >= 0)
+		close(node_control_fd);
+	if (bypass_fd >= 0)
+		close(bypass_fd);
 	if (counter_fd >= 0)
 		close(counter_fd);
 	if (stats_fd >= 0)
@@ -749,6 +800,35 @@ out:
 	return err;
 }
 
+static int cmd_set_bypass(int argc, char **argv)
+{
+	struct node_control control = {};
+	__u32 key = 0;
+	int fd;
+	int err = 1;
+
+	if (argc != 1 ||
+	    (strcmp(argv[0], "0") != 0 && strcmp(argv[0], "1") != 0))
+		return 2;
+
+	control.bypass = argv[0][0] - '0';
+	fd = open_pinned_map(NODE_CONTROL_PIN_PATH);
+	if (fd < 0)
+		return 1;
+
+	if (bpf_map_update_elem(fd, &key, &control, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to update node_control[0]: %s\n", strerror(errno));
+		goto out;
+	}
+
+	printf("bypass set to %u\n", control.bypass);
+	err = 0;
+
+out:
+	close(fd);
+	return err;
+}
+
 static int cmd_active_config(void)
 {
 	struct active_config config;
@@ -788,6 +868,8 @@ int main(int argc, char **argv)
 		err = cmd_tail(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "rate") == 0)
 		err = cmd_rate(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "set-bypass") == 0)
+		err = cmd_set_bypass(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "active_config") == 0)
 		err = argc == 2 ? cmd_active_config() : 2;
 	else if (strcmp(argv[1], "snapshot") == 0)

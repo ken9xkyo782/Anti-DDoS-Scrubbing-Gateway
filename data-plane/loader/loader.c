@@ -15,6 +15,7 @@
 #include <bpf/libbpf.h>
 
 #include "drop_event.h"
+#include "node_control.h"
 #include "rules.h"
 #include "service.h"
 #include "blacklist.h"
@@ -25,6 +26,8 @@
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
 #define ACTIVE_CONFIG_PIN_PATH PIN_DIR "/active_config"
+#define NODE_CONTROL_PIN_PATH PIN_DIR "/node_control"
+#define BYPASS_COUNTER_PIN_PATH PIN_DIR "/bypass_counter"
 #define SERVICE_MAP_PIN_PATH PIN_DIR "/service_map"
 #define RULE_BLOCK_MAP_PIN_PATH PIN_DIR "/rule_block_map"
 #define WHITELIST_BLOOM_PIN_PATH PIN_DIR "/whitelist_bloom"
@@ -198,7 +201,9 @@ static int set_config_pin_paths(struct xdp_gateway_bpf *skel)
 	    set_pin_path(skel->maps.fair_node_config,
 			 FAIR_NODE_CONFIG_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.gbl_meta, GBL_META_PIN_PATH) != 0 ||
-	    set_pin_path(skel->maps.active_config, ACTIVE_CONFIG_PIN_PATH) != 0)
+	    set_pin_path(skel->maps.active_config, ACTIVE_CONFIG_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.node_control, NODE_CONTROL_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.bypass_counter, BYPASS_COUNTER_PIN_PATH) != 0)
 		return -1;
 
 	return 0;
@@ -250,6 +255,8 @@ static void unpin_config_maps(struct xdp_gateway_bpf *skel)
 	unpin_map(skel->maps.fair_node_config, "fair_node_config");
 	unpin_map(skel->maps.gbl_meta, "gbl_meta");
 	unpin_map(skel->maps.active_config, "active_config");
+	unpin_map(skel->maps.node_control, "node_control");
+	unpin_map(skel->maps.bypass_counter, "bypass_counter");
 }
 
 static int pin_observability_maps(struct xdp_gateway_bpf *skel)
@@ -308,6 +315,10 @@ static int pin_config_maps(struct xdp_gateway_bpf *skel)
 	if (pin_map(skel->maps.gbl_meta, "gbl_meta") != 0)
 		goto rollback;
 	if (pin_map(skel->maps.active_config, "active_config") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.node_control, "node_control") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.bypass_counter, "bypass_counter") != 0)
 		goto rollback;
 
 	return 0;
@@ -587,6 +598,22 @@ static int seed_active_config(struct xdp_gateway_bpf *skel)
 	}
 
 	printf("seeded active_config[0] active_slot=0 version=1\n");
+	return 0;
+}
+
+static int seed_node_control(struct xdp_gateway_bpf *skel)
+{
+	struct node_control control = {};
+	__u32 key = 0;
+	int fd = bpf_map__fd(skel->maps.node_control);
+
+	if (fd < 0 || bpf_map_update_elem(fd, &key, &control, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed node_control[0]: %s\n",
+			strerror(errno));
+		return -1;
+	}
+
+	printf("seeded node_control[0] bypass=0\n");
 	return 0;
 }
 
@@ -1094,6 +1121,7 @@ int main(int argc, char **argv)
 
 	if (populate_tx_devmap(skel, out_ifindex, out_ifname) != 0 ||
 	    seed_active_config(skel) != 0 ||
+	    seed_node_control(skel) != 0 ||
 	    seed_sample_config(skel) != 0 ||
 	    seed_gbl_meta_zero(skel) != 0 ||
 	    seed_fair_node_config(skel, &fair_seed, 0) != 0 ||
