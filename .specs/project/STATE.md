@@ -1,8 +1,25 @@
 # State
 
-**Last Updated:** 2026-07-13
+**Last Updated:** 2026-07-14
 
-**Current Work (authoritative update):** M5 → **Telemetry & dashboards P1** —
+**Current Work (authoritative update):** M5 → **Telemetry & dashboards** —
+**FULLY EXECUTED / VERIFIED** (P1 2026-07-13; P2/P3 2026-07-14). All 40 TEL
+requirements are verified. This 2026-07-14 run closed the feature: **T14** full
+CP gate re-run green after billing landed (`pytest -q` → 507 passed), **T15**
+`20c304b` added the P2 SPA panels (`TopTalkersPanel`, `BloomFpPanel`,
+`CommittedHonoredPanel`, `FeedStatusPanel`) + `theme/thresholds.ts` §9.1
+display-only severity coloring, and **T16** `46bdd9b` added the telemetry
+history/export endpoints (`GET …/telemetry/history` + `/telemetry/export?format=csv|json`)
+and the `TrendChart` wired into both dashboards. Final 2026-07-14 gates:
+control-plane `ruff`/format/`mypy` clean and `pytest -q` → **507 passed** (18
+pre-existing Pydantic warnings); frontend lint/typecheck/Vitest → **17 files /
+34 tests** plus production build. New panels/endpoints are covered by unit +
+integration gates; a live browser walkthrough of the P2/P3 surfaces was not
+re-run (the P1 SPA serving path was already browser-validated 2026-07-13).
+**Next phase:** M5 *Chargeback metering* is executed; resume M6 (bypass &
+maintenance — tasks drafted).
+
+**Prior current work (P1):** M5 → **Telemetry & dashboards P1** —
 **EXECUTED / VERIFIED** (2026-07-13). T1–T12 and T17 are complete. This run
 landed T7 `8efba3b`, T9 `c2d4239`, T8 `17f0aa9`, T11 `77753e4`, and T12
 `6e335e8`; T17 records the operational and testing conventions. Final gates:

@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/telemetry-dashboards/design.md` (AD-030)
 **Spec**: `.specs/features/telemetry-dashboards/spec.md` (TEL-01..40)
-**Status**: P1 verified (2026-07-13)
+**Status**: P1 verified (2026-07-13); P2 (T13–T15) + P3 (T16) verified (2026-07-14)
 
 **Confirmed defaults carried from Design review** (the 3 flags):
 - D-030-6 — aggregation is a **worker background task**, no `TELEMETRY_AGGREGATE` `JobType`. ✅
@@ -41,9 +41,9 @@ Do not use the historic counts below as a current baseline.
 | T11 | Complete | `77753e4`; FE gate: 5 files / 8 tests passed |
 | T12 | Complete | `6e335e8`; FE gate: 9 files / 13 tests; CP static-serving checks: 2 passed |
 | T13 | Complete | DP build and 130 DP tests; CP full gate passed with 452 tests; focused follow-up passed with 19 tests |
-| T14 | Implemented | Focused integration: 3 passed; scoped lint/format and mypy passed. The full CP gate is blocked by unrelated untracked billing tests and a concurrent external pytest run. |
-| T15 | Pending | Execute after T14's full CP gate has a clean shared test database |
-| T16 | Pending | Execute after the P2 work to validate the final dashboard surface together |
+| T14 | Complete | Full CP gate re-run green: `ruff`/format/`mypy` clean, `pytest -q` → 497 passed (2026-07-14) |
+| T15 | Complete | `20c304b`; FE gate: 16 files / 32 tests; lint/typecheck/build clean (2026-07-14) |
+| T16 | Complete | CP full gate 507 passed; FE gate 17 files / 34 tests; trend + CSV/JSON export (2026-07-14) |
 | T17 | Complete | docs render review and final P1 traceability recorded |
 
 T3 additionally pins `active_config` with the established observability
@@ -428,10 +428,9 @@ opt-in FastAPI serving of the production SPA bundle.
 - [x] Integration verifies each metric, including planned services without
   telemetry, both honored and breached commitments, feed-job exclusion from
   last-apply selection, and latest-run selection.
-- [ ] The CP `full` gate remains externally blocked: untracked billing tests
-  currently fail lint/collection, and another pytest process owns the shared
-  integration database. Scoped T14 lint/format/mypy and integration checks
-  pass.
+- [x] CP `full` gate green after billing landed: `ruff`/format/`mypy` clean and
+  `pytest -q` → **497 passed** (18 pre-existing Pydantic warnings). The former
+  external block (untracked billing tests + a concurrent pytest run) is resolved.
 
 **Tests**: integration
 **Gate**: full
@@ -450,9 +449,12 @@ opt-in FastAPI serving of the production SPA bundle.
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] Top dst-port + top src (labeled sampled) panels; bloom-FP, committed-honored, feed-status panels; §9.1 threshold coloring (display only, no alert)
-- [ ] Vitest unit for each panel from mock payloads
-- [ ] Gate passes: `fe`
+- [x] Top dst-port + top src (labeled sampled) `TopTalkersPanel`; `BloomFpPanel`,
+  `CommittedHonoredPanel`, `FeedStatusPanel`; `theme/thresholds.ts` §9.1
+  severity coloring (display only, no alert). Wired into the tenant service
+  panel, node telemetry panel, and admin dashboard.
+- [x] Vitest unit for each panel from mock payloads, plus threshold-severity unit tests
+- [x] Gate passes: `fe` — 16 files / 32 tests; lint, typecheck, and production build clean
 
 **Tests**: fe-unit
 **Gate**: fe
@@ -471,9 +473,11 @@ opt-in FastAPI serving of the production SPA bundle.
 **Tools**: Skill `coding-guidelines`
 
 **Done when**:
-- [ ] `GET …/telemetry/history` (windows range) + CSV/JSON export; `TrendChart` plots retained windows
-- [ ] Integration (export) + fe-unit (chart)
-- [ ] Gate passes: CP `full` + FE `fe`
+- [x] `GET /services/{id}/telemetry/history` + `/node/telemetry/history` (bounded
+  `limit`, chronological, baseline excluded) and `/telemetry/export?format=csv|json`;
+  `TrendChart` plots retained windows, wired into the tenant and admin views.
+- [x] Integration (history + CSV/JSON export, tenant-scoped 404 / admin-only 403) + fe-unit (chart)
+- [x] Gate passes: CP `full` — 507 passed; FE `fe` — 17 files / 34 tests, lint/typecheck/build clean
 
 **Tests**: integration
 **Gate**: full
@@ -584,5 +588,15 @@ No `[P]` task depends on another `[P]` task in its phase (T6, T10 are independen
 **MCPs/Skills**: `coding-guidelines` on all code tasks; `docs-writer` on T17; `context7` (fallback web) on T3/T10/T13 for external-API/version checks; `mermaid-studio` already used in Design. Confirm this mapping.
 
 **P1 execution result (2026-07-13):** T1–T12 and T17 are complete. Final
-validation is recorded above; TEL-01–30 are verified. T13–T15 remain deferred
-to P2 and T16 remains deferred to P3.
+validation is recorded above; TEL-01–30 are verified.
+
+**P2/P3 execution result (2026-07-14):** T13 (committed earlier) plus T14, T15,
+and T16 are complete — all 40 TEL requirements are verified. T14's full CP gate
+was re-run green after billing landed (`pytest -q` → 507 passed). T15 added the
+P2 dashboard panels (`TopTalkersPanel`, `BloomFpPanel`, `CommittedHonoredPanel`,
+`FeedStatusPanel`) and `theme/thresholds.ts` §9.1 display coloring
+(`20c304b`; FE gate 16 files / 32 tests). T16 added the telemetry
+history/export endpoints and the `TrendChart` (`46bdd9b`; CP full gate 507
+passed, FE gate 17 files / 34 tests). Final gates: CP `ruff`/format/`mypy`
+clean and `pytest -q` → **507 passed** (18 pre-existing Pydantic warnings); FE
+`lint`/`typecheck`/Vitest **17 files / 34 tests** plus production build.

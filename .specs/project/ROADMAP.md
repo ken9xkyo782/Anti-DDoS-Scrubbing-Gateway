@@ -191,7 +191,7 @@
 
 ### Features
 
-**Telemetry & dashboards** - P1 VERIFIED (2026-07-13; P2/P3 deferred)
+**Telemetry & dashboards** - VERIFIED (P1 2026-07-13; P2/P3 2026-07-14) — all 40 TEL reqs verified
 - End-to-end vertical slice: new **exact per-CPU per-service counters** on the XDP hot path (clean + per-reason drop pkts/bytes — D-TEL-1, clean-byte = billing source reused by chargeback) → worker background telemetry lane (not a `JobType`; in-worker 1–2 second scheduler) rolling windowed `TelemetryCounter` rows → telemetry/health API → **first React SPA** (shell + telemetry/node views only, D-TEL-2)
 - Tenant per-service view (clean-vs-drop, drop-reason distribution, PPS/BPS) + admin node view (XDP mode, map version, apply status, `map_error`, backlog, feed status, throughput-vs-capacity); **REST polling ≤2 s** (D-TEL-3); sampled top dst-port + top src IP (D-TEL-4, `top_src` PII pilot-accepted CM-08); strict tenant isolation (5.2)
 - Spec `spec.md` (TEL-01..40; P1=01..30 MVP slice, P2=31..38, P3=39..40); context `context.md` (D-TEL-1..4, A-TEL-1..8)
@@ -205,8 +205,13 @@
   deep-link/login/404, tenant isolation, two-second polling, and critical-XDP
   validation passed against FastAPI-served assets.
   `CONTROL_PLANE_FRONTEND_STATIC_DIR` is opt-in and has an HTML-only history
-  fallback that preserves API and asset 404s. TEL-01–30 are verified. P2
-  T13–T15 and P3 T16 remain explicitly deferred; TEL-31–40 remain pending.
+  fallback that preserves API and asset 404s. TEL-01–30 are verified.
+- P2/P3 status (2026-07-14): T13–T16 complete → **all 40 TEL reqs verified**.
+  T13 sampled top-talkers; T14 richer node-health metrics (full CP gate re-run
+  green after billing landed); T15 P2 SPA panels (`TopTalkersPanel`,
+  `BloomFpPanel`, `CommittedHonoredPanel`, `FeedStatusPanel`) + `theme/thresholds.ts`
+  §9.1 display coloring; T16 telemetry history/export endpoints + `TrendChart`.
+  Final gates: CP `pytest -q` **507 passed**; FE **17 files / 34 tests** + build.
 
 **Chargeback metering** - IN PROGRESS (spec + context + design APPROVED + tasks drafted)
 - p95 clean bps sampling → `BillingUsage` per period; overage policy (`billed`/`capped`)

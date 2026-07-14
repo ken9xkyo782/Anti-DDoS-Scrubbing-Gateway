@@ -2,7 +2,7 @@
 
 **Feature ID prefix:** `TEL`
 **Milestone:** M5 — Observability & chargeback (first of two features; sibling = *Chargeback metering*)
-**Status:** P1 verified (2026-07-13); P2 in progress; P3 pending
+**Status:** P1 verified (2026-07-13); P2 + P3 verified (2026-07-14)
 
 ## Problem Statement
 
@@ -213,25 +213,25 @@ Explicitly excluded. Documented to prevent scope creep.
 | TEL-28 | P1: Dashboard SPA | - | Verified |
 | TEL-29 | P1: Dashboard SPA | - | Verified |
 | TEL-30 | P1: Dashboard SPA | - | Verified |
-| TEL-31 | P2: Richer admin observability | - | Implementing |
-| TEL-32 | P2: Richer admin observability | - | Implementing |
-| TEL-33 | P2: Richer admin observability | - | Implementing |
-| TEL-34 | P2: Richer admin observability | - | Implementing |
-| TEL-35 | P2: Richer admin observability | - | Pending |
+| TEL-31 | P2: Richer admin observability | - | Verified |
+| TEL-32 | P2: Richer admin observability | - | Verified |
+| TEL-33 | P2: Richer admin observability | - | Verified |
+| TEL-34 | P2: Richer admin observability | - | Verified |
+| TEL-35 | P2: Richer admin observability | - | Verified |
 | TEL-36 | P2: Top-talkers view | - | Verified |
 | TEL-37 | P2: Top-talkers view | - | Verified |
-| TEL-38 | P2: Top-talkers view | - | Pending |
-| TEL-39 | P3: Historical trend & export | - | Pending |
-| TEL-40 | P3: Historical trend & export | - | Pending |
+| TEL-38 | P2: Top-talkers view | - | Verified |
+| TEL-39 | P3: Historical trend & export | - | Verified |
+| TEL-40 | P3: Historical trend & export | - | Verified |
 
 **ID format:** `TEL-[NUMBER]`
 
 **Status values:** Pending → In Design → In Tasks → Implementing → Verified
 
-**Coverage:** 40 total. TEL-01..30 are implemented and verified by the P1
-gates. T13 verifies TEL-36..37. T14 implements TEL-31..34 and awaits its
-full control-plane gate; TEL-35 and TEL-38 remain pending for P2, and
-TEL-39..40 remain pending for P3.
+**Coverage:** 40 total, all verified. TEL-01..30 by the P1 gates; TEL-36..37 by
+T13; TEL-31..34 by T14 (full CP gate re-run green — 507 passed); TEL-35 and
+TEL-38 by the T15 P2 panels + §9.1 threshold coloring; TEL-39..40 by the T16
+history/export endpoints + `TrendChart`.
 
 ---
 
