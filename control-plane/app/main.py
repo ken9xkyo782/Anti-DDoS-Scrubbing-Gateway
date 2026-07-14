@@ -10,6 +10,7 @@ from app.api.routers import (
     allocations,
     apply_status,
     auth,
+    billing,
     feeds,
     global_blacklist,
     lists,
@@ -36,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 _API_PATH_PREFIXES = {
     "allocations",
     "auth",
+    "billing",
     "feeds",
     "health",
     "jobs",
@@ -53,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(allocations.router)
     app.include_router(apply_status.router)
     app.include_router(auth.router)
+    app.include_router(billing.router)
     app.include_router(feeds.router)
     app.include_router(global_blacklist.router)
     app.include_router(lists.router)
