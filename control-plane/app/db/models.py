@@ -145,6 +145,35 @@ class XdpMode(StrEnum):
     unknown = "unknown"
 
 
+class AlertScope(StrEnum):
+    node = "node"
+    service = "service"
+
+
+class AlertState(StrEnum):
+    pending = "pending"
+    firing = "firing"
+    resolved = "resolved"
+
+
+class AlertSeverity(StrEnum):
+    info = "info"
+    warning = "warning"
+    critical = "critical"
+
+
+class ChannelKind(StrEnum):
+    email = "email"
+    webhook = "webhook"
+
+
+class NotificationState(StrEnum):
+    pending = "pending"
+    sent = "sent"
+    retrying = "retrying"
+    failed = "failed"
+
+
 role_enum = SAEnum(
     Role,
     name="role",
@@ -250,6 +279,36 @@ telemetry_scope_enum = SAEnum(
 xdp_mode_enum = SAEnum(
     XdpMode,
     name="xdp_mode",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+alert_scope_enum = SAEnum(
+    AlertScope,
+    name="alert_scope",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+alert_state_enum = SAEnum(
+    AlertState,
+    name="alert_state",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+alert_severity_enum = SAEnum(
+    AlertSeverity,
+    name="alert_severity",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+channel_kind_enum = SAEnum(
+    ChannelKind,
+    name="channel_kind",
+    native_enum=False,
+    values_callable=lambda values: [value.value for value in values],
+)
+notification_state_enum = SAEnum(
+    NotificationState,
+    name="notification_state",
     native_enum=False,
     values_callable=lambda values: [value.value for value in values],
 )
@@ -1027,3 +1086,135 @@ class NodeHealthSnapshot(Base):
     node_clean_bps: Mapped[int] = mapped_column(BigInteger, nullable=False)
     node_capacity_bps: Mapped[int] = mapped_column(BigInteger, nullable=False)
     bloom_stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+class AlertRule(TimestampMixin, Base):
+    __tablename__ = "alert_rule"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    severity_override: Mapped[AlertSeverity | None] = mapped_column(
+        alert_severity_enum,
+        nullable=True,
+    )
+    fire_threshold_override: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    clear_threshold_override: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    silence_in_maintenance: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class NotificationChannel(TimestampMixin, Base):
+    __tablename__ = "notification_channel"
+    __table_args__ = (Index("ix_notification_channel_tenant", "tenant_id", "enabled"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[ChannelKind] = mapped_column(channel_kind_enum, nullable=False)
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    min_severity: Mapped[AlertSeverity] = mapped_column(
+        alert_severity_enum,
+        default=AlertSeverity.info,
+        nullable=False,
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tenant: Mapped[Tenant | None] = relationship()
+
+
+class Alert(TimestampMixin, Base):
+    __tablename__ = "alert"
+    __table_args__ = (
+        Index(
+            "uq_alert_active_scope",
+            "rule_key",
+            "scope_key",
+            unique=True,
+            postgresql_where=text("state <> 'resolved'"),
+        ),
+        Index("ix_alert_tenant_state", "tenant_id", "state"),
+        Index("ix_alert_state_fired", "state", "fired_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rule_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope: Mapped[AlertScope] = mapped_column(alert_scope_enum, nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("protected_service.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    service_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    severity: Mapped[AlertSeverity] = mapped_column(alert_severity_enum, nullable=False)
+    state: Mapped[AlertState] = mapped_column(
+        alert_state_enum,
+        default=AlertState.pending,
+        nullable=False,
+    )
+    metric_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    context: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    fire_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    clear_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    first_observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    service: Mapped[ProtectedService | None] = relationship()
+    tenant: Mapped[Tenant | None] = relationship()
+    acknowledger: Mapped[User | None] = relationship()
+
+
+class AlertNotification(TimestampMixin, Base):
+    __tablename__ = "alert_notification"
+    __table_args__ = (Index("ix_alert_notification_alert", "alert_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("alert.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notification_channel.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    channel_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[ChannelKind] = mapped_column(channel_kind_enum, nullable=False)
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[NotificationState] = mapped_column(
+        notification_state_enum,
+        default=NotificationState.pending,
+        nullable=False,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    alert: Mapped[Alert] = relationship()
+    channel: Mapped[NotificationChannel | None] = relationship()
