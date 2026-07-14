@@ -200,6 +200,37 @@ IN in native/DRV mode, populate `tx_devmap[0]` with OUT, pin observability maps 
 `/sys/fs/bpf/xdp_gateway/`, seed the demo service when provided, or fail clearly with no generic/SKB
 fallback. Ctrl-C should detach cleanly and remove the pins.
 
+### Node bypass and maintenance conventions
+
+The global soft-bypass test seam writes `node_control[0].bypass` directly with
+`bpf_map_update_elem` in the dp-unit harness. Cover a bypassed IPv4
+`service_miss`, the separate `bypass_counter`, the unchanged per-service
+`svc_stat`, and the bypass-off enforcement path. IPv6, malformed IPv4, and
+fragments remain fail-fast drops even while bypass is on.
+
+The loader pins `node_control` and `bypass_counter` under
+`/sys/fs/bpf/xdp_gateway/`. Use the privileged operator interface only against
+a running, pinned gateway:
+
+```sh
+sudo ./build/dpstat set-bypass 1
+sudo ./build/dpstat snapshot --json
+sudo ./build/dpstat set-bypass 0
+```
+
+The snapshot contains `node_control.bypass` and exact aggregate
+`bypass.pkts`/`bypass.bytes` values. The `smoke_bypass.sh` variant in
+`make smoke` verifies an undeclared IPv4 destination redirects unchanged while
+bypass is on, then drops after bypass is cleared. Keep this privileged smoke
+serial with the other veth tests.
+
+Worker node-control tests use `committed_db` and `FakeBypassWriter` to cover
+desired-state convergence, retry after a writer failure, restart reassertion,
+and the maintenance-clear reconcile kick. Worker runtime coverage must also
+prove that the node-control lane can assert bypass while an apply is blocked.
+Maintenance processor tests hold `SERVICE_UPDATE` jobs in `queued` and confirm
+that the latest version drains after maintenance clears.
+
 ### Drop-reason ABI
 
 `data-plane/src/drop_reason.h` is authoritative for drop-reason names and indices. Indices `0..15` are

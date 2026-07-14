@@ -202,6 +202,8 @@ The loader pins these maps for operators and later workers:
 | `/sys/fs/bpf/xdp_gateway/sample_stats` | Per-CPU emitted, suppressed, and lost sample counters. |
 | `/sys/fs/bpf/xdp_gateway/bloom_stats` | Per-stage bloom-hit/LPM-miss counters. |
 | `/sys/fs/bpf/xdp_gateway/svc_stat_map` | Exact per-service clean/drop packet and byte counters, keyed by `dp_id`. |
+| `/sys/fs/bpf/xdp_gateway/node_control` | Node-global soft-bypass flag. |
+| `/sys/fs/bpf/xdp_gateway/bypass_counter` | Exact per-CPU bypass packet and byte totals. |
 
 Use `dpstat` while the loader is running:
 
@@ -210,6 +212,8 @@ sudo ./build/dpstat counters
 sudo ./build/dpstat counters -w 2
 sudo ./build/dpstat tail
 sudo ./build/dpstat rate 256 64
+sudo ./build/dpstat set-bypass 1
+sudo ./build/dpstat set-bypass 0
 ```
 
 Counter maps reset when the XDP program is reloaded. Consumers must compute deltas between reads, not
@@ -240,6 +244,12 @@ and `drop_by_reason`. Provide the ingress ifindex to report the live XDP mode;
 without it, the mode remains `unknown`. If a required pinned map is unavailable,
 `dpstat` reports the gateway as offline and exits non-zero rather than emitting
 a partial snapshot.
+
+The same JSON document includes `node_control.bypass` and
+`bypass.{pkts,bytes}`. `set-bypass 1` makes valid parsed IPv4 traffic redirect
+without entering the service-policy pipeline; it does not forward IPv6,
+malformed IPv4, or fragments. Bypass bytes are counted separately and do not
+increment per-service clean counters.
 
 ## Apply helper (xdpgw-apply)
 

@@ -62,6 +62,21 @@ cd ../control-plane && python -m app.worker
 The data-plane loader must be running and must own the pinned observability
 maps. See the data-plane README for the `dpstat snapshot --json` contract.
 
+## Node-control lane and operator runbook
+
+The worker runs node-control reconciliation as an independent background lane.
+It reasserts the persisted bypass state through `dpstat set-bypass 0|1` without
+waiting for the normal apply backlog. Maintenance keeps service-update jobs
+queued; clearing it wakes reconciliation so queued work can drain.
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `CONTROL_PLANE_WORKER_NODE_CONTROL_ENABLED` | `true` | Enables the bypass reconciliation lane. |
+| `CONTROL_PLANE_WORKER_NODE_CONTROL_INTERVAL_SECONDS` | `1.0` | Sets the desired-bypass assertion interval. |
+
+For engagement, verification, accounting, and exit steps, follow the
+[bypass and maintenance OLA runbook](docs/bypass-maintenance-runbook.md).
+
 ## Billing metering and usage
 
 The worker runs billing metering as an independent background lane. It reuses

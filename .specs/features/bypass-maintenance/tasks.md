@@ -2,7 +2,7 @@
 
 **Design:** `.specs/features/bypass-maintenance/design.md` (AD-032)
 **Spec:** `.specs/features/bypass-maintenance/spec.md` (BYP-01..33)
-**Status:** Draft (2026-07-13) → awaiting approval → Execute
+**Status:** Executed (2026-07-14) — all task commits landed and task-scoped gates pass.
 
 **Baselines (pin live at Execute):** dp `make test` **B_dp** (≥91 + telemetry `svc_stat` additions);
 cp `pytest -q` **B_cp** (≥262 + feed + telemetry); fe Vitest **B_fe** (telemetry shell count).
@@ -68,18 +68,18 @@ Phase 5:
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] `node_control` `ARRAY[1]` (`{__u32 bypass; __u32 _reserved}`) + `bypass_counter` `PERCPU_ARRAY[1]`
+- [x] `node_control` `ARRAY[1]` (`{__u32 bypass; __u32 _reserved}`) + `bypass_counter` `PERCPU_ARRAY[1]`
       (`{__u64 pkts; __u64 bytes}`) defined; `node_control_bypass()` reads the single aligned `__u32`.
-- [ ] `redirect_out_bypass()` sets `verdict=REDIRECT`, `write_test_meta`, `bypass_count(meta)`,
+- [x] `redirect_out_bypass()` sets `verdict=REDIRECT`, `write_test_meta`, `bypass_count(meta)`,
       `bpf_redirect_map(&tx_devmap,0,XDP_DROP)` — does **not** call `svc_stat_clean`.
-- [ ] `ETH_P_IP` branch: after `parse_l4` OK, `if (node_control_bypass()) return redirect_out_bypass(&meta);`
+- [x] `ETH_P_IP` branch: after `parse_l4` OK, `if (node_control_bypass()) return redirect_out_bypass(&meta);`
       before `service_lookup_redirect`; ARP path unchanged.
-- [ ] dp-unit: harness writes `node_control.bypass` via `bpf_map_update_elem` (no new `PKT_TEST_HOOKS`),
+- [x] dp-unit: harness writes `node_control.bypass` via `bpf_map_update_elem` (no new `PKT_TEST_HOOKS`),
       asserting: bypass=1 + would-be-`service_miss` IPv4 → `verdict=REDIRECT` + `bypass_counter` pkts/bytes
       advance + `svc_stat` for that dp_id **unchanged**; bypass=1 does **not** rescue IPv6/malformed/fragment
       (still their drop reasons); bypass=0 → normal `service_lookup_redirect` verdict.
-- [ ] Gate passes: `make test`
-- [ ] Test count: **B_dp + new cases** pass (no silent deletions)
+- [x] Gate passes: `make test`
+- [x] Test count: **B_dp + new cases** pass (no silent deletions)
 
 **Tests:** dp-unit
 **Gate:** quick (`make test`)
@@ -100,13 +100,13 @@ Phase 5:
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] Loader pins both maps (mirrors the pin/unpin/rollback of `active_config`); `seed_node_control` writes
+- [x] Loader pins both maps (mirrors the pin/unpin/rollback of `active_config`); `seed_node_control` writes
       `bypass=0` on load (fresh node = enforcing).
-- [ ] `dpstat set-bypass 0|1` opens the pinned `node_control` and `bpf_map_update_elem(&0,{bypass})`.
-- [ ] `dpstat snapshot --json` emits `"node_control":{"bypass":0|1}` and `"bypass":{"pkts":N,"bytes":N}`
+- [x] `dpstat set-bypass 0|1` opens the pinned `node_control` and `bpf_map_update_elem(&0,{bypass})`.
+- [x] `dpstat snapshot --json` emits `"node_control":{"bypass":0|1}` and `"bypass":{"pkts":N,"bytes":N}`
       (sum the `PERCPU_ARRAY`) — matching the JSON contract T6 parses.
-- [ ] Gate passes: `make bpf skel loader apply dpstat`
-- [ ] `./build/dpstat set-bypass 1` without pinned maps returns the existing friendly not-loaded error.
+- [x] Gate passes: `make bpf skel loader apply dpstat`
+- [x] `./build/dpstat set-bypass 1` without pinned maps returns the existing friendly not-loaded error.
 
 **Tests:** none (build gate; live behavior verified in T3 dp-integration smoke — the DP-established
 loader/tooling → build, smoke → separate privileged task pattern)
@@ -128,10 +128,10 @@ assert `bypass_counter` advanced via `dpstat snapshot`.
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] Smoke: bypass on → undeclared-dst IPv4 delivered `IN→OUT` (verbatim, TTL/csum unchanged); bypass off
+- [x] Smoke: bypass on → undeclared-dst IPv4 delivered `IN→OUT` (verbatim, TTL/csum unchanged); bypass off
       → same frame dropped; `bypass_counter` reflects the forwarded frames.
-- [ ] Gate passes: `make test && sudo make smoke`
-- [ ] Test count: **B_dp** dp-unit still pass; smoke green.
+- [x] Gate passes: `make test && sudo make smoke`
+- [x] Test count: **B_dp** dp-unit still pass; smoke green.
 
 **Tests:** dp-integration
 **Gate:** full (`make test && sudo make smoke`)
@@ -152,14 +152,14 @@ migration `..._00NN_node_control`.
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] `NodeControl`: `id SmallInteger PK CHECK(id=1)`, `bypass_enabled`, `maintenance_enabled`,
+- [x] `NodeControl`: `id SmallInteger PK CHECK(id=1)`, `bypass_enabled`, `maintenance_enabled`,
       `bypass_reason (≤512)`, `bypass_activated_at`, `maintenance_activated_at`, `bypass_actor_user_id`,
       `maintenance_actor_user_id` (FK users SET NULL), timestamps.
-- [ ] Migration up/down reversible; `down_revision` pinned to the then-current head at Execute.
-- [ ] Integration test: singleton constraint (second row with `id≠1` or duplicate rejected), defaults
+- [x] Migration up/down reversible; `down_revision` pinned to the then-current head at Execute.
+- [x] Integration test: singleton constraint (second row with `id≠1` or duplicate rejected), defaults
       (both flags false), FK SET NULL on actor delete.
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: **B_cp + new** pass; `alembic upgrade head` + `downgrade` clean on the test DB.
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: **B_cp + new** pass; `alembic upgrade head` + `downgrade` clean on the test DB.
 
 **Tests:** integration
 **Gate:** full
@@ -180,15 +180,15 @@ dangerous-action audit), `maintenance_active`.
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] `set_bypass(db, actor, enabled, reason, ip)` / `set_maintenance(...)` update the singleton, set/clear
+- [x] `set_bypass(db, actor, enabled, reason, ip)` / `set_maintenance(...)` update the singleton, set/clear
       `*_activated_at`, write `record_event(action="node.bypass.enabled|disabled" / "node.maintenance.*")`.
-- [ ] Idempotent: toggling to the current state is a no-op (no row change, **no second audit**) — BYP-07.
-- [ ] `maintenance_active(db) -> bool` for the worker gate.
-- [ ] Integration test: enable/disable each writes exactly one audit event with the right action/outcome;
+- [x] Idempotent: toggling to the current state is a no-op (no row change, **no second audit**) — BYP-07.
+- [x] `maintenance_active(db) -> bool` for the worker gate.
+- [x] Integration test: enable/disable each writes exactly one audit event with the right action/outcome;
       idempotent re-toggle writes none; `activated_at` set on enable, cleared on disable; audit rows are
       queryable (BYP-31).
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: **B_cp + new** pass.
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: **B_cp + new** pass.
 
 **Tests:** integration
 **Gate:** full
@@ -209,11 +209,11 @@ parsed from the dpstat `node_control`/`bypass` JSON block; keep `FakeTelemetryRe
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] `from_dict` parses `node_control.bypass` (→ `bypass_active`) + `bypass.{pkts,bytes}`; `to_dict`
+- [x] `from_dict` parses `node_control.bypass` (→ `bypass_active`) + `bypass.{pkts,bytes}`; `to_dict`
       round-trips; missing block tolerated (defaults) for backward compat.
-- [ ] Unit test: round-trip a snapshot with/without the bypass block; asserts `bypass_active` + counters.
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
-- [ ] Test count: **new unit cases** pass (no silent deletions).
+- [x] Unit test: round-trip a snapshot with/without the bypass block; asserts `bypass_active` + counters.
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
+- [x] Test count: **new unit cases** pass (no silent deletions).
 
 **Tests:** unit
 **Gate:** quick
@@ -236,16 +236,16 @@ parsed from the dpstat `node_control`/`bypass` JSON block; keep `FakeTelemetryRe
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] `POST /node/bypass {enabled, reason?}` / `POST /node/maintenance {enabled}` → `set_*`, admin-only;
+- [x] `POST /node/bypass {enabled, reason?}` / `POST /node/maintenance {enabled}` → `set_*`, admin-only;
       non-admin → 403; `reason>512` → 422.
-- [ ] `GET /node/health` returns `bypass`/`maintenance` blocks each with `desired`, `effective`,
+- [x] `GET /node/health` returns `bypass`/`maintenance` blocks each with `desired`, `effective`,
       `activated_at`, `active_seconds`, plus XDP mode / slot / version / bypass counter from the reader;
       `desired≠effective` visible when the reader reports offline (BYP-26).
-- [ ] Independence (BYP-24): both blocks reported independently.
-- [ ] Integration test (AsyncClient): admin toggle+read happy path; 403 non-admin; 422 long reason;
+- [x] Independence (BYP-24): both blocks reported independently.
+- [x] Integration test (AsyncClient): admin toggle+read happy path; 403 non-admin; 422 long reason;
       desired-vs-effective drift via an injected `FakeTelemetryReader`.
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: **B_cp + new** pass.
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: **B_cp + new** pass.
 
 **Tests:** integration
 **Gate:** full
@@ -267,13 +267,13 @@ supersession.
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] With maintenance on, a popped/reconciled `SERVICE_UPDATE` job is **not** dispatched — stays `queued`
+- [x] With maintenance on, a popped/reconciled `SERVICE_UPDATE` job is **not** dispatched — stays `queued`
       (no `mark_applying`); `apply_status` reflects `queued`.
-- [ ] With maintenance off, the same backlog drains and applies (latest per service, version-guarded).
-- [ ] Integration test (`committed_db`, injected applier): maintenance on → job holds `queued`, mutation
+- [x] With maintenance off, the same backlog drains and applies (latest per service, version-guarded).
+- [x] Integration test (`committed_db`, injected applier): maintenance on → job holds `queued`, mutation
       still enqueues; maintenance off → drains to `active`; superseded older job no-ops.
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: **B_cp + new** pass.
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: **B_cp + new** pass.
 
 **Tests:** integration
 **Gate:** full
@@ -298,18 +298,18 @@ subprocess-exec pattern (for `DpstatBypassWriter`); `Settings` `worker_*` + `wor
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] `reconcile_once`: bypass desired≠asserted → `writer.set(bypass)`; not-loaded/error leaves effective
+- [x] `reconcile_once`: bypass desired≠asserted → `writer.set(bypass)`; not-loaded/error leaves effective
       unknown (drift visible); maintenance-clear edge → `on_maintenance_cleared` kicks a reconcile.
-- [ ] `run_loop(stop)` ticks every `worker_node_control_interval_seconds` (default 1.0), catch-log-continue;
+- [x] `run_loop(stop)` ticks every `worker_node_control_interval_seconds` (default 1.0), catch-log-continue;
       spawned as a standalone task in `Worker.run` (independent of the BRPOP/`process_job` loop → jumps the
       backlog), cancelled/awaited in `finally`.
-- [ ] Restart re-asserts bypass from the persisted `NodeControl` row (BYP-05).
-- [ ] `worker_node_control_enabled=True`, `worker_node_control_interval_seconds=1.0` in `Settings`.
-- [ ] Integration test (`committed_db`, `FakeBypassWriter`): bypass on → writer called with 1; row off →
+- [x] Restart re-asserts bypass from the persisted `NodeControl` row (BYP-05).
+- [x] `worker_node_control_enabled=True`, `worker_node_control_interval_seconds=1.0` in `Settings`.
+- [x] Integration test (`committed_db`, `FakeBypassWriter`): bypass on → writer called with 1; row off →
       writer called with 0; restart re-assert; maintenance-clear → kick fires; independence from the apply
       loop (a blocked applier does not delay a bypass assert).
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: **B_cp + new** pass.
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: **B_cp + new** pass.
 
 **Tests:** integration
 **Gate:** full
@@ -329,11 +329,11 @@ critical "BYPASS ACTIVE" banner + a "MAINTENANCE" indicator on every route.
 **Tools:** Skill `coding-guidelines`. No MCP.
 
 **Done when:**
-- [ ] Banner shows when `bypass.effective` (critical style) and a "MAINTENANCE" indicator when
+- [x] Banner shows when `bypass.effective` (critical style) and a "MAINTENANCE" indicator when
       `maintenance.effective`, on every route; reflects state within the 2 s poll.
-- [ ] Vitest: banner renders/clears from mocked `/node/health` states via the typed client.
-- [ ] Gate passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build`
-- [ ] Test count: **B_fe + new** pass.
+- [x] Vitest: banner renders/clears from mocked `/node/health` states via the typed client.
+- [x] Gate passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build`
+- [x] Test count: **B_fe + new** pass.
 
 **Tests:** fe
 **Gate:** fe
@@ -355,11 +355,11 @@ runbook doc.
 **Tools:** Skill `docs-writer`. No MCP.
 
 **Done when:**
-- [ ] TESTING.md: bypass dp-unit seam (harness writes `node_control`), `set-bypass`/snapshot-bypass, the
+- [x] TESTING.md: bypass dp-unit seam (harness writes `node_control`), `set-bypass`/snapshot-bypass, the
       node-control reconcile lane + maintenance-gate test conventions.
-- [ ] OLA runbook: engage/exit bypass + maintenance, bypass-counted-separately/chargeback note, restart
+- [x] OLA runbook: engage/exit bypass + maintenance, bypass-counted-separately/chargeback note, restart
       survival.
-- [ ] Gate: docs render; no code gate.
+- [x] Gate: docs render; no code gate.
 
 **Tests:** none
 **Gate:** none (docs)
