@@ -20,6 +20,10 @@ from app.worker.feed_coordinator import FeedCoordinator, FeedFetchCompletion
 from app.worker.feed_runner import FeedRunner
 from app.worker.feed_scheduler import enqueue_due_feed_syncs
 from app.worker.handlers import configure_feed_runner
+from app.worker.node_control_reconciler import (
+    DpstatBypassWriter,
+    NodeControlReconciler,
+)
 from app.worker.processor import claim_job, process_job, reconcile_once
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,10 @@ class TelemetryLane(Protocol):
 
 
 class BillingLane(Protocol):
+    async def run_loop(self, stop: asyncio.Event) -> None: ...
+
+
+class NodeControlLane(Protocol):
     async def run_loop(self, stop: asyncio.Event) -> None: ...
 
 
@@ -44,6 +52,7 @@ class Worker:
         feed_runner: FeedRunner | None = None,
         telemetry: TelemetryLane | None = None,
         billing: BillingLane | None = None,
+        node_control: NodeControlLane | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
@@ -52,6 +61,8 @@ class Worker:
         self.feed_runner = feed_runner
         self.telemetry = telemetry
         self.billing = billing
+        self.node_control = node_control
+        self._reconcile_requested = asyncio.Event()
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         stop_event = stop or asyncio.Event()
@@ -63,6 +74,18 @@ class Worker:
         )
         if self.feed_runner is not None:
             configure_feed_runner(self.feed_runner)
+        self._reconcile_requested.clear()
+        node_control = self.node_control
+        if node_control is None and self.settings.worker_node_control_enabled:
+            node_control = NodeControlReconciler(
+                session_factory=self.session_factory,
+                writer=DpstatBypassWriter(
+                    binary=self.settings.worker_telemetry_binary_path,
+                    timeout_seconds=self.settings.worker_telemetry_timeout_seconds,
+                ),
+                interval_seconds=self.settings.worker_node_control_interval_seconds,
+                on_maintenance_cleared=self._reconcile_requested.set,
+            )
         telemetry_task = (
             asyncio.create_task(self.telemetry.run_loop(stop_event))
             if self.telemetry is not None
@@ -71,6 +94,11 @@ class Worker:
         billing_task = (
             asyncio.create_task(self.billing.run_loop(stop_event))
             if self.billing is not None
+            else None
+        )
+        node_control_task = (
+            asyncio.create_task(node_control.run_loop(stop_event))
+            if node_control is not None
             else None
         )
         inflight: asyncio.Task[object] | None = None
@@ -88,6 +116,7 @@ class Worker:
                 "backoff_max_seconds": self.settings.worker_backoff_max_seconds,
                 "telemetry_enabled": self.telemetry is not None,
                 "billing_enabled": self.billing is not None,
+                "node_control_enabled": node_control is not None,
             },
         )
 
@@ -221,7 +250,13 @@ class Worker:
                     inflight = None
                     continue
 
-                if asyncio.get_running_loop().time() < next_reconcile:
+                reconciliation_requested = self._reconcile_requested.is_set()
+                if reconciliation_requested:
+                    self._reconcile_requested.clear()
+                if (
+                    asyncio.get_running_loop().time() < next_reconcile
+                    and not reconciliation_requested
+                ):
                     continue
                 backoff = await self._schedule_due_feeds(
                     stop_event,
@@ -254,6 +289,7 @@ class Worker:
             try:
                 await self._finish_background_lane(telemetry_task)
                 await self._finish_background_lane(billing_task)
+                await self._finish_background_lane(node_control_task)
                 await self._finish_inflight(
                     feed_coordinator.inflight_task if feed_coordinator is not None else None
                 )
@@ -374,18 +410,33 @@ class Worker:
     async def _wait_for_pop(self, stop: asyncio.Event) -> uuid.UUID | None:
         pop_task = asyncio.create_task(self._brpop())
         stop_task = asyncio.create_task(stop.wait())
+        reconcile_task = asyncio.create_task(self._reconcile_requested.wait())
         done, _ = await asyncio.wait(
-            {pop_task, stop_task},
+            {pop_task, stop_task, reconcile_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         if stop_task in done:
             if not pop_task.done():
                 pop_task.cancel()
                 await self._discard_cancelled(pop_task)
+            if not reconcile_task.done():
+                reconcile_task.cancel()
+                await self._discard_cancelled(reconcile_task)
+            return None
+
+        if reconcile_task in done:
+            if not pop_task.done():
+                pop_task.cancel()
+                await self._discard_cancelled(pop_task)
+            if not stop_task.done():
+                stop_task.cancel()
+                await self._discard_cancelled(stop_task)
             return None
 
         stop_task.cancel()
         await self._discard_cancelled(stop_task)
+        reconcile_task.cancel()
+        await self._discard_cancelled(reconcile_task)
         return await pop_task
 
     async def _wait_for_work(
