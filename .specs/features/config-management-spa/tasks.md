@@ -94,8 +94,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-04, CFG-06, D-034-1
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `Dialog` traps focus + Esc/overlay close (Radix); `ConfirmDialog` takes `tone`/`confirmLabel`/`onConfirm`; `Toaster` uses `aria-live`; `useToast()` API stable
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests (focus trap, confirm callback, toast announce), total monotonic
+- [x] `Dialog` traps focus + Esc/overlay close (Radix); `ConfirmDialog` takes `tone`/`confirmLabel`/`onConfirm`; `Toaster` uses `aria-live`; `useToast()` API stable
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests (focus trap, confirm callback, toast announce), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add overlay and navigation UI primitives`
 > Granularity: cohesive family (justified, not split).
