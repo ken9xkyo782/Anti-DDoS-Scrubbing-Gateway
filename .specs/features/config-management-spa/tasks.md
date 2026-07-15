@@ -142,9 +142,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-03, D-034-4
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Polls every 1s while `apply_status ∈ {pending,queued,applying}`, stops at `active|failed`; after 30s emits `takingLonger` + slows to 5s; never fabricates `active`
-- [ ] `ApplyStatusIndicator` shows count of in-flight applies; hidden at zero
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (fake-timer state machine: settle-to-active, settle-to-failed, soft-timeout), total monotonic
+- [x] Polls every 1s while `apply_status ∈ {pending,queued,applying}`, stops at `active|failed`; after 30s emits `takingLonger` + slows to 5s; never fabricates `active`
+- [x] `ApplyStatusIndicator` shows count of in-flight applies; hidden at zero
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (fake-timer state machine: settle-to-active, settle-to-failed, soft-timeout), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add async apply-status hook and indicator`
 
