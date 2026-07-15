@@ -285,9 +285,44 @@
   (granularity, diagram↔deps, test co-location). Tools: `coding-guidelines` code, `docs-writer` T12, no MCPs.
   Baselines pinned live at Execute (`B_cp`≥507, `B_fe`≥34). Next: **approve tasks → Execute**
 
-**SLA/OLA reporting & audit** - PLANNED
-- Per-tenant periodic SLA report (met/missed per dimension) tied to `BillingUsage`
-- Audit log for service/rule/list/feed/user + dangerous admin actions
+**SLA/OLA reporting & audit** - IN PROGRESS (spec + context drafted; awaiting approval → Design)
+- Worker-side lane materializes a per-tenant, per-period **SLA report** (met/missed per dimension, open→final
+  immutable, tied to the `BillingUsage` UTC-month period) + an admin **OLA** operational summary — reads only
+  already-persisted evidence, **zero hot-path change, no new DP surface/counter, no fabricated numbers**
+- Dimensions (measurable-only): committed-clean-bandwidth honored (from persisted fairness-breach `Alert`
+  durations), billing/chargeback (`BillingUsage`), + OLA apply-reliability (`AgentJob failed`)/feed-health
+  (`FeedSyncRun`)/bypass-maintenance windows (`AuditEvent`+`NodeControl`); Availability + added-latency-p99
+  disclosed **best-effort, not scored** (AD-007 / A-TEL-8); absent source → `insufficient_data`
+- Audit **read/query/export** surface (admin-only) over the **already-complete** write path (41 `record_event`
+  sites; `AuditEvent` has no `tenant_id` → admin-only, tenant self-audit deferred); no write-path change
+- Spec `spec.md` (SLA-01..36; P1=01..27 MVP, P2=28..33, P3=34..36); context `context.md` (D-SLA-1..4, A-SLA-1..8)
+- 4 gray areas resolved (AskUserQuestion): **D-SLA-1** worker lane → immutable `open`→`final` period rows ·
+  **D-SLA-2** measurable-only dimensions from persisted evidence (best-effort exclusions never fabricated) ·
+  **D-SLA-3** admin-only audit read/query/export, no write-path change · **D-SLA-4** API + export + P2 SPA
+  panel, SLA (tenant) vs OLA (admin) split, no auto-email in v1
+- **Execute readiness:** all evidence sources present in-tree (`BillingUsage`/`_0009`, `NodeControl`/`_0010`,
+  Alerting models/`_0011`) → **no hard external gate**; committed-honored soft-coordinates on *Alerting*'s
+  fairness-breach `Alert` rows (degrades to `insufficient_data` until present). New models + migration `_0012`
+  (after `_0011_alerting`). Reuses M1 RBAC/`AuditEvent`/`scrub_metadata`, `billing_period.py` UTC-month,
+  billing/telemetry export+retention patterns, M5 SPA shell (P2)
+
+---
+
+## Frontend / operability (cross-cutting, no backend milestone gate)
+
+**Goal:** Make the Pilot fully operable from the SPA — configuration management, not just observability. Surfaces the already-shipped M1/M4/M6 APIs; pure frontend.
+
+### Features
+
+**Configuration management SPA (admin & tenant)** - SPEC + DESIGN + TASKS DRAFTED (AD-034; awaiting approval → Execute)
+- Closes the deferred *"Config CRUD screens in the SPA"* effort (telemetry-dashboards `D-TEL-2` punt) on top of the existing, tested APIs; **pure frontend, zero new backend endpoint/model/migration**
+- Tenant self-service (P1): services, allow-rules, whitelist/VIP, service blacklist — all ownership-guarded (`load_service_for_principal`); every mutation surfaces the async apply lifecycle (`pending→queued→applying→active|failed`) + `version`/`active_version`, never implying instant application
+- Admin console (P2): tenants/users, CIDR allocation, service oversight + **admin-only** plan sizing (`PATCH /services/{id}/plan`), threat feeds + global blacklist, alert rules/channels + test-send, node bypass/maintenance
+- Account change-password + admin apply/job backlog (P3)
+- Spec `spec.md` (CFG-01..53; P1=01..24 MVP, P2=25..50, P3=51..53). **No backend milestone gate** — P1 buildable today; P2 alerting/node-control stories **soft-depend** on M6 *Alerting* + *Bypass & maintenance* executed (their config/control endpoints must exist)
+- Design `design.md` (**AD-034**) + 2 rendered diagrams (`diagrams/config-architecture.{mmd,svg}`, `diagrams/apply-status-ux.{mmd,svg}`). **UI/UX directive:** the SPA has **zero CSS today** → the design introduces a real design system. Key decisions: **D-034-1** unified **`radix-ui`** (React 19-verified) + **CSS Modules** + **CSS-variable tokens** (light+dark) · **D-034-2** rebuild the shell (Sidebar+Topbar) app-wide, rehome+base-restyle existing observability panels (visual-only, tests stay green) · **D-034-3** enhance `apiClient` to parse FastAPI `{detail}` → inline field errors · **D-034-4** async-apply UX = `useApplyStatus` (1 s poll while non-terminal, 30 s soft-timeout) + StatusBadge + toasts + Topbar indicator · **D-034-5** dep-free forms (no RHF/zod) · **D-034-6** Sidebar IA (Overview/Manage[role]/Observe) + service-detail Radix Tabs · **D-034-7** tenant plan display-only, admin plan-at-create · **D-034-8** zero backend change (missing endpoint → SPEC_DEVIATION) · **D-034-9** dual-theme tokens · **D-034-10** Vitest primitives+screens, keep existing tests green. All 53 reqs mapped to components
+- Tasks `tasks.md` (T1–T19; all 53 reqs mapped; single **frontend** track, all **fe-unit**/**fe** gate): **T1** tokens+base+theme+`radix-ui` dep · **T2/T3/T4** primitive families (form / overlay-nav / data-display) · **T5** `[P]` apiClient `{detail}` parse + DTO types · **T6** `useApplyStatus`+indicator · **T7** app-shell rebuild (Sidebar/Topbar/role-routing) · **T8** `[P]` tenant resource hooks · **T9→T10→T11** tenant services/rules/lists (P1 demoable slice) · **T12/T13/T14/T15/T16/T17** `[P]` admin console pages (tenants+users, allocations, services+plan, feeds+global-BL, alerting, node) · **T18** `[P]` account+job-backlog (P3) · **T19** `[P]` docs. All 3 pre-approval checks pass (granularity — T2/T3/T4/T7 flagged cohesive-not-split; diagram↔`Depends on`; test co-location = fe-unit everywhere). Endpoints for P2 (`/alerts/*`, `/node/*`) verified present in-tree → admin screens buildable now. `B_fe`=Vitest head total (≥34) pinned live at Execute. Tools: `coding-guidelines` (code), `docs-writer` (T19), no MCPs
+- Reuses the M5 SPA (Vite+React 19+TS, TanStack Query, `AuthContext`/`ProtectedRoute`, `apiClient`, `theme/thresholds.ts` severity colors); `AppLayout`→`AppShell`; extends, does not fork
 
 ---
 
