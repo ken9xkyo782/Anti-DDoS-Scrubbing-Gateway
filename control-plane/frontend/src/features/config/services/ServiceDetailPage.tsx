@@ -12,6 +12,8 @@ import {
 import { useService } from '../../../hooks/resources/useServices'
 import { useApplyStatus } from '../../../hooks/useApplyStatus'
 import { RulesTab } from './RulesTab'
+import { WhitelistTab } from './WhitelistTab'
+import { BlacklistTab } from './BlacklistTab'
 
 export function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -172,25 +174,11 @@ export function ServiceDetailPage() {
         </Tabs.Content>
 
         <Tabs.Content value="whitelist">
-          <Card>
-            <CardHeader>
-              <CardTitle>Whitelist / VIP bypass entries</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p style={{ color: 'var(--text-muted)' }}>Whitelist management is coming soon.</p>
-            </CardContent>
-          </Card>
+          <WhitelistTab serviceId={service.id} service={service} />
         </Tabs.Content>
 
         <Tabs.Content value="blacklist">
-          <Card>
-            <CardHeader>
-              <CardTitle>Blacklist / Block entries</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p style={{ color: 'var(--text-muted)' }}>Blacklist management is coming soon.</p>
-            </CardContent>
-          </Card>
+          <BlacklistTab serviceId={service.id} />
         </Tabs.Content>
       </Tabs.Root>
     </div>
