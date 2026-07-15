@@ -174,8 +174,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-07..24 (data path), D-034-3
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `useServices` (list/get/create/patch/enable/disable/delete), `useRules` (list/create/patch/delete/overlap-check), `useLists` (whitelist+blacklist list/add/remove); mutations invalidate the right query keys and surface `ApiError`
-- [ ] Gate passes: `fe`; adds ≥6 fe-unit tests (invalidation + error passthrough per hook), total monotonic
+- [x] `useServices` (list/get/create/patch/enable/disable/delete), `useRules` (list/create/patch/delete/overlap-check), `useLists` (whitelist+blacklist list/add/remove); mutations invalidate the right query keys and surface `ApiError`
+- [x] Gate passes: `fe`; adds ≥6 fe-unit tests (invalidation + error passthrough per hook), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add tenant resource query/mutation hooks`
 
