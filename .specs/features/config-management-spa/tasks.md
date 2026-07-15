@@ -235,8 +235,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-25..29
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Tenants list/create/patch/delete(confirm)/suspend/reactivate; Users list/create/patch/delete(confirm)/reset-password with role+tenant assignment; blocking API errors (revoke-in-use etc.) surfaced
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
+- [x] Tenants list/create/patch/delete(confirm)/suspend/reactivate; Users list/create/patch/delete(confirm)/reset-password with role+tenant assignment; blocking API errors (revoke-in-use etc.) surfaced
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin tenant and user management`
 
