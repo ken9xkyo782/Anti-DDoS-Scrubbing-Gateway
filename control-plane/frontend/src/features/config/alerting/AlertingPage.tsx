@@ -27,6 +27,10 @@ import {
 import type {
   AlertRuleResponse,
   NotificationChannelResponse,
+  NotificationChannelRequest,
+  AlertChannelTestResponse,
+  WebhookChannelConfig,
+  EmailChannelConfig,
   ChannelKind,
   AlertSeverity,
 } from '../../../api/types'
@@ -49,8 +53,10 @@ export function AlertingPage() {
   } | null>(null)
 
   const createChannelMutation = useCreateNotificationChannel()
+  const updateChannelMutation = useUpdateNotificationChannel(editingChannel?.id ?? '')
+  const deleteChannelMutation = useDeleteNotificationChannel(deletingChannel?.id ?? '')
 
-  const handleCreateChannelSubmit = async (payload: any) => {
+  const handleCreateChannelSubmit = async (payload: NotificationChannelRequest) => {
     await createChannelMutation.mutateAsync(payload)
     toast({ title: 'Notification channel created successfully', variant: 'success' })
     setIsCreateChannelOpen(false)
@@ -58,9 +64,8 @@ export function AlertingPage() {
 
   const handleDeleteChannel = async () => {
     if (!deletingChannel) return
-    const deleteMutation = useDeleteNotificationChannel(deletingChannel.id)
     try {
-      await deleteMutation.mutateAsync()
+      await deleteChannelMutation.mutateAsync()
       toast({ title: 'Notification channel deleted successfully', variant: 'success' })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An unknown error occurred'
@@ -223,18 +228,20 @@ export function AlertingPage() {
                     header: 'Configuration',
                     render: (channel) => {
                       if (channel.kind === 'webhook') {
+                        const cfg = channel.config as WebhookChannelConfig
                         return (
                           <span style={{ fontSize: '12px', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                            URL: {channel.config.url}
+                            URL: {cfg.url}
                           </span>
                         )
                       } else {
+                        const cfg = channel.config as EmailChannelConfig
                         return (
                           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                            <div>Host: {channel.config.smtp_host}</div>
-                            <div>From: {channel.config.from}</div>
+                            <div>Host: {cfg.smtp_host}</div>
+                            <div>From: {cfg.from}</div>
                             <div style={{ wordBreak: 'break-all' }}>
-                              To: {Array.isArray(channel.config.to) ? channel.config.to.join(', ') : ''}
+                              To: {Array.isArray(cfg.to) ? cfg.to.join(', ') : ''}
                             </div>
                           </div>
                         )
@@ -261,30 +268,23 @@ export function AlertingPage() {
                     channel={channel}
                     onEdit={setEditingChannel}
                     onDelete={setDeletingChannel}
-                    onTest={async (id) => {
-                      setTestingStatus({ channelId: id, state: 'loading' })
-                      try {
-                        const testMutation = useTestNotificationChannel(id)
-                        const result = await testMutation.mutateAsync()
-                        if (result.state === 'success') {
-                          setTestingStatus({ channelId: id, state: 'success' })
-                          toast({ title: 'Test notification sent successfully!', variant: 'success' })
-                        } else {
-                          setTestingStatus({
-                            channelId: id,
-                            state: 'error',
-                            errorMsg: result.error || 'Unknown dispatch error',
-                          })
-                          toast({
-                            title: 'Failed to send test notification',
-                            description: result.error || undefined,
-                            variant: 'error',
-                          })
-                        }
-                      } catch (err) {
-                        const msg = err instanceof Error ? err.message : 'Unknown network error'
+                    onTestStart={(id) => setTestingStatus({ channelId: id, state: 'loading' })}
+                    onTestResult={(id, result, error) => {
+                      if (error) {
+                        const msg = error instanceof Error ? error.message : 'Unknown network error'
                         setTestingStatus({ channelId: id, state: 'error', errorMsg: msg })
                         toast({ title: 'Failed to send test notification', description: msg, variant: 'error' })
+                      } else if (result && result.state === 'success') {
+                        setTestingStatus({ channelId: id, state: 'success' })
+                        toast({ title: 'Test notification sent successfully!', variant: 'success' })
+                      } else {
+                        const errorMsg = result?.error || 'Unknown dispatch error'
+                        setTestingStatus({ channelId: id, state: 'error', errorMsg })
+                        toast({
+                          title: 'Failed to send test notification',
+                          description: result?.error || undefined,
+                          variant: 'error',
+                        })
                       }
                     }}
                   />
@@ -332,8 +332,7 @@ export function AlertingPage() {
           <ChannelForm
             channel={editingChannel}
             onSubmit={async (payload) => {
-              const updateMutation = useUpdateNotificationChannel(editingChannel.id)
-              await updateMutation.mutateAsync(payload)
+              await updateChannelMutation.mutateAsync(payload)
               toast({ title: 'Notification channel updated successfully', variant: 'success' })
               setEditingChannel(null)
             }}
@@ -362,16 +361,22 @@ interface ChannelRowActionsProps {
   channel: NotificationChannelResponse
   onEdit: (channel: NotificationChannelResponse) => void
   onDelete: (channel: NotificationChannelResponse) => void
-  onTest: (id: string) => void
+  onTestStart: (id: string) => void
+  onTestResult: (id: string, result: AlertChannelTestResponse | null, error: unknown) => void
 }
 
-function ChannelRowActions({ channel, onEdit, onDelete, onTest }: ChannelRowActionsProps) {
+function ChannelRowActions({ channel, onEdit, onDelete, onTestStart, onTestResult }: ChannelRowActionsProps) {
+  const testMutation = useTestNotificationChannel(channel.id)
   const [isTesting, setIsTesting] = useState(false)
 
   const handleTest = async () => {
     setIsTesting(true)
+    onTestStart(channel.id)
     try {
-      await onTest(channel.id)
+      const result = await testMutation.mutateAsync()
+      onTestResult(channel.id, result, null)
+    } catch (err) {
+      onTestResult(channel.id, null, err)
     } finally {
       setIsTesting(false)
     }
@@ -545,7 +550,7 @@ function RuleForm({ rule, onCancel }: RuleFormProps) {
 
 interface ChannelFormProps {
   channel?: NotificationChannelResponse
-  onSubmit: (payload: any) => Promise<void>
+  onSubmit: (payload: NotificationChannelRequest) => Promise<void>
   onCancel: () => void
 }
 
@@ -555,13 +560,15 @@ function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
   const [enabled, setEnabled] = useState(channel?.enabled ?? true)
   const [minSeverity, setMinSeverity] = useState<AlertSeverity>(channel?.min_severity ?? 'info')
 
-  // Config values
-  const [webhookUrl, setWebhookUrl] = useState(channel?.kind === 'webhook' ? channel.config.url ?? '' : '')
-  const [smtpHost, setSmtpHost] = useState(channel?.kind === 'email' ? channel.config.smtp_host ?? '' : '')
-  const [smtpFrom, setSmtpFrom] = useState(channel?.kind === 'email' ? channel.config.from ?? '' : '')
+  // Config values (config is Record<string, unknown>; narrow by channel kind).
+  const webhookCfg = (channel?.config ?? {}) as WebhookChannelConfig
+  const emailCfg = (channel?.config ?? {}) as EmailChannelConfig
+  const [webhookUrl, setWebhookUrl] = useState(channel?.kind === 'webhook' ? webhookCfg.url ?? '' : '')
+  const [smtpHost, setSmtpHost] = useState(channel?.kind === 'email' ? emailCfg.smtp_host ?? '' : '')
+  const [smtpFrom, setSmtpFrom] = useState(channel?.kind === 'email' ? emailCfg.from ?? '' : '')
   const [smtpTo, setSmtpTo] = useState(
-    channel?.kind === 'email' && Array.isArray(channel.config.to)
-      ? channel.config.to.join(', ')
+    channel?.kind === 'email' && Array.isArray(emailCfg.to)
+      ? emailCfg.to.join(', ')
       : ''
   )
 
@@ -584,7 +591,7 @@ function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
       nextErrors.name = 'Channel name is required'
     }
 
-    const config: Record<string, any> = {}
+    const config: Record<string, unknown> = {}
 
     if (kind === 'webhook') {
       if (!webhookUrl.trim()) {
@@ -620,7 +627,7 @@ function ChannelForm({ channel, onSubmit, onCancel }: ChannelFormProps) {
 
     setIsSubmitting(true)
     try {
-      const payload: any = {
+      const payload: NotificationChannelRequest = {
         name: name.trim(),
         kind,
         enabled,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useAuth } from '../../../auth/AuthContext'
 import {
   DataTable,
@@ -85,26 +85,22 @@ function AdminAllocationsView() {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [revokingAllocation, setRevokingAllocation] = useState<AllocationResponse | null>(null)
 
-  // Auto-select first tenant when loaded
-  useEffect(() => {
-    if (tenants.length > 0 && !selectedTenantId) {
-      setSelectedTenantId(tenants[0].id)
-    }
-  }, [tenants, selectedTenantId])
+  // Default to the first tenant until the admin picks one (derived, not stored).
+  const effectiveTenantId = selectedTenantId || (tenants[0]?.id ?? '')
 
   const {
     data: usageRows = [],
     isLoading: isLoadingAllocations,
     error: allocationsError,
-  } = useAllocations(selectedTenantId || null)
+  } = useAllocations(effectiveTenantId || null)
 
   const createMutation = useCreateAllocation()
-  const revokeMutation = useRevokeAllocation(revokingAllocation?.id ?? '', selectedTenantId || null)
+  const revokeMutation = useRevokeAllocation(revokingAllocation?.id ?? '', effectiveTenantId || null)
 
   const handleCreateSubmit = async (payload: { cidr: string }) => {
-    if (!selectedTenantId) return
+    if (!effectiveTenantId) return
     await createMutation.mutateAsync({
-      tenant_id: selectedTenantId,
+      tenant_id: effectiveTenantId,
       cidr: payload.cidr,
     })
     toast({ title: 'CIDR allocated successfully', variant: 'success' })
@@ -119,9 +115,11 @@ function AdminAllocationsView() {
     } catch (err) {
       let message = err instanceof Error ? err.message : 'An unknown error occurred'
       if (err instanceof ApiError && err.status === 409 && err.detail && typeof err.detail === 'object') {
-        const detailObj = err.detail as any
-        if ('blockers' in detailObj && Array.isArray(detailObj.blockers)) {
-          const serviceNames = detailObj.blockers.map((b: string) => b.replace('protected_service:', ''))
+        const detailObj = err.detail as { blockers?: unknown }
+        if (Array.isArray(detailObj.blockers)) {
+          const serviceNames = (detailObj.blockers as string[]).map((b) =>
+            b.replace('protected_service:', ''),
+          )
           message = `Allocation is still in use by service(s): ${serviceNames.join(', ')}`
         }
       }
@@ -135,7 +133,7 @@ function AdminAllocationsView() {
     }
   }
 
-  const selectedTenant = tenants.find((t) => t.id === selectedTenantId)
+  const selectedTenant = tenants.find((t) => t.id === effectiveTenantId)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', padding: 'var(--space-6)' }}>
@@ -143,7 +141,7 @@ function AdminAllocationsView() {
         title="CIDR Allocations"
         description="Manage IP/CIDR address space allocations for tenant organizations."
         actions={
-          selectedTenantId &&
+          effectiveTenantId &&
           usageRows.length > 0 && (
             <Button variant="primary" onClick={() => setIsCreateOpen(true)} data-testid="allocate-btn">
               Allocate CIDR
@@ -158,7 +156,7 @@ function AdminAllocationsView() {
         </label>
         <Select
           id="tenant-select"
-          value={selectedTenantId}
+          value={effectiveTenantId}
           onValueChange={setSelectedTenantId}
           options={tenants.map((t) => ({ value: t.id, label: t.name }))}
           placeholder={isLoadingTenants ? 'Loading tenants...' : 'Select a tenant...'}
@@ -166,7 +164,7 @@ function AdminAllocationsView() {
         />
       </div>
 
-      {!selectedTenantId ? (
+      {!effectiveTenantId ? (
         <EmptyState
           title="No tenant selected"
           description="Please select a tenant from the dropdown above to view and manage their CIDR allocations."

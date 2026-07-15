@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Button, Field, Input, Select } from '../../../ui'
 import { ApiError, fieldErrorsFrom422 } from '../../../api/client'
 import { useTenants } from '../../../hooks/resources/useTenants'
@@ -30,11 +30,12 @@ export function UserForm({ user, onSubmit, onCancel, isSubmitting = false }: Use
   const isEdit = !!user
 
   // Reset tenant selection when role changes to admin
-  useEffect(() => {
-    if (role === 'admin') {
+  const handleRoleChange = (nextRole: Role) => {
+    setRole(nextRole)
+    if (nextRole === 'admin') {
       setTenantId('')
     }
-  }, [role])
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -133,7 +134,7 @@ export function UserForm({ user, onSubmit, onCancel, isSubmitting = false }: Use
         <Select
           options={roleOptions}
           value={role}
-          onValueChange={(val) => setRole(val as Role)}
+          onValueChange={(val) => handleRoleChange(val as Role)}
           disabled={isSubmitting}
           aria-label="Role"
         />

@@ -20,21 +20,21 @@ export function AllocationForm({ onSubmit, onCancel, isSubmitting = false }: All
   const checkOverlapMutation = useCheckOverlap()
 
   useEffect(() => {
-    if (!cidr.trim() || cidr.length < 5) {
-      setOverlapWarning(null)
-      return
-    }
-
+    const trimmed = cidr.trim()
     const timer = setTimeout(async () => {
+      if (!trimmed || trimmed.length < 5) {
+        setOverlapWarning(null)
+        return
+      }
       setIsCheckingOverlap(true)
       setOverlapWarning(null)
       try {
-        const res = await checkOverlapMutation.mutateAsync({ cidr: cidr.trim() })
+        const res = await checkOverlapMutation.mutateAsync({ cidr: trimmed })
         if (res.overlaps && res.conflicts.length > 0) {
-          const conflictsStr = res.conflicts.map(c => c.cidr).join(', ')
+          const conflictsStr = res.conflicts.map((c) => c.cidr).join(', ')
           setOverlapWarning(`Warning: CIDR overlaps with existing active allocations: ${conflictsStr}`)
         }
-      } catch (err) {
+      } catch {
         // Ignore invalid CIDR inputs in background overlap checking
       } finally {
         setIsCheckingOverlap(false)
