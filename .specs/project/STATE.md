@@ -1,8 +1,155 @@
 # State
 
-**Last Updated:** 2026-07-14
+**Last Updated:** 2026-07-15
 
-**Current Work (authoritative update):** M6 #2 → **Alerting** — **SPEC + CONTEXT
+**Current Work (authoritative update):** **Configuration management SPA (admin &
+tenant)** — new cross-cutting **frontend** feature — **SPEC + DESIGN (AD-034) +
+TASKS DRAFTED** (2026-07-15, awaiting approval → Execute). `tasks.md` (T1–T19; all
+53 reqs mapped) landed: single **frontend** track, **fe-unit** tests beside source
++ **fe** gate (`npm run lint && typecheck && test --run && build`) for every code
+task. **T1** tokens+base+theme+`radix-ui` dep · **T2/T3/T4** primitive families
+(form / overlay-nav / data-display, serialize on shared `ui/index.ts` barrel) ·
+**T5** `[P]` apiClient `{detail}` parse + `fieldErrorsFrom422` + DTO `types.ts` ·
+**T6** `useApplyStatus`(1 s→30 s soft-timeout)+`ApplyStatusIndicator` · **T7**
+app-shell rebuild (Sidebar role-filtered + Topbar + role-routing; rehome existing
+dashboards, keep tests green) · **T8** `[P]` tenant resource hooks
+(services/rules/lists) · **T9→T10→T11** tenant services/detail-tabs/lists (P1
+demoable slice, serial on shared service dir) · **T12–T17** `[P]` admin console
+pages (tenants+users · allocations · services+plan · feeds+global-BL · alerting ·
+node) · **T18** `[P]` account+job-backlog (P3) · **T19** `[P]` docs. **Parallelism
+basis:** fe-unit parallel-safe only across **disjoint source files** (fe gate
+independent of `compose.test.yml`); foundation/shell/tenant tasks serialize on
+shared files, admin pages fan out `[P]` (run each in an isolated worktree since
+`typecheck`/`build` compile all of `src/`). **All 3 mandatory pre-approval checks
+pass** (granularity — T2/T3/T4/T7/T12/T15 flagged cohesive-not-split with
+justification; diagram↔`Depends on`; test co-location = fe-unit everywhere, zero
+deferral). **P2 endpoints verified present in-tree** (`/alerts/rules|channels|test`,
+`/node/bypass|maintenance|health`) → admin screens buildable **now**, no hard M6
+gate. **Radix React 19 + unified `radix-ui` package web-verified**; T1 pins exact
+version + verifies peer range. Tools: `coding-guidelines` (code T1–T18),
+`docs-writer` (T19), **no MCPs**. `B_fe`=`npm run test` head total (≥34) pinned
+live at Execute; each task keeps the total monotonic + states its added-test floor.
+**Next:** approve tasks → **Execute** (Phase 1: T1 first, then T2→T3→T4 with T5
+`[P]`). *Independent of the M6 #3 SLA/OLA backend thread below.* `design.md` + 2
+rendered
+diagrams (`diagrams/config-architecture.{mmd,svg}` component,
+`diagrams/apply-status-ux.{mmd,svg}` async-apply sequence) landed. **UI/UX
+directive resolved via AskUserQuestion:** the SPA has **zero CSS today** (verified
+in-tree — no stylesheet, `main.tsx` imports none, only 9 files use inline
+`style={}` for chart colors), so "hiện đại, best UI/UX" means **introducing a real
+design system from scratch** → user chose **"Token CSS + Radix primitives"**.
+**Radix React 19 compat + the unified `radix-ui` package web-verified** (Knowledge
+Chain step 4). AD-034 key decisions: **D-034-1** unified `radix-ui` + CSS Modules
+(Vite-native) + CSS-variable tokens (light+dark); **D-034-2** rebuild shell
+(Sidebar+Topbar) app-wide, rehome + base-restyle existing observability panels
+(visual-only, behavior/tests preserved); **D-034-3** enhance `apiClient` to parse
+FastAPI `{detail}` + `fieldErrorsFrom422` helper (current client throws
+status-only); **D-034-4** async-apply UX = `useApplyStatus` (1 s poll while
+`pending|queued|applying`, 30 s soft-timeout → slow poll + "taking longer" state,
+stop at `active|failed`) + `StatusBadge` + toasts + Topbar `ApplyStatusIndicator`
+(rule/list mutations reuse parent service apply-status); **D-034-5** dep-free
+forms (`Field` + client validators + 422 merge, **no** react-hook-form/zod);
+**D-034-6** Sidebar IA (Overview / Manage[role-filtered] / Observe) + service-detail
+Radix Tabs (Overview·Rules·Whitelist·Blacklist); **D-034-7** tenant plan
+display-only (`/plan` admin-only), admin plan-at-create; **D-034-8** zero backend
+change, missing endpoint → `SPEC_DEVIATION`; **D-034-9** dual-theme via
+`prefers-color-scheme` + `[data-theme]` toggle, fold `thresholds.ts` into tokens;
+**D-034-10** Vitest primitives(a11y/keyboard)+screens(mocked apiClient/QueryClient),
+existing panel tests stay green. **Async-apply contract grounded live in-tree**:
+`ApplyMutationResponse{apply_status,version,active_version}` (every 202),
+`ApplyStatusView{...,last_error,latest_job}` (`GET /services/{id}/apply-status`),
+`ServiceResponse` carries `apply_status`/`version`/`active_version`/`plan`/`warnings`.
+All 53 reqs mapped to components (Foundation→primitives→shell→data-layer =
+P1 critical path, then tenant screens = demoable P1 slice, then admin console,
+then P3). No `CONCERNS.md` (nothing to mitigate); `.specs/codebase/TESTING.md`
+present for Tasks. **Next:** approve design → **Tasks** (single FE track;
+`B_fe`=current Vitest total ≥34 pinned live at Execute; pin exact `radix-ui`
+version + React 19 peer range at Execute). *Independent of the M6 #3 SLA/OLA
+backend thread below.*
+
+**Prior sub-step (superseded above):** **SPEC DRAFTED** (2026-07-15,
+awaiting approval → Design). New feature dir
+`.specs/features/config-management-spa/` with `spec.md` (`CFG-01..53`; P1=01..24
+MVP, P2=25..50, P3=51..53). Resolves the intent fork via AskUserQuestion:
+user chose **"Config-management SPA"** (the deferred CRUD screens), not a redesign
+of the existing read-only observability dashboards. **Pure frontend, zero new
+backend endpoint/model/migration** — surfaces the already-shipped, tested APIs.
+Scope: **P1 tenant self-service** (services CRUD + enable/disable via
+`load_service_for_principal` ownership guard; allow-rules ≤16/unique-priority +
+overlap-check; whitelist/VIP + service blacklist) + **shell/nav** (role-aware,
+reuses `AuthContext`/`ProtectedRoute`/`AppLayout`; reusable async-apply-status
+primitive polling `/services/{id}/apply-status`); **P2 admin console** (tenants/
+users, CIDR allocation + overlap-check, service oversight + **admin-only** plan
+sizing `PATCH /services/{id}/plan`, threat feeds + `/feeds/{id}/sync` + global
+blacklist, alert rules/channels + test-send, node bypass/maintenance); **P3**
+account change-password (`POST /auth/password`) + admin job backlog (`GET /jobs`).
+**Grounding verified live in-tree** by enumerating every router
+(`app/api/routers/*`): tenant self-creates services (`_tenant_for_create` scopes to
+own tenant), `/plan` is admin-only, every service/rule/list write returns `202
+{apply_status, version, active_version}`. **No backend milestone gate** — P1
+buildable today; P2 alerting + node-control stories **soft-depend** on M6
+*Alerting* + *Bypass & maintenance* executed (config/control endpoints must exist).
+Reuses the M5 SPA (Vite+React+TS, TanStack Query, existing `apiClient`). Out of
+scope: any backend change, telemetry/billing/alert-history **views** (already
+shipped), audit-log viewer (M6 SLA/OLA owns `/audit`), SSE/WebSocket, SSO/MFA.
+ROADMAP gains a new "Frontend / operability" cross-cutting section. **5 open gray
+areas flagged for Design** (async-apply UX depth; form/validation library vs plain
+React+TanStack; tenant plan display-only; admin plan-at-create; navigation IA).
+**Next:** approve spec → **Design** (or discuss the 5 gray areas first). *This
+feature is independent of the M6 #3 SLA/OLA work below, which remains the active
+backend thread.*
+
+**Prior current work (superseded above):** M6 #3 → **SLA/OLA reporting & audit**
+(final M6 feature) — **SPEC + CONTEXT DRAFTED** (2026-07-14, awaiting approval →
+Design). New feature dir `.specs/features/sla-ola-reporting/` with `spec.md`
+(SLA-01..36; P1=01..27 MVP, P2=28..33, P3=34..36) and `context.md` (D-SLA-1..4,
+A-SLA-1..8). **Control-plane/worker only, zero hot-path change, no new DP
+surface/counter, no fabricated numbers** — reads only already-persisted evidence.
+Scope: a worker background lane materializes a per-(tenant, period) **SLA report**
+(met/missed per dimension, `open`→`final` immutable, unique `(tenant,period_start)`,
+tied to the `BillingUsage` UTC calendar-month period reusing `billing_period.py`)
++ an admin **OLA** operational summary; plus an **admin-only** queryable/exportable
+view over the **already-complete** audit write path. **4 gray areas resolved via
+AskUserQuestion (all recommended options):** **D-SLA-1** compute/storage = new
+worker lane → immutable period rows (running `open` finalized to `final`; API/export
+read stored rows, never recompute; not a Redis `JobType`); **D-SLA-2** dimensions =
+**measurable-only from persisted evidence** — committed-clean-bandwidth honored (from
+persisted fairness-breach `Alert` durations, Alerting M6 #2), billing/chargeback
+(finalized `BillingUsage`, never recompute p95), OLA apply-reliability
+(`AgentJob failed`)/feed-health (`FeedSyncRun`)/bypass-maintenance windows
+(`node.bypass.*`/`node.maintenance.*` `AuditEvent` + `NodeControl`); **Availability
++ added-latency-p99 disclosed `best_effort`/not-measured (AD-007 / A-TEL-8), never
+scored or fabricated**; absent source → `insufficient_data` (fail-safe); **D-SLA-3**
+audit half = **admin-only read/query/export** (`GET /audit` newest-first via
+`ix_audit_events_created_at` + filters + CSV/JSON export) over the finished write
+path (**41 `record_event` sites**, full dangerous-action taxonomy incl.
+`tenant.delete`/`service.delete`/`feed.delete`/`node.bypass.*`/`node.maintenance.*`;
+`scrub_metadata` strips secrets) — **no write-path change**; admin-only is structural
+(`AuditEvent` has **no `tenant_id`**, mirrors Alerting D-033-2 "no email column";
+tenant self-audit deferred); **D-SLA-4** delivery = API + CSV/JSON export + **P2 SPA
+panel**, SLA (tenant-facing) vs OLA (admin-scoped) split (tenant never sees OLA/
+another tenant, §5.2), **no auto-email in v1** (scheduled email = P3 hook reusing
+Alerting SMTP, SLA-36). **Execute readiness:** all evidence sources are **present
+in-tree** (verified live: `BillingUsage`+migration `_0009` = chargeback executed,
+`NodeControl` `_0010`, Alerting models `_0011` with the evaluator lane landing now)
+→ **no hard external gate**; committed-honored soft-coordinates on *Alerting*'s
+fairness-breach `Alert` rows (degrades to `insufficient_data` until present). New
+models + migration are **`_0012`** (after head `20260714_0011_alerting`). Grounding
+verified live in-tree: `AuditEvent` fields + `record_event`/`scrub_metadata` + 41
+action taxonomy (**no `audit.py` router exists yet**), `BillingUsage` open→final at
+`models.py:611`, `billing_period.py` UTC-month, billing/telemetry export+retention
+patterns, M5 SPA shell. **8 assumptions (A-SLA-1..8)** flagged (new in-worker lane
+not a JobType; zero DP; additive models + migration `_0012` pinned live; sources
+present now; never fabricate; committed-honored via `Alert` not a new counter; audit
+admin-only read-only secrets-scrubbed; RBAC reuse + tenant scope via denormalized
+`tenant_id`).
+ROADMAP entry PLANNED→IN PROGRESS. **Next:** approve spec+context → **Design**
+(AD-0xx: report lane + `SlaReport`(+dimension detail / target-override) models +
+migration + `/sla` & `/audit` routers + P2 SPA panel; resolve model shape /
+committed-honored math / tick cadence at Design). M6 #1 bypass-maintenance + M6 #2
+alerting remain drafted/awaiting Execute.
+
+**Prior current work (superseded above):** M6 #2 → **Alerting** — **SPEC + CONTEXT
 + DESIGN (AD-033) + TASKS DRAFTED** (2026-07-14, awaiting approval → Execute).
 `tasks.md` (T1–T12; all 42 reqs mapped) landed: **T1** extract `telemetry_math`
 committed-bps helper (re-point telemetry router) · **T2** `[P]` `alert_rules`
