@@ -24,12 +24,40 @@ export interface SelectProps {
 }
 
 export const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
-  ({ id, options, value, defaultValue, onValueChange, placeholder = 'Select an option…', disabled, name, required, className = '', 'aria-describedby': ariaDescribedBy, 'aria-invalid': ariaInvalid, ...props }, ref) => {
+  (
+    {
+      id,
+      options,
+      value,
+      defaultValue,
+      onValueChange,
+      placeholder = 'Select an option…',
+      disabled,
+      name,
+      required,
+      className = '',
+      'aria-describedby': ariaDescribedBy,
+      'aria-invalid': ariaInvalid,
+      ...props
+    },
+    ref
+  ) => {
+    const EMPTY_VALUE_PLACEHOLDER = '__empty_value__'
+
+    const translatedValue = value === '' ? EMPTY_VALUE_PLACEHOLDER : value
+    const translatedDefaultValue = defaultValue === '' ? EMPTY_VALUE_PLACEHOLDER : defaultValue
+
+    const handleValueChange = onValueChange
+      ? (val: string) => {
+          onValueChange(val === EMPTY_VALUE_PLACEHOLDER ? '' : val)
+        }
+      : undefined
+
     return (
       <RadixSelect.Root
-        value={value}
-        defaultValue={defaultValue}
-        onValueChange={onValueChange}
+        value={translatedValue}
+        defaultValue={translatedDefaultValue}
+        onValueChange={handleValueChange}
         disabled={disabled}
         required={required}
         name={name}
@@ -58,21 +86,24 @@ export const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
               </svg>
             </RadixSelect.ScrollUpButton>
             <RadixSelect.Viewport className={styles.viewport}>
-              {options.map((option) => (
-                <RadixSelect.Item
-                  key={option.value}
-                  value={option.value}
-                  disabled={option.disabled}
-                  className={styles.item}
-                >
-                  <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
-                  <RadixSelect.ItemIndicator className={styles.itemIndicator}>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </RadixSelect.ItemIndicator>
-                </RadixSelect.Item>
-              ))}
+              {options.map((option) => {
+                const itemValue = option.value === '' ? EMPTY_VALUE_PLACEHOLDER : option.value
+                return (
+                  <RadixSelect.Item
+                    key={itemValue}
+                    value={itemValue}
+                    disabled={option.disabled}
+                    className={styles.item}
+                  >
+                    <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
+                    <RadixSelect.ItemIndicator className={styles.itemIndicator}>
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </RadixSelect.ItemIndicator>
+                  </RadixSelect.Item>
+                )
+              })}
             </RadixSelect.Viewport>
             <RadixSelect.ScrollDownButton className={styles.scrollButton}>
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
