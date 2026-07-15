@@ -189,9 +189,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-07..14, D-034-4/7
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Lists own services; create/edit via Dialog with client CIDR validation and 422→inline field errors; disable warns drop-all + confirm; delete confirms; committed/ceiling shown read-only
-- [ ] Each mutation shows `StatusBadge` progressing to a terminal state; empty state has a create CTA
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests (create happy, 422 inline, disable-confirm, apply badge, plan read-only), total monotonic
+- [x] Lists own services; create/edit via Dialog with client CIDR validation and 422→inline field errors; disable warns drop-all + confirm; delete confirms; committed/ceiling shown read-only
+- [x] Each mutation shows `StatusBadge` progressing to a terminal state; empty state has a create CTA
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests (create happy, 422 inline, disable-confirm, apply badge, plan read-only), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add tenant service management screen`
 
