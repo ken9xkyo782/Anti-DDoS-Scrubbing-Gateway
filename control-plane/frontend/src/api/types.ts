@@ -237,4 +237,51 @@ export interface FeedSyncAccepted {
   job: FeedSyncJobResponse
 }
 
+export type AlertSeverity = 'info' | 'warning' | 'critical'
+export type ChannelKind = 'email' | 'webhook'
+
+export interface AlertRuleResponse {
+  key: string
+  enabled: boolean
+  severity: AlertSeverity
+  fire_threshold: number
+  clear_threshold: number
+  silence_in_maintenance: boolean
+}
+
+export interface AlertRulePatchRequest {
+  enabled?: boolean | null
+  severity?: AlertSeverity | null
+  fire_threshold?: number | null
+  clear_threshold?: number | null
+  silence_in_maintenance?: boolean | null
+}
+
+export interface NotificationChannelResponse {
+  id: string
+  name: string
+  kind: ChannelKind
+  tenant_id: string | null
+  enabled: boolean
+  min_severity: AlertSeverity
+  config: Record<string, any>
+}
+
+export interface NotificationChannelRequest {
+  name?: string
+  kind?: ChannelKind
+  tenant_id?: string | null
+  enabled?: boolean
+  min_severity?: AlertSeverity
+  config?: Record<string, any>
+  secret?: string | null
+}
+
+export interface AlertChannelTestResponse {
+  state: string
+  attempts: number
+  error: string | null
+}
+
+
 

@@ -295,8 +295,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-43..46
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Rules list + per-rule threshold override; channels list/create/patch/delete(confirm); secret field write-only (never renders stored value); test-send shows result
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (threshold patch, write-only secret, test-send result), total monotonic
+- [x] Rules list + per-rule threshold override; channels list/create/patch/delete(confirm); secret field write-only (never renders stored value); test-send shows result
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (threshold patch, write-only secret, test-send result), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin alerting configuration`
 
