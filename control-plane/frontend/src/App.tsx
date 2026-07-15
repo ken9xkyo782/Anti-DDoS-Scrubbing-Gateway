@@ -13,6 +13,7 @@ import { ServiceDetailPage } from './features/config/services/ServiceDetailPage'
 import { TenantsPage } from './features/config/tenants/TenantsPage'
 import { UsersPage } from './features/config/users/UsersPage'
 import { AllocationsPage } from './features/config/allocations/AllocationsPage'
+import { AdminServicesPage } from './features/config/services-admin/AdminServicesPage'
 
 
 
@@ -58,7 +59,7 @@ export function App() {
           {/* Admin-only routes */}
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
             <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/services" element={<ComingSoon title="Services Oversight" />} />
+            <Route path="/admin/services" element={<AdminServicesPage />} />
             <Route path="/admin/tenants" element={<TenantsPage />} />
             <Route path="/admin/users" element={<UsersPage />} />
             <Route path="/admin/allocations" element={<AllocationsPage />} />

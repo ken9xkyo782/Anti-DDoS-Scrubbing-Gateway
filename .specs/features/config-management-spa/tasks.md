@@ -265,8 +265,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-34..37, D-034-7
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Lists services across tenants with filter + owning tenant; admin create requires `tenant_id` and may set plan inline; plan edit hits `/plan` and shows apply-status; enable/disable/delete work for any service
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (all-tenant list, tenant_id required on admin create, plan patch), total monotonic
+- [x] Lists services across tenants with filter + owning tenant; admin create requires `tenant_id` and may set plan inline; plan edit hits `/plan` and shows apply-status; enable/disable/delete work for any service
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (all-tenant list, tenant_id required on admin create, plan patch), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin service oversight and plan sizing`
 

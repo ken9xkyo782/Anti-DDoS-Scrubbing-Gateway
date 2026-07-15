@@ -127,3 +127,31 @@ export function useDisableService(id: string) {
     },
   })
 }
+
+export function useUpdateServicePlan(id: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation<
+    ApplyMutationResponse,
+    Error,
+    {
+      committed_clean_gbps: number
+      ceiling_clean_gbps: number
+    }
+  >({
+    mutationFn: (payload) =>
+      apiClient<ApplyMutationResponse>(`/services/${id}/plan`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['services'] })
+      queryClient.invalidateQueries({ queryKey: ['services', id] })
+      queryClient.invalidateQueries({ queryKey: ['apply-status', id] })
+    },
+  })
+}
+
