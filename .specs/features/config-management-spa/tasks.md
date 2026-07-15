@@ -310,8 +310,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-47..50
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Shows desired/effective bypass+maintenance from `/node/health`; bypass toggle confirms ("disables scrubbing") → `POST /node/bypass`; maintenance toggle explains queue-and-apply-on-exit → `POST /node/maintenance`; banner still shows active state
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (state read, bypass confirm, maintenance explain), total monotonic
+- [x] Shows desired/effective bypass+maintenance from `/node/health`; bypass toggle confirms ("disables scrubbing") → `POST /node/bypass`; maintenance toggle explains queue-and-apply-on-exit → `POST /node/maintenance`; banner still shows active state
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (state read, bypass confirm, maintenance explain), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin node bypass and maintenance controls`
 

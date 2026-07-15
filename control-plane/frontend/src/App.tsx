@@ -17,6 +17,7 @@ import { AdminServicesPage } from './features/config/services-admin/AdminService
 import { FeedsPage } from './features/config/feeds/FeedsPage'
 import { GlobalBlacklistPage } from './features/config/global-blacklist/GlobalBlacklistPage'
 import { AlertingPage } from './features/config/alerting/AlertingPage'
+import { NodeControlPage } from './features/config/node/NodeControlPage'
 
 
 
@@ -70,7 +71,7 @@ export function App() {
             <Route path="/admin/feeds" element={<FeedsPage />} />
             <Route path="/admin/global-blacklist" element={<GlobalBlacklistPage />} />
             <Route path="/admin/alerting" element={<AlertingPage />} />
-            <Route path="/admin/node" element={<ComingSoon title="Node Control" />} />
+            <Route path="/admin/node" element={<NodeControlPage />} />
             <Route path="/admin/jobs" element={<ComingSoon title="Job Backlog" />} />
           </Route>
         </Route>
