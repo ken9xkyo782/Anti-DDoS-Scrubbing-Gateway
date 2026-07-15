@@ -5,7 +5,10 @@ import type { AlertRuleResponse, AlertRulePatchRequest } from '../../api/types'
 export function useAlertRules() {
   return useQuery<AlertRuleResponse[]>({
     queryKey: ['alert-rules'],
-    queryFn: () => apiClient<AlertRuleResponse[]>('/alerts/rules'),
+    queryFn: async () => {
+      const res = await apiClient<{ rules: AlertRuleResponse[] }>('/alerts/rules')
+      return res?.rules ?? []
+    },
   })
 }
 

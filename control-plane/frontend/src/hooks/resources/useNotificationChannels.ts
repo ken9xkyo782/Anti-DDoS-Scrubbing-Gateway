@@ -9,7 +9,10 @@ import type {
 export function useNotificationChannels() {
   return useQuery<NotificationChannelResponse[]>({
     queryKey: ['notification-channels'],
-    queryFn: () => apiClient<NotificationChannelResponse[]>('/alerts/channels'),
+    queryFn: async () => {
+      const res = await apiClient<{ channels: NotificationChannelResponse[] }>('/alerts/channels')
+      return res?.channels ?? []
+    },
   })
 }
 
