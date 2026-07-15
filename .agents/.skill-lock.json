@@ -19,10 +19,12 @@
       "source": "local",
       "contentHash": "23ac05b7f2d8df8311129d41432eba248bdcf14e9ace3f17c581976f7d888ada",
       "installedAt": "2026-07-07T06:23:42.882Z",
-      "updatedAt": "2026-07-07T06:23:42.980Z",
+      "updatedAt": "2026-07-15T03:00:34.692Z",
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "gemini",
+        "antigravity"
       ],
       "method": "copy",
       "global": false
@@ -32,10 +34,12 @@
       "source": "local",
       "contentHash": "28a414c715d3c41aae28a25e2f109813ec3f246f76b5567c1e7d6a128cd289ff",
       "installedAt": "2026-07-07T06:23:42.884Z",
-      "updatedAt": "2026-07-07T06:23:42.982Z",
+      "updatedAt": "2026-07-15T03:00:34.694Z",
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "gemini",
+        "antigravity"
       ],
       "method": "copy",
       "global": false
@@ -45,10 +49,12 @@
       "source": "local",
       "contentHash": "c49827c59d2e27d313731dfd36314cfde0e8dbf15be0e8f813d2f8b751546b0c",
       "installedAt": "2026-07-07T06:23:42.888Z",
-      "updatedAt": "2026-07-07T06:23:42.985Z",
+      "updatedAt": "2026-07-15T03:00:34.699Z",
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "gemini",
+        "antigravity"
       ],
       "method": "copy",
       "global": false
@@ -84,10 +90,12 @@
       "source": "local",
       "contentHash": "9c45020d33af9ac2d44c89721f154c94bd73b9d8590117597b9a26920ff9cecc",
       "installedAt": "2026-07-07T06:23:42.958Z",
-      "updatedAt": "2026-07-07T06:23:42.994Z",
+      "updatedAt": "2026-07-15T03:00:34.701Z",
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "gemini",
+        "antigravity"
       ],
       "method": "copy",
       "global": false
@@ -123,10 +131,25 @@
       "source": "local",
       "contentHash": "69867b0e19be1fb556d2e697f0f18f1de0363d1aa2de9d36754d5b107156357c",
       "installedAt": "2026-07-07T06:23:42.975Z",
-      "updatedAt": "2026-07-07T06:23:43.002Z",
+      "updatedAt": "2026-07-15T03:00:34.723Z",
       "agents": [
         "claude-code",
-        "codex"
+        "codex",
+        "gemini",
+        "antigravity"
+      ],
+      "method": "copy",
+      "global": false
+    },
+    "core-web-vitals": {
+      "name": "core-web-vitals",
+      "source": "local",
+      "contentHash": "3a67190e1dea1f2573d4fbb17071bbdac5ff4fd087d8cb5271094851c2acd559",
+      "installedAt": "2026-07-15T03:00:34.650Z",
+      "updatedAt": "2026-07-15T03:00:34.696Z",
+      "agents": [
+        "gemini",
+        "antigravity"
       ],
       "method": "copy",
       "global": false
