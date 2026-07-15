@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/config-management-spa/design.md` (AD-034)
 **Spec**: `.specs/features/config-management-spa/spec.md` (`CFG-01..53`)
-**Status**: Draft (awaiting approval → Execute)
+**Status**: In progress
 
 **Track**: single **frontend** track (`control-plane/frontend/`). Test type for every task = **fe-unit** (Vitest beside source). Gate for every code task = **fe** (`cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build`). Baseline `B_fe` = current `npm run test` total (≥34 from telemetry+alerting), **pinned live at Execute**; each task's Done-when adds its own tests and keeps the running total monotonic (no silent deletions).
 
@@ -59,11 +59,11 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-05 (theme persistence), D-034-1/9
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `radix-ui` (unified) pinned in `package.json`; `npm install` clean; React 19 peer range verified (no `--legacy-peer-deps`)
-- [ ] `tokens.css` defines color/space/type/radius/shadow/z/motion vars with a dark set via `@media (prefers-color-scheme: dark)` **and** `:root[data-theme="dark"]`; `base.css` resets + focus-visible ring; both imported once in `main.tsx`
-- [ ] `useTheme()` toggles `data-theme` and persists to `localStorage`; `thresholds.ts` helpers unchanged in API but colors sourced from tokens
-- [ ] `prefers-reduced-motion` respected; AA contrast in both themes (spot-checked)
-- [ ] Gate passes: `fe`; adds ≥2 fe-unit tests (useTheme, thresholds), total ≥ `B_fe`+2
+- [x] `radix-ui` (unified) pinned in `package.json`; `npm install` clean; React 19 peer range verified (no `--legacy-peer-deps`)
+- [x] `tokens.css` defines color/space/type/radius/shadow/z/motion vars with a dark set via `@media (prefers-color-scheme: dark)` **and** `:root[data-theme="dark"]`; `base.css` resets + focus-visible ring; both imported once in `main.tsx`
+- [x] `useTheme()` toggles `data-theme` and persists to `localStorage`; `thresholds.ts` helpers unchanged in API but colors sourced from tokens
+- [x] `prefers-reduced-motion` respected; AA contrast in both themes (spot-checked)
+- [x] Gate passes: `fe`; adds ≥2 fe-unit tests (useTheme, thresholds), total ≥ `B_fe`+2
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add design tokens, base styles, and theme toggle`
 
