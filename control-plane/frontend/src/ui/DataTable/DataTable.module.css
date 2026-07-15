@@ -1,0 +1,123 @@
+/* DataTable.module.css */
+
+.tableWrapper {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-elevated);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.thead {
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background-color: var(--gray-50);
+  z-index: 10;
+}
+
+.headerRow {
+  background-color: transparent;
+}
+
+.th {
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+}
+
+.sortableTh:hover {
+  color: var(--text);
+}
+
+.thContent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sortIndicator {
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.tbody {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--text);
+}
+
+.tr {
+  border-bottom: 1px solid var(--border);
+  transition: background-color var(--dur-fast) var(--ease-in-out);
+}
+
+.tr:last-child {
+  border-bottom: none;
+}
+
+.tr:hover {
+  background-color: var(--gray-50);
+}
+
+.td {
+  padding: var(--space-3) var(--space-4);
+  vertical-align: middle;
+}
+
+.tdActions {
+  padding: var(--space-3) var(--space-4);
+  text-align: right;
+  vertical-align: middle;
+}
+
+.skeletonCell {
+  width: 75%;
+  height: var(--space-4);
+}
+
+.skeletonCellActions {
+  width: 32px;
+  height: var(--space-4);
+  margin-left: auto;
+}
+
+.emptyRow {
+  background-color: transparent;
+}
+
+.tdEmpty {
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+
+.defaultEmpty {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.errorContainer {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-critical);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-bg);
+  width: 100%;
+}
+
+.errorText {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--color-critical);
+}
