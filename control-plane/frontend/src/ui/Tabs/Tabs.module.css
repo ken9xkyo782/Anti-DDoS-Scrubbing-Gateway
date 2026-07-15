@@ -1,0 +1,51 @@
+/* Tabs.module.css */
+
+.list {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.trigger {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  padding: var(--space-3) 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-in-out),
+              border-color var(--dur-fast) var(--ease-in-out);
+  outline: none;
+}
+
+.trigger:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.trigger[data-state="active"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.trigger:focus-visible {
+  box-shadow: none;
+  border-bottom-color: var(--border-focus);
+}
+
+.trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.content {
+  outline: none;
+}
+
+.content:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-md);
+}

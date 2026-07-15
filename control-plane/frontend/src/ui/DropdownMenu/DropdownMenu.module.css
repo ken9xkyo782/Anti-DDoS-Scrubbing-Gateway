@@ -1,0 +1,56 @@
+/* DropdownMenu.module.css */
+
+.content {
+  min-width: 160px;
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-1);
+  z-index: var(--z-dropdown);
+  animation: slideUpAndFade var(--dur-fast) var(--ease-out);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  user-select: none;
+  cursor: pointer;
+  outline: none;
+  transition: background-color var(--dur-fast) var(--ease-in-out),
+              color var(--dur-fast) var(--ease-in-out);
+}
+
+.item[data-disabled] {
+  color: var(--text-muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.item[data-highlighted] {
+  background-color: var(--accent-bg);
+  color: var(--accent);
+}
+
+.separator {
+  height: 1px;
+  background-color: var(--border);
+  margin: var(--space-1) 0;
+}
+
+@keyframes slideUpAndFade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
