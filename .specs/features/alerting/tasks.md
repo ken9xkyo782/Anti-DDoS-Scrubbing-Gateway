@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/alerting/design.md` (AD-033)
 **Spec**: `.specs/features/alerting/spec.md` (ALRT-01..42)
-**Status**: Draft (2026-07-14, awaiting approval → Execute)
+**Status**: Approved — Execute in progress (2026-07-14)
 
 > **Track:** single **control-plane / worker** track — **zero data-plane work** (alerting reads only
 > already-persisted rows; no new DP surface or counter). Per `.specs/codebase/TESTING.md`, only **unit**
@@ -69,7 +69,7 @@ T7, T9 ─→ T12 [P] (docs)
 
 ## Task Breakdown
 
-### T1: `services/telemetry_math.py` — extract committed-bps helper
+### T1: `services/telemetry_math.py` — extract committed-bps helper ✅ Complete (c3cf198)
 
 **What**: Extract `_committed_clean_bps(plan)` (+ a `committed_honored(bps, plan)` predicate) out of the
 telemetry router into a shared pure module and re-point the router at it (import-only, behavior-identical) so
@@ -97,7 +97,7 @@ the fairness/SLA rule reuses one implementation (no logic fork).
 
 ---
 
-### T2: `services/alert_rules.py` — §9.3 rule catalog + pure predicates [P]
+### T2: `services/alert_rules.py` — §9.3 rule catalog + pure predicates [P] ✅ Complete (d5a0963)
 
 **What**: The fixed rule catalog (one `RuleDef` per §9.3 event, ALRT-10..20) with §9.1-seeded default
 thresholds, and the **pure** `evaluate(inputs, effective) -> list[RuleObservation]` that maps an `AlertInputs`
@@ -123,7 +123,7 @@ operates only on `AlertInputs` fields (incl. pre-computed `committed_bps`) — *
 
 ---
 
-### T3: alert models + enums + migration `_0011`
+### T3: alert models + enums + migration `_0011` ✅ Complete (71fb6d0)
 
 **What**: The four additive models (`AlertRule`, `NotificationChannel`, `Alert`, `AlertNotification`) + the
 five enums, and their Alembic migration.
@@ -154,7 +154,7 @@ postgresql_where=…)` idiom; migration head = `20260714_0010_node_control` (dow
 
 ---
 
-### T4: `worker/alert_sources.py` — `AlertSources.load` → `AlertInputs`
+### T4: `worker/alert_sources.py` — `AlertSources.load` → `AlertInputs` ✅ Complete (c7adb71)
 
 **What**: One batched read of the persisted source rows into an immutable `AlertInputs` snapshot (latest
 health, recent telemetry per service/node, job backlog/failed/stuck, feed failures + overlaps, node-control),
@@ -180,7 +180,7 @@ models; `ProtectedService.dp_id → (service, tenant)` + `ServicePlan` join (bil
 
 ---
 
-### T5: `worker/alert_evaluator.py` — lifecycle engine + `run_loop`
+### T5: `worker/alert_evaluator.py` — lifecycle engine + `run_loop` ✅ Complete (c11b9a6)
 
 **What**: The `AlertEvaluator` lane: `reconcile(observations)` driving the `pending→firing→resolved`
 lifecycle (for-duration debounce, hysteresis band, dedup, re-notify window, auto-resolve, disabled/absent
@@ -210,7 +210,7 @@ inject a **recording dispatcher double** in tests (RecordingApplier precedent).
 
 ---
 
-### T6: `worker/alert_dispatch.py` — dispatcher, channels, routing & isolation
+### T6: `worker/alert_dispatch.py` — dispatcher, channels, routing & isolation ✅ Complete (ae61402)
 
 **What**: `NotificationDispatcher` — channel **selection/routing** (by `tenant_id` scope + `min_severity`),
 `AlertNotification` creation + bounded-retry delivery + status, the `EmailChannel` (stdlib `smtplib` via
@@ -239,7 +239,7 @@ hygiene); `httpx.MockTransport` + a fake SMTP sink in tests (feed-fetch test pre
 
 ---
 
-### T7: worker wiring + `worker_alert_*` settings + history retention prune
+### T7: worker wiring + `worker_alert_*` settings + history retention prune ✅ Complete (2fdc876)
 
 **What**: Run the `AlertEvaluator` lane in the worker process, add the `worker_alert_*` settings, and prune
 resolved-alert history beyond the retention horizon.
@@ -265,7 +265,7 @@ node_control precedent), the `AlertLane` Protocol shape, `worker_*` settings con
 
 ---
 
-### T8: `/alerts` history read router + schemas
+### T8: `/alerts` history read router + schemas ✅ Complete (5357d59)
 
 **What**: The `GET /alerts` (admin all · tenant own-service, filters, empty state) and `GET /alerts/{id}`
 (with notification rows) endpoints + response schemas, with strict tenant isolation.
@@ -292,7 +292,7 @@ conventions; `Alert`/`AlertNotification` models (T3).
 
 ---
 
-### T9: `/alerts/rules` + `/alerts/channels` admin config + test-send
+### T9: `/alerts/rules` + `/alerts/channels` admin config + test-send ✅ Complete (e9aeeae)
 
 **What**: Admin config surface on the same router: rule catalog read + threshold/severity/enabled override;
 `NotificationChannel` CRUD (secret write-only, audited); `POST /alerts/channels/{id}/test`.
@@ -319,7 +319,7 @@ conventions; `Alert`/`AlertNotification` models (T3).
 
 ---
 
-### T10: Alerts panel in the SPA (P2 — gated on telemetry frontend)
+### T10: Alerts panel in the SPA (P2 — gated on telemetry frontend) ✅ Complete (297ee49)
 
 **What**: An `AlertsPanel` view/route showing active + recent alerts, role-scoped and severity-colored,
 reusing the telemetry SPA shell.
