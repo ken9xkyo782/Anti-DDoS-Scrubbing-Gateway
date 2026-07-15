@@ -250,8 +250,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-30..33
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Allocate runs overlap-check before commit; revoke confirms and surfaces revoke-in-use (`TCA-16`) block; tenant sees own allocations read-only
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests, total monotonic
+- [x] Allocate runs overlap-check before commit; revoke confirms and surfaces revoke-in-use (`TCA-16`) block; tenant sees own allocations read-only
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin CIDR allocation management`
 

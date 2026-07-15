@@ -12,6 +12,7 @@ import { ServicesPage } from './features/config/services/ServicesPage'
 import { ServiceDetailPage } from './features/config/services/ServiceDetailPage'
 import { TenantsPage } from './features/config/tenants/TenantsPage'
 import { UsersPage } from './features/config/users/UsersPage'
+import { AllocationsPage } from './features/config/allocations/AllocationsPage'
 
 
 
@@ -51,7 +52,7 @@ export function App() {
             <Route path="/tenant" element={<TenantDashboard />} />
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/:id" element={<ServiceDetailPage />} />
-            <Route path="/allocations" element={<ComingSoon title="My Allocations" />} />
+            <Route path="/allocations" element={<AllocationsPage />} />
           </Route>
 
           {/* Admin-only routes */}
@@ -60,7 +61,7 @@ export function App() {
             <Route path="/admin/services" element={<ComingSoon title="Services Oversight" />} />
             <Route path="/admin/tenants" element={<TenantsPage />} />
             <Route path="/admin/users" element={<UsersPage />} />
-            <Route path="/admin/allocations" element={<ComingSoon title="CIDR Allocations" />} />
+            <Route path="/admin/allocations" element={<AllocationsPage />} />
             <Route path="/admin/feeds" element={<ComingSoon title="Threat Feeds" />} />
             <Route path="/admin/global-blacklist" element={<ComingSoon title="Global Blacklist" />} />
             <Route path="/admin/alerting" element={<ComingSoon title="Alerting Configuration" />} />

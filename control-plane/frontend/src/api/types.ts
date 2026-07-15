@@ -157,3 +157,23 @@ export interface UserResponse {
   last_login_at: string | null
 }
 
+export interface AllocationResponse {
+  id: string
+  tenant_id: string
+  cidr: string
+  status: CIDRStatus
+  allocated_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AllocationUsageResponse {
+  allocation: AllocationResponse
+  dependent_count: number
+}
+
+export interface OverlapCheckResponse {
+  overlaps: boolean
+  conflicts: AllocationResponse[]
+}
+
