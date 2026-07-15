@@ -340,10 +340,12 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: traceability/docs
 **Tools**: Skill `docs-writer`; MCP: none
 **Done when**:
-- [ ] Doc covers foundation, primitives, shell/IA, apply-status UX, and the screen→endpoint map; links the two rendered diagrams
-- [ ] No code change → `fe` lint/typecheck/build still green if any `src` doc-comment touched; else N/A
-**Tests**: none (docs) · **Gate**: fe (only if `src` touched) / none
-**Commit**: `docs(config-spa): document configuration screens and design system`
+- [x] Doc covers foundation, primitives, shell/IA, apply-status UX, and the screen→endpoint map; links the two rendered diagrams — `control-plane/frontend/README.md` rewritten (2026-07-15)
+- [x] No `src` change (README only) → `fe` gate N/A for this task
+**Tests**: none (docs) · **Gate**: none (docs only)
+**Commit**: `docs(config-spa): document configuration screens and design system` (not yet committed — awaiting user)
+
+**Status**: ✅ Done (2026-07-15). Grounded in the real routes (`App.tsx`), sidebar groups, `ui/` barrel, `hooks/resources/`, and `features/config/` on disk. README documents the design system, nav IA, apply-status UX, and the screen→endpoint map, and links both rendered diagrams. The dev-proxy gap below is noted truthfully in the README's *Develop and test* section.
 
 ---
 
@@ -419,9 +421,18 @@ Every code task writes its own fe-unit tests in the same task and runs the **fe*
 
 ---
 
+## Findings during Execute — RESOLVED (2026-07-15)
+
+Verified live while executing T19 (`control-plane/frontend`): typecheck/build/tests were green but the full **`fe` gate was RED** on two defects. **Both fixed the same day; the `fe` gate is now GREEN** (lint PASS · typecheck PASS · `npm run test -- --run` **48 files / 213 passed** · build PASS).
+
+1. **Lint — 64 problems (fixed).** Not just cosmetic `any`: the pass also uncovered **3 real `react-hooks/rules-of-hooks` bugs** in `AlertingPage.tsx` (delete/update/test channel mutation hooks were called *inside* handlers/callbacks) and **3 `react-hooks/set-state-in-effect`** (`AllocationForm`, `AllocationsPage`, `UserForm`), plus 56 `no-explicit-any` + 2 unused-vars. **Fixes**: lifted the AlertingPage mutation hooks to top level (the `FeedsPage` `?.id ?? ''` pattern) and moved the per-row test mutation into `ChannelRowActions` with `onTestStart`/`onTestResult` callbacks; replaced the auto-select effect with a derived `effectiveTenantId`; moved UserForm's admin-role tenant reset into the role handler; moved AllocationForm's debounce guard inside the timer; typed the `any`s with real DTOs — added `WebhookChannelConfig`/`EmailChannelConfig` + `NotificationChannelRequest` usage, exported `FeedFormPayload` (which also closed a real credential-omit type hole), and typed the admin service form payloads; test-double `any`s replaced with typed mock props / `as never`.
+2. **Vite dev proxy (fixed).** `vite.config.ts` now forwards every prefix the SPA calls — `/auth`, `/billing`, `/services`, `/node`, `/tenants`, `/users`, `/allocations`, `/me`, `/feeds`, `/blacklist`, `/alerts`, `/jobs` (enumerated from the hooks). README dev section updated to match.
+
+Nothing committed yet (awaiting user). `B_fe` now **213** across 48 files. With the gate green, the feature is functionally complete pending the user's commit decision.
+
 ## Notes
 
-- **Baselines pinned live at Execute**: `B_fe` = `npm run test` head total (≥34). Each task keeps the total monotonic and states its added-test floor.
+- **Baselines pinned live at Execute**: `B_fe` = `npm run test` head total (≥34). Each task keeps the total monotonic and states its added-test floor. Live at T19: **213** Vitest tests across 48 files.
 - **Radix pin**: T1 pins the exact `radix-ui` version + verifies the React 19 peer range (no `--legacy-peer-deps`); if a Radix component's import path differs under the unified package, adjust at T2/T3.
 - **Regression guard**: existing telemetry/billing/alerts panel + route tests must stay green through T7's shell rebuild (they assert text/roles, not pixels); any DOM-structure-coupled assertion touched is a minimal, flagged update within T7.
 - **Critical path**: T1→T4 (+T5 `[P]`) → T6 → T7 unlocks everything; T7→T8→T9→T10→T11 is the demoable **P1** slice; Phase-4 admin pages fan out `[P]`; P3+docs last.

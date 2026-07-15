@@ -3,8 +3,35 @@
 **Last Updated:** 2026-07-15
 
 **Current Work (authoritative update):** **Configuration management SPA (admin &
-tenant)** — new cross-cutting **frontend** feature — **SPEC + DESIGN (AD-034) +
-TASKS DRAFTED** (2026-07-15, awaiting approval → Execute). `tasks.md` (T1–T19; all
+tenant)** — **EXECUTE IN PROGRESS** (2026-07-15). **T19 (docs) DONE** —
+`control-plane/frontend/README.md` rewritten (design system, nav IA,
+apply-status UX, screen→endpoint map, links both rendered diagrams), grounded in
+the real routes/sidebar/`ui` barrel/`hooks/resources`/`features/config` on disk.
+**T1–T18 code present; a fix pass landed and the full `fe` gate is now GREEN**
+(lint PASS · typecheck PASS · `npm run test -- --run` **48 files / 213 passed** ·
+build PASS). Two defects were found during T19 and **both fixed 2026-07-15**:
+(1) `npm run lint` had **64 problems** — not just `any`: it surfaced **3 real
+`react-hooks/rules-of-hooks` bugs** in `AlertingPage.tsx` (delete/update/test
+channel mutation hooks called *inside* handlers) + **3 `set-state-in-effect`**
+(`AllocationForm`/`AllocationsPage`/`UserForm`) + 56 `no-explicit-any` + 2
+unused-vars. Fixed by lifting AlertingPage mutation hooks to top level (FeedsPage
+`?.id ?? ''` pattern), moving the per-row test mutation into `ChannelRowActions`
+(`onTestStart`/`onTestResult`), deriving `effectiveTenantId` instead of an
+auto-select effect, handling UserForm's admin tenant-reset in the role handler,
+moving AllocationForm's debounce guard inside the timer, and typing the `any`s
+with real DTOs (added `WebhookChannelConfig`/`EmailChannelConfig`, exported
+`FeedFormPayload` — which also closed a real credential-omit type hole — typed
+admin form payloads; test-double `any`s → typed mock props / `as never`).
+(2) `vite.config.ts` dev proxy extended to every SPA prefix
+(`/tenants`/`/users`/`/allocations`/`/me`/`/feeds`/`/blacklist`/`/alerts`/`/jobs`
+added to the existing four); README dev section updated. Both logged
+RESOLVED in `tasks.md` §Findings. `B_fe` now **213** across 48 files. **Nothing
+committed yet (awaiting user).** Feature is functionally complete + gate-green
+pending the commit decision. *Independent of the M6 #3 SLA/OLA backend thread
+below.*
+
+**Prior sub-step (superseded above):** **SPEC + DESIGN (AD-034) +
+TASKS DRAFTED** (2026-07-15). `tasks.md` (T1–T19; all
 53 reqs mapped) landed: single **frontend** track, **fe-unit** tests beside source
 + **fe** gate (`npm run lint && typecheck && test --run && build`) for every code
 task. **T1** tokens+base+theme+`radix-ui` dep · **T2/T3/T4** primitive families
