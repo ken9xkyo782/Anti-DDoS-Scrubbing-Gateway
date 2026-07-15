@@ -37,7 +37,7 @@ Hệ thống có ba thành phần triển khai độc lập:
 | **Data-plane** | C, XDP/eBPF | Chạy trong nhân, phân loại từng gói tin ở tốc độ cao, redirect gói sạch, drop gói tấn công, đếm số liệu. |
 | **Control-plane API** | Python 3.12, FastAPI | API quản trị: tenant, dịch vụ, whitelist/blacklist, feed, cấu hình, đọc số liệu. |
 | **Worker** | Python 3.12 | Tiến trình nền cùng codebase với API: áp cấu hình xuống data-plane, thu số liệu, đo cước, đánh giá cảnh báo, đồng bộ feed. |
-| **Frontend SPA** | React 19, Vite | Bảng điều khiển cho tenant và quản trị viên, gọi API bằng cookie phiên. |
+| **Frontend SPA** | React 19, Vite | Bảng điều khiển quan sát **và** màn hình quản lý cấu hình (dịch vụ, luật, danh sách, tenant, người dùng, cấp CIDR, feed, cảnh báo, node) cho tenant và quản trị viên; gọi API bằng cookie phiên. |
 
 Luồng đi của một thay đổi cấu hình và của số liệu quan sát:
 
@@ -571,24 +571,75 @@ $ npm ci
 ### 6.2 Chạy máy chủ phát triển
 
 ```bash
-$ npm run dev
+$ npm run dev          # hoặc từ thư mục gốc: make fe-dev
 ```
 
-Vite proxy `/auth`, `/services` và `/node` sang control-plane API, nên API phải
-đang chạy ở [mục 4.6](#46-khởi-động-api) và cấu hình có
-`CONTROL_PLANE_COOKIE_SECURE=false` (vì dev server chạy HTTP). Bảng tenant chỉ
-liệt kê dịch vụ trả về từ `GET /services` rồi poll dịch vụ đang chọn mỗi hai
-giây; bảng quản trị poll số liệu và sức khỏe node mỗi hai giây.
+Vite proxy **mọi tiền tố API mà SPA gọi** — `/auth`, `/billing`, `/services`,
+`/node`, `/tenants`, `/users`, `/allocations`, `/me`, `/feeds`, `/blacklist`,
+`/alerts`, `/jobs` — sang control-plane API, nên API phải đang chạy ở
+[mục 4.6](#46-khởi-động-api) và cấu hình có `CONTROL_PLANE_COOKIE_SECURE=false`
+(vì dev server chạy HTTP). Bảng quan sát của tenant liệt kê dịch vụ từ
+`GET /services` rồi poll dịch vụ đang chọn mỗi hai giây; bảng quan sát của quản
+trị viên poll số liệu và sức khỏe node mỗi hai giây; các màn hình quản lý cấu
+hình đọc/ghi trực tiếp qua API.
 
 ### 6.3 Kiểm thử thủ công trên trình duyệt
 
-1. Mở URL mà `npm run dev` in ra (thường `http://127.0.0.1:5173`).
+1. Mở URL mà `npm run dev` in ra (thường `http://127.0.0.1:5173`), hoặc bản
+   production do FastAPI phục vụ ([mục 6.4](#64-build-bản-production-và-cho-fastapi-phục-vụ)).
 2. Đăng nhập bằng tài khoản admin đã bootstrap. Yêu cầu trả `401` sẽ redirect về
-   **Login**.
-3. Kiểm các trạng thái hiển thị: loading, empty, error và **stale**. Chế độ XDP
-   `generic` và `offline` được tô là **critical**.
-4. Với tài khoản tenant, xác minh chỉ thấy dịch vụ của tenant đó, không thấy số
-   liệu node hay dữ liệu của tenant khác.
+   **Login**; hết phiên cũng đưa về Login.
+3. **Điều hướng (sidebar).** Menu bên trái chia ba nhóm, **lọc theo vai trò**:
+   - **Overview** — bảng điều khiển của vai trò (`/tenant` hoặc `/admin`).
+   - **Manage** — màn hình cấu hình: với tenant là *My Services* và *Allocations*
+     (chỉ đọc); với admin là *Services*, *Tenants*, *Users*, *Allocations*,
+     *Threat Feeds*, *Global Blacklist*, *Alerting*, *Node Control*, *Job Backlog*.
+   - **Observe** — *Telemetry*, *Billing*, *Alerts* (chỉ đọc).
+
+   Thanh trên cùng có nút chuyển **giao diện sáng/tối** (lưu ở `localStorage`) và
+   menu tài khoản (đổi mật khẩu, đăng xuất).
+4. **Trạng thái hiển thị.** Mọi màn hình có loading, empty và error; bảng quan
+   sát còn có **stale**. Chế độ XDP `generic`/`offline` được tô **critical**.
+
+**Cách ly tenant.** Với tài khoản tenant, xác minh chỉ thấy dịch vụ của tenant
+đó; gõ thẳng một URL admin (ví dụ `/admin/tenants`) phải bị chặn và đưa về
+`/forbidden`, không lộ dữ liệu admin.
+
+**Tenant tự phục vụ (quản lý cấu hình).** Đăng nhập một tài khoản tenant đã được
+cấp dải CIDR:
+
+- Vào **My Services** → *Create*: nhập tên và `cidr_or_ip` thuộc dải đã cấp. CIDR
+  sai (ngoài dải, trùng dịch vụ khác) phải hiện lỗi từ API **ngay tại ô nhập**.
+  Committed/ceiling (gói) hiển thị **chỉ đọc** với tenant (vì `/plan` chỉ dành cho
+  admin).
+- Mở chi tiết một dịch vụ → tab **Rules** (thêm/sửa/xóa allow-rule, xem cảnh báo
+  overlap, thứ tự theo `priority`), tab **Whitelist** và **Blacklist** (thêm/xóa,
+  có xác nhận khi xóa).
+- Mỗi thao tác ghi hiển thị **vòng đời áp cấu hình** (`pending → queued →
+  applying → active | failed`) bằng huy hiệu trạng thái và toast — UI **không**
+  coi là xong cho tới khi đạt `active`; `failed` hiện lỗi và `active_version` cũ
+  vẫn đang chạy.
+
+**Bảng điều khiển admin (quản lý cấu hình).** Với tài khoản admin:
+
+- **Tenants / Users** — tạo/sửa/đình chỉ/kích hoạt tenant; tạo/sửa/xóa/đặt lại
+  mật khẩu người dùng, gán vai trò và tenant.
+- **Allocations** — cấp dải CIDR (kiểm tra overlap trước khi commit) và thu hồi;
+  thu hồi dải đang dùng bị API chặn và báo lỗi.
+- **Services** — xem dịch vụ toàn hệ thống, lọc theo tenant, đặt **gói**
+  committed/ceiling (`PATCH /services/{id}/plan`, chỉ admin), tạo dịch vụ hộ
+  tenant (bắt buộc chọn `tenant_id`).
+- **Threat Feeds** — tạo/sửa/xóa nguồn feed, chạy **sync thủ công**, xem lịch sử
+  sync; **Global Blacklist** — thêm/xóa mục.
+- **Alerting** — chỉnh ngưỡng luật cảnh báo; quản lý kênh thông báo (secret là
+  **chỉ-ghi**, không hiển thị lại) và **gửi thử** một kênh.
+- **Node Control** — bật/tắt **bypass** (có xác nhận, cảnh báo tắt scrubbing) và
+  **maintenance**; banner "BYPASS ACTIVE" hiện khi bật.
+- **Job Backlog** — theo dõi hàng đợi apply/job của worker.
+
+> Chi tiết kiến trúc frontend (design system, primitive, bản đồ màn
+> hình→endpoint, UX áp cấu hình) xem
+> [README frontend](../control-plane/frontend/README.md).
 
 ### 6.4 Build bản production và cho FastAPI phục vụ
 
@@ -608,9 +659,11 @@ trả HTML SPA cho chúng. Bỏ biến này khi có máy chủ web khác phục 
 ```bash
 $ cd control-plane/frontend
 $ npm run lint && npm run typecheck && npm run test -- --run && npm run build
+# hoặc từ thư mục gốc: make fe-gate
 ```
 
-Gate này độc lập với `compose.test.yml`.
+Gate này độc lập với `compose.test.yml`. Kỳ vọng: lint và typecheck sạch, bộ
+Vitest **pass** (hiện **48 tệp / 213 test**), và build production thành công.
 
 ---
 
@@ -640,6 +693,15 @@ Xác minh chuỗi khớp nối:
   `dpstat active_config` cho thấy version tăng.
 - **Bypass khớp hai chiều**: `POST /node/bypass` → `node/health` báo effective
   `true` → `dpstat snapshot --json` báo `node_control.bypass=1`.
+- **Quản lý cấu hình qua SPA**: đăng nhập admin → tạo tenant, cấp CIDR, tạo dịch
+  vụ + đặt gói, thêm feed — toàn bộ từ trình duyệt; mỗi thay đổi dịch vụ hiện
+  vòng đời áp cấu hình đạt `active`. Tenant tự quản lý dịch vụ/luật/danh sách của
+  mình và không truy cập được màn hình admin ([mục 6.3](#63-kiểm-thử-thủ-công-trên-trình-duyệt)).
+
+> **Lối tắt Makefile.** `make deploy` dựng toàn bộ hệ thống trong một lệnh;
+> `make test` chạy toàn bộ gate tự động (data-plane + control-plane + frontend);
+> `make fe-dev` mở dev server. Xem `make help` để biết đầy đủ target và biến
+> override.
 
 ---
 
