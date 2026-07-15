@@ -158,9 +158,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-02, CFG-05, D-034-2/6
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Sidebar renders only role-permitted items (Overview/Manage[role]/Observe); admin-only routes wrapped in `ProtectedRoute allowedRoles={['admin']}` → `/forbidden`; Topbar has user menu + ThemeToggle + ApplyStatusIndicator
-- [ ] Existing dashboards/billing/alerts render under the new shell unchanged in behavior; responsive collapse < 1024px
-- [ ] Gate passes: `fe`; existing route/panel tests stay green; adds ≥4 fe-unit tests (role-filtered nav, admin-route block for tenant, session-expiry redirect), total monotonic
+- [x] Sidebar renders only role-permitted items (Overview/Manage[role]/Observe); admin-only routes wrapped in `ProtectedRoute allowedRoles={['admin']}` → `/forbidden`; Topbar has user menu + ThemeToggle + ApplyStatusIndicator
+- [x] Existing dashboards/billing/alerts render under the new shell unchanged in behavior; responsive collapse < 1024px
+- [x] Gate passes: `fe`; existing route/panel tests stay green; adds ≥4 fe-unit tests (role-filtered nav, admin-route block for tenant, session-expiry redirect), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): rebuild app shell with sidebar, topbar, and role nav`
 
