@@ -10,6 +10,9 @@ import { TenantDashboard } from './pages/TenantDashboard'
 import { ProtectedRoute } from './routes/ProtectedRoute'
 import { ServicesPage } from './features/config/services/ServicesPage'
 import { ServiceDetailPage } from './features/config/services/ServiceDetailPage'
+import { TenantsPage } from './features/config/tenants/TenantsPage'
+import { UsersPage } from './features/config/users/UsersPage'
+
 
 
 function DashboardLanding() {
@@ -55,8 +58,8 @@ export function App() {
           <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/services" element={<ComingSoon title="Services Oversight" />} />
-            <Route path="/admin/tenants" element={<ComingSoon title="Tenants Management" />} />
-            <Route path="/admin/users" element={<ComingSoon title="Users Management" />} />
+            <Route path="/admin/tenants" element={<TenantsPage />} />
+            <Route path="/admin/users" element={<UsersPage />} />
             <Route path="/admin/allocations" element={<ComingSoon title="CIDR Allocations" />} />
             <Route path="/admin/feeds" element={<ComingSoon title="Threat Feeds" />} />
             <Route path="/admin/global-blacklist" element={<ComingSoon title="Global Blacklist" />} />

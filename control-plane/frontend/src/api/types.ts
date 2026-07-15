@@ -136,3 +136,24 @@ export interface BlacklistEntryResponse {
   created_by: string | null
   created_at: string
 }
+
+export interface TenantResponse {
+  id: string
+  name: string
+  status: TenantStatus
+  created_at: string
+  updated_at: string
+  active_allocation_count: number
+  user_count: number
+}
+
+export interface UserResponse {
+  id: string
+  username: string
+  role: Role
+  tenant_id: string | null
+  tenant_name: string | null
+  status: UserStatus
+  last_login_at: string | null
+}
+
