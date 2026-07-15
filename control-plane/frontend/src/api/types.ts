@@ -257,6 +257,16 @@ export interface AlertRulePatchRequest {
   silence_in_maintenance?: boolean | null
 }
 
+export interface WebhookChannelConfig {
+  url?: string
+}
+
+export interface EmailChannelConfig {
+  smtp_host?: string
+  from?: string
+  to?: string[]
+}
+
 export interface NotificationChannelResponse {
   id: string
   name: string
@@ -264,7 +274,7 @@ export interface NotificationChannelResponse {
   tenant_id: string | null
   enabled: boolean
   min_severity: AlertSeverity
-  config: Record<string, any>
+  config: Record<string, unknown>
 }
 
 export interface NotificationChannelRequest {
@@ -273,7 +283,7 @@ export interface NotificationChannelRequest {
   tenant_id?: string | null
   enabled?: boolean
   min_severity?: AlertSeverity
-  config?: Record<string, any>
+  config?: Record<string, unknown>
   secret?: string | null
 }
 

@@ -3,16 +3,19 @@ import { Button, Field, Input, Select, Switch } from '../../../ui'
 import { ApiError, fieldErrorsFrom422 } from '../../../api/client'
 import type { FeedSourceResponse, FeedFormat } from '../../../api/types'
 
+export interface FeedFormPayload {
+  name: string
+  url: string
+  sync_interval_seconds: number
+  format: FeedFormat
+  enabled: boolean
+  // Optional so an edit can omit it to keep the existing stored credential.
+  credential_env_var?: string | null
+}
+
 interface FeedFormProps {
   feed?: FeedSourceResponse
-  onSubmit: (data: {
-    name: string
-    url: string
-    sync_interval_seconds: number
-    format: FeedFormat
-    enabled: boolean
-    credential_env_var: string | null
-  }) => Promise<void>
+  onSubmit: (data: FeedFormPayload) => Promise<void>
   onCancel: () => void
   isSubmitting?: boolean
 }
@@ -74,7 +77,7 @@ export function FeedForm({ feed, onSubmit, onCancel, isSubmitting = false }: Fee
         } else if (parsed.username || parsed.password || parsed.hash || trimmedUrl.includes('#')) {
           nextErrors.url = 'Feed source URL must be HTTPS without userinfo or fragments'
         }
-      } catch (err) {
+      } catch {
         nextErrors.url = 'Feed source URL must be a valid HTTPS URL'
       }
     }
@@ -101,14 +104,7 @@ export function FeedForm({ feed, onSubmit, onCancel, isSubmitting = false }: Fee
 
     try {
       // Build request payload
-      const payload: {
-        name: string
-        url: string
-        sync_interval_seconds: number
-        format: FeedFormat
-        enabled: boolean
-        credential_env_var: string | null
-      } = {
+      const payload: FeedFormPayload = {
         name: name.trim(),
         url: trimmedUrl,
         sync_interval_seconds: intervalInt,
@@ -128,7 +124,7 @@ export function FeedForm({ feed, onSubmit, onCancel, isSubmitting = false }: Fee
       // Let's show a text input for `Credential Environment Variable` and if editing, add a checkbox/help text: "Only specify a new variable name to change or overwrite the existing credentials". If they clear it entirely and save, we set it to null. But what if they want to keep it?
       // Let's check: if we have a state `changeCredential` (boolean) default to false for edit mode, and if checked, we allow entering a value or setting to null. If not checked, we exclude `credential_env_var` from the payload!
       // This is extremely safe and clear. Let's implement that!
-      const finalPayload: any = { ...payload }
+      const finalPayload: FeedFormPayload = { ...payload }
       if (isEdit) {
         if (!changeCredential) {
           delete finalPayload.credential_env_var

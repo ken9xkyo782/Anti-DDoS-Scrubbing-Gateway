@@ -412,7 +412,16 @@ function AdminServiceRowActions({
 interface AdminCreateFormProps {
   tenants: Array<{ id: string; name: string }>
   isLoadingTenants: boolean
-  onSubmit: (payload: any) => Promise<void>
+  onSubmit: (payload: {
+    name: string
+    cidr_or_ip: string
+    mode: string
+    tenant_id: string
+    vip_pps: number | null
+    vip_bps: number | null
+    committed_clean_gbps: number | null
+    ceiling_clean_gbps: number | null
+  }) => Promise<void>
   onCancel: () => void
   isSubmitting: boolean
 }
@@ -599,7 +608,13 @@ function AdminCreateServiceForm({
 /* --- Admin Edit Form (Basic Details only, no plan sizing) --- */
 interface AdminEditFormProps {
   service: ServiceResponse
-  onSubmit: (payload: any) => Promise<void>
+  onSubmit: (payload: {
+    name: string
+    cidr_or_ip: string
+    mode: string
+    vip_pps: number | null
+    vip_bps: number | null
+  }) => Promise<void>
   onCancel: () => void
   isSubmitting: boolean
 }

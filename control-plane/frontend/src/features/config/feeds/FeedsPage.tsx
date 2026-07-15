@@ -16,7 +16,7 @@ import {
   useDeleteFeed,
   useSyncFeed,
 } from '../../../hooks/resources/useFeeds'
-import { FeedForm } from './FeedForm'
+import { FeedForm, type FeedFormPayload } from './FeedForm'
 import { FeedSyncsModal } from './FeedSyncsModal'
 import type { FeedSourceResponse } from '../../../api/types'
 
@@ -31,13 +31,13 @@ export function FeedsPage() {
   const updateMutation = useUpdateFeed(editingFeed?.id ?? '')
   const deleteMutation = useDeleteFeed(deletingFeed?.id ?? '')
 
-  const handleCreateSubmit = async (payload: any) => {
+  const handleCreateSubmit = async (payload: FeedFormPayload) => {
     await createMutation.mutateAsync(payload)
     toast({ title: 'Threat feed created successfully', variant: 'success' })
     setIsCreateOpen(false)
   }
 
-  const handleEditSubmit = async (payload: any) => {
+  const handleEditSubmit = async (payload: FeedFormPayload) => {
     if (!editingFeed) return
     await updateMutation.mutateAsync(payload)
     toast({ title: 'Threat feed updated successfully', variant: 'success' })
