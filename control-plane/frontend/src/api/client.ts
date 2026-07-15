@@ -1,12 +1,8 @@
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message = `Request failed with status ${status}`,
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
+import { ApiError } from './errors'
+import type { ValidationErrorDetail } from './errors'
+
+export { ApiError, fieldErrorsFrom422 } from './errors'
+export type { ValidationErrorDetail } from './errors'
 
 function redirectToLogin() {
   if (window.location.pathname === '/login') {
@@ -29,7 +25,22 @@ export async function apiClient<T>(path: string, init: RequestInit = {}): Promis
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status)
+    let detail: unknown = undefined
+    let message = `Request failed with status ${response.status}`
+    try {
+      const body = await response.json()
+      if (body && typeof body === 'object') {
+        if ('detail' in body) {
+          detail = body.detail
+          if (typeof detail === 'string') {
+            message = detail
+          }
+        }
+      }
+    } catch {
+      // Ignore parsing errors, keep default message
+    }
+    throw new ApiError(response.status, message, detail as string | ValidationErrorDetail[] | undefined)
   }
 
   if (response.status === 204) {
