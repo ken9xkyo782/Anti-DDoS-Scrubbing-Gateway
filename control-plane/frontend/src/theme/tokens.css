@@ -44,10 +44,10 @@
   /* Z-index hierarchy */
   --z-base: 0;
   --z-sticky: 100;
-  --z-dropdown: 200;
   --z-overlay: 300;
   --z-modal: 400;
-  --z-toast: 500;
+  --z-dropdown: 500;
+  --z-toast: 600;
 
   /* Transitions & Motion */
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
