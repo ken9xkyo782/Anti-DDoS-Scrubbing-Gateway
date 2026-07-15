@@ -126,9 +126,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-03 (types), CFG-07/13/24 (inline errors), D-034-3/8
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Non-2xx reads JSON `{detail}` (string OR FastAPI validation array) into `ApiError.detail`; `fieldErrorsFrom422` maps `loc`/`msg` → `{field: message}`; 401→login + 204 unchanged
-- [ ] `types.ts` interfaces (`ApplyStatus`, `ApplyMutationResponse`, `ApplyStatusView`, `ServiceResponse`, `RuleResponse`, `Whitelist/BlacklistEntryResponse`, `Tenant/User/Allocation/Feed/AlertRule/NotificationChannel/NodeHealth/NodeControlState/JobView`) match `app/api/schemas` field-for-field (no invented fields)
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (detail parse, 422 mapping, 401/204 preserved), total monotonic
+- [x] Non-2xx reads JSON `{detail}` (string OR FastAPI validation array) into `ApiError.detail`; `fieldErrorsFrom422` maps `loc`/`msg` → `{field: message}`; 401→login + 204 unchanged
+- [x] `types.ts` interfaces (`ApplyStatus`, `ApplyMutationResponse`, `ApplyStatusView`, `ServiceResponse`, `RuleResponse`, `Whitelist/BlacklistEntryResponse`, `Tenant/User/Allocation/Feed/AlertRule/NotificationChannel/NodeHealth/NodeControlState/JobView`) match `app/api/schemas` field-for-field (no invented fields)
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (detail parse, 422 mapping, 401/204 preserved), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): parse API error detail and add shared DTO types`
 
