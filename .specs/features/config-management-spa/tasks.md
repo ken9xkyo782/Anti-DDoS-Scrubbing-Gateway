@@ -77,9 +77,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-04, D-034-1/5
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Each primitive renders with variants/sizes, disabled + loading states; `Field` wires label+hint+error to control via `aria-describedby`/`aria-invalid`
-- [ ] Radix `Select`/`Switch` keyboard + ARIA behavior intact; barrel exports all
-- [ ] Gate passes: `fe`; adds ≥6 fe-unit tests (roles/keyboard/disabled), total monotonic
+- [x] Each primitive renders with variants/sizes, disabled + loading states; `Field` wires label+hint+error to control via `aria-describedby`/`aria-invalid`
+- [x] Radix `Select`/`Switch` keyboard + ARIA behavior intact; barrel exports all
+- [x] Gate passes: `fe`; adds ≥6 fe-unit tests (roles/keyboard/disabled), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add form UI primitives`
 > Granularity: cohesive primitive **family** in one task (justified, not split) — mirrors sibling `[P]` panel-group tasks.
