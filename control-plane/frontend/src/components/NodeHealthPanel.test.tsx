@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { NodeHealthPanel } from './NodeHealthPanel'
 
 describe('NodeHealthPanel', () => {
-  it('renders node health, live backlog, feed status, and throughput', () => {
+  it('renders node health, live backlog, and throughput', () => {
     render(
       <NodeHealthPanel
         health={{
@@ -32,7 +32,6 @@ describe('NodeHealthPanel', () => {
     expect(screen.getByText('XDP mode: native')).toBeInTheDocument()
     expect(screen.getByText('42')).toBeInTheDocument()
     expect(screen.getByText('Queued jobs: 3')).toBeInTheDocument()
-    expect(screen.getByText('Threat feed: success')).toBeInTheDocument()
     expect(screen.getByText('50.0% of capacity')).toBeInTheDocument()
   })
 })

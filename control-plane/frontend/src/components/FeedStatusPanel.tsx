@@ -1,9 +1,15 @@
 import type { FeedSource } from '../hooks/useNodeTelemetry'
 import type { Severity } from '../theme/thresholds'
-import { severityColor } from '../theme/thresholds'
+import styles from './dashboard.module.css'
 
 interface FeedStatusPanelProps {
   feedSources: FeedSource[]
+}
+
+const BADGE_TONE: Record<Severity, string> = {
+  ok: styles.badgeOk,
+  warning: styles.badgeWarn,
+  critical: styles.badgeCrit,
 }
 
 function feedSeverity(source: FeedSource): Severity {
@@ -28,21 +34,30 @@ function statusLabel(source: FeedSource): string {
 
 export function FeedStatusPanel({ feedSources }: FeedStatusPanelProps) {
   return (
-    <section aria-labelledby="feed-status-heading">
-      <h3 id="feed-status-heading">Feed sync status</h3>
+    <section aria-labelledby="feed-status-heading" className={styles.section}>
+      <h3 id="feed-status-heading" className={styles.title}>
+        Feed sync status
+      </h3>
       {feedSources.length === 0 ? (
-        <p>No feed sources are configured.</p>
+        <p className={styles.empty}>No feed sources are configured.</p>
       ) : (
-        <ul>
+        <ul className={styles.statusList}>
           {feedSources.map((source) => {
             const severity = feedSeverity(source)
             return (
-              <li key={source.id}>
-                <span>{source.name}: </span>
-                <span data-severity={severity} style={{ color: severityColor(severity) }}>
-                  {statusLabel(source)}
-                </span>
-                {source.last_error ? <p>Error: {source.last_error}</p> : null}
+              <li key={source.id} className={styles.statusItem}>
+                <div className={styles.statusRow}>
+                  <span className={styles.statusName}>{source.name}</span>
+                  <span
+                    className={`${styles.badge} ${BADGE_TONE[severity]}`}
+                    data-severity={severity}
+                  >
+                    {statusLabel(source)}
+                  </span>
+                </div>
+                {source.last_error ? (
+                  <p className={styles.statusError}>Error: {source.last_error}</p>
+                ) : null}
               </li>
             )
           })}
