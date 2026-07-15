@@ -8,6 +8,7 @@ import { AlertsPanel } from './components/AlertsPanel'
 import { LoginPage } from './pages/LoginPage'
 import { TenantDashboard } from './pages/TenantDashboard'
 import { ProtectedRoute } from './routes/ProtectedRoute'
+import { ServicesPage } from './features/config/services/ServicesPage'
 
 function DashboardLanding() {
   const { principal } = useAuth()
@@ -43,7 +44,7 @@ export function App() {
           {/* Tenant-only routes */}
           <Route element={<ProtectedRoute allowedRoles={['tenant_user']} />}>
             <Route path="/tenant" element={<TenantDashboard />} />
-            <Route path="/services" element={<ComingSoon title="My Services" />} />
+            <Route path="/services" element={<ServicesPage />} />
             <Route path="/allocations" element={<ComingSoon title="My Allocations" />} />
           </Route>
 
