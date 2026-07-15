@@ -18,9 +18,8 @@ import { FeedsPage } from './features/config/feeds/FeedsPage'
 import { GlobalBlacklistPage } from './features/config/global-blacklist/GlobalBlacklistPage'
 import { AlertingPage } from './features/config/alerting/AlertingPage'
 import { NodeControlPage } from './features/config/node/NodeControlPage'
-
-
-
+import { AccountPage } from './features/config/account/AccountPage'
+import { JobBacklogPage } from './features/config/jobs/JobBacklogPage'
 
 function DashboardLanding() {
   const { principal } = useAuth()
@@ -32,14 +31,7 @@ function ForbiddenPage() {
   return <main style={{ padding: 'var(--space-6)' }}><h1>Access denied</h1></main>
 }
 
-function ComingSoon({ title }: { title: string }) {
-  return (
-    <div>
-      <h1>{title}</h1>
-      <p style={{ color: 'var(--text-muted)', marginTop: 'var(--space-2)' }}>This feature is coming soon.</p>
-    </div>
-  )
-}
+
 
 export function App() {
   return (
@@ -51,7 +43,7 @@ export function App() {
           <Route index element={<DashboardLanding />} />
           <Route path="/billing" element={<BillingPanel />} />
           <Route path="/alerts" element={<AlertsPanel />} />
-          <Route path="/account" element={<ComingSoon title="Account Settings" />} />
+          <Route path="/account" element={<AccountPage />} />
           
           {/* Tenant-only routes */}
           <Route element={<ProtectedRoute allowedRoles={['tenant_user']} />}>
@@ -72,7 +64,7 @@ export function App() {
             <Route path="/admin/global-blacklist" element={<GlobalBlacklistPage />} />
             <Route path="/admin/alerting" element={<AlertingPage />} />
             <Route path="/admin/node" element={<NodeControlPage />} />
-            <Route path="/admin/jobs" element={<ComingSoon title="Job Backlog" />} />
+            <Route path="/admin/jobs" element={<JobBacklogPage />} />
           </Route>
         </Route>
       </Route>

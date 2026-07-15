@@ -99,7 +99,7 @@ export function ServiceDetailPage() {
           fontSize: 'var(--font-size-sm)',
           color: 'var(--color-danger, #b42318)'
         }}>
-          <strong>Gateway deployment failed:</strong> {applyStatusView.last_error}. Active configuration has been rolled back.
+          <strong>Gateway deployment failed:</strong> {applyStatusView.last_error}. Active configuration has been rolled back (running version: {applyStatusView.active_version != null ? applyStatusView.active_version : 'none'}).
         </div>
       )}
 

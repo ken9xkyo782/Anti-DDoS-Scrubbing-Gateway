@@ -407,6 +407,7 @@ describe('ServiceDetailPage & RulesTab & RuleForm', () => {
 
     expect(screen.getByText(/Gateway deployment failed:/)).toBeInTheDocument()
     expect(screen.getByText(/Connection timeout with scrubbing gateway node 10.0.0.5/)).toBeInTheDocument()
+    expect(screen.getByText(/running version: 1/)).toBeInTheDocument()
   })
 
   it('lists whitelist and blacklist entries correctly', async () => {
