@@ -325,8 +325,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-51..53
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Change-password validates new password client-side + surfaces API errors; job backlog lists jobs with state/target; a `failed` service exposes `last_error` + still-live `active_version`
-- [ ] Gate passes: `fe`; adds ≥3 fe-unit tests, total monotonic
+- [x] Change-password validates new password client-side + surfaces API errors; job backlog lists jobs with state/target; a `failed` service exposes `last_error` + still-live `active_version`
+- [x] Gate passes: `fe`; adds ≥3 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add account password change and job backlog`
 
