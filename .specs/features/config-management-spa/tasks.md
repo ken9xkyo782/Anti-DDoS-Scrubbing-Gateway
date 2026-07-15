@@ -205,8 +205,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-15..19
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Rules listed ascending by `priority` (evaluation order visible); create enforces ≤16 + unique-priority client-side then surfaces API rejection; overlap-check preview shows shadow warnings; edit/delete surface apply-status
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (priority order, overlap warning, >16 guard, apply-status), total monotonic
+- [x] Rules listed ascending by `priority` (evaluation order visible); create enforces ≤16 + unique-priority client-side then surfaces API rejection; overlap-check preview shows shadow warnings; edit/delete surface apply-status
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (priority order, overlap warning, >16 guard, apply-status), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add service detail with allow-rules tab`
 

@@ -9,6 +9,8 @@ import { LoginPage } from './pages/LoginPage'
 import { TenantDashboard } from './pages/TenantDashboard'
 import { ProtectedRoute } from './routes/ProtectedRoute'
 import { ServicesPage } from './features/config/services/ServicesPage'
+import { ServiceDetailPage } from './features/config/services/ServiceDetailPage'
+
 
 function DashboardLanding() {
   const { principal } = useAuth()
@@ -45,6 +47,7 @@ export function App() {
           <Route element={<ProtectedRoute allowedRoles={['tenant_user']} />}>
             <Route path="/tenant" element={<TenantDashboard />} />
             <Route path="/services" element={<ServicesPage />} />
+            <Route path="/services/:id" element={<ServiceDetailPage />} />
             <Route path="/allocations" element={<ComingSoon title="My Allocations" />} />
           </Route>
 
