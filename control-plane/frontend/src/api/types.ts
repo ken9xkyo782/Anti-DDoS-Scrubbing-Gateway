@@ -177,3 +177,64 @@ export interface OverlapCheckResponse {
   conflicts: AllocationResponse[]
 }
 
+export type FeedFormat = 'line_list'
+
+export type FeedSyncStatus = 'queued' | 'running' | 'success' | 'partial' | 'failed'
+
+export interface FeedSourceResponse {
+  id: string
+  name: string
+  url: string
+  format: FeedFormat
+  enabled: boolean
+  sync_interval_seconds: number
+  has_credential: boolean
+  last_status: FeedSyncStatus | null
+  last_error: string | null
+  last_sync_at: string | null
+  next_sync_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface FeedSyncRunResponse {
+  id: string
+  feed_source_id: string
+  source_name: string
+  sequence: number
+  trigger: ChangeTrigger
+  dry_run: boolean
+  status: FeedSyncStatus
+  started_at: string | null
+  finished_at: string | null
+  duration_ms: number | null
+  error: string | null
+  fetched_lines: number
+  valid: number
+  duplicates: number
+  added: number
+  removed: number
+  skipped_invalid: number
+  overlap_count: number
+  global_changed: boolean
+  desired_revision: number | null
+  node_map_version: number | null
+}
+
+export interface FeedSyncJobResponse {
+  id: string
+  feed_sync_run_id: string
+  status: JobStatus
+  attempts: number
+  dispatched_at: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface FeedSyncAccepted {
+  run: FeedSyncRunResponse
+  job: FeedSyncJobResponse
+}
+
+

@@ -14,6 +14,9 @@ import { TenantsPage } from './features/config/tenants/TenantsPage'
 import { UsersPage } from './features/config/users/UsersPage'
 import { AllocationsPage } from './features/config/allocations/AllocationsPage'
 import { AdminServicesPage } from './features/config/services-admin/AdminServicesPage'
+import { FeedsPage } from './features/config/feeds/FeedsPage'
+import { GlobalBlacklistPage } from './features/config/global-blacklist/GlobalBlacklistPage'
+
 
 
 
@@ -63,8 +66,8 @@ export function App() {
             <Route path="/admin/tenants" element={<TenantsPage />} />
             <Route path="/admin/users" element={<UsersPage />} />
             <Route path="/admin/allocations" element={<AllocationsPage />} />
-            <Route path="/admin/feeds" element={<ComingSoon title="Threat Feeds" />} />
-            <Route path="/admin/global-blacklist" element={<ComingSoon title="Global Blacklist" />} />
+            <Route path="/admin/feeds" element={<FeedsPage />} />
+            <Route path="/admin/global-blacklist" element={<GlobalBlacklistPage />} />
             <Route path="/admin/alerting" element={<ComingSoon title="Alerting Configuration" />} />
             <Route path="/admin/node" element={<ComingSoon title="Node Control" />} />
             <Route path="/admin/jobs" element={<ComingSoon title="Job Backlog" />} />
