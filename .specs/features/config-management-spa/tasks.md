@@ -220,8 +220,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-20..24
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Whitelist + blacklist entries list/add/remove with client CIDR validation, confirm-on-remove, 422→inline, and apply-status feedback
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (add validation, remove confirm, api error inline, both lists), total monotonic
+- [x] Whitelist + blacklist entries list/add/remove with client CIDR validation, confirm-on-remove, 422→inline, and apply-status feedback
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (add validation, remove confirm, api error inline, both lists), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add whitelist and blacklist tabs`
 
