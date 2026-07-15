@@ -280,8 +280,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-38..42
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Feed CRUD with URL + interval-range validation; manual `POST /feeds/{id}/sync` reflects the run; sync history from `/feeds/{id}/syncs`; global blacklist add/list/remove(confirm)
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
+- [x] Feed CRUD with URL + interval-range validation; manual `POST /feeds/{id}/sync` reflects the run; sync history from `/feeds/{id}/syncs`; global blacklist add/list/remove(confirm)
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin threat-feed and global-blacklist management`
 
