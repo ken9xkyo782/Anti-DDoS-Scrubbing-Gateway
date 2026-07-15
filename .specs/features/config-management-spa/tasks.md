@@ -110,8 +110,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-04, D-034-1
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `DataTable` renders columns/rows with sticky header, sortable columns, per-row action slot, and dedicated loading (Skeleton) / empty (EmptyState) / error states; `StatusBadge` maps each `apply_status` to a semantic token color
-- [ ] Gate passes: `fe`; adds ≥6 fe-unit tests (sort, empty, loading, status colors), total monotonic
+- [x] `DataTable` renders columns/rows with sticky header, sortable columns, per-row action slot, and dedicated loading (Skeleton) / empty (EmptyState) / error states; `StatusBadge` maps each `apply_status` to a semantic token color
+- [x] Gate passes: `fe`; adds ≥6 fe-unit tests (sort, empty, loading, status colors), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add data-display UI primitives`
 > Granularity: cohesive family (justified, not split).
