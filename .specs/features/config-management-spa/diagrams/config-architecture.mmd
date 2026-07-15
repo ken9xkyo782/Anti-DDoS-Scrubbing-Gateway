@@ -1,0 +1,52 @@
+%% Diagram: Configuration Management SPA — architecture (AD-034)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+graph TD
+    subgraph Foundation["Design-system foundation"]
+      TOK["theme/tokens.css<br/>color / space / type / radius / shadow<br/>light + dark"]
+      BASE["theme/base.css<br/>reset + element base"]
+    end
+    subgraph UI["ui/ primitives (radix-ui + CSS Modules)"]
+      PRIM["Button · Field / Input / Select / Switch<br/>Dialog / ConfirmDialog · DropdownMenu · Tabs · Toast<br/>DataTable · Badge / StatusBadge · EmptyState · PageHeader"]
+    end
+    subgraph Shell["layout/ app shell"]
+      SIDEBAR["Sidebar<br/>role-filtered nav"]
+      TOPBAR["Topbar<br/>breadcrumb · user menu<br/>ThemeToggle · ApplyStatusIndicator"]
+    end
+    subgraph Screens["features/config/ screens"]
+      TENANT["Tenant self-service<br/>Services · Rules · Whitelist · Blacklist"]
+      ADMIN["Admin console<br/>Tenants/Users · Allocations · Services<br/>Feeds · Global BL · Alerting · Node"]
+    end
+    subgraph Data["api/ + hooks/ data layer"]
+      HOOKS["resource query/mutation hooks<br/>(TanStack Query)"]
+      APPLY["useApplyStatus<br/>poll /apply-status"]
+      CLIENT["apiClient<br/>enhanced: parse {detail}"]
+    end
+    AUTH["AuthContext / ProtectedRoute<br/>(existing)"]
+    API["Existing control-plane REST API<br/>M1 / M4 / M6 — unchanged"]
+
+    TOK --> PRIM
+    BASE --> PRIM
+    PRIM --> SIDEBAR
+    PRIM --> TOPBAR
+    PRIM --> TENANT
+    PRIM --> ADMIN
+    SIDEBAR --> TENANT
+    SIDEBAR --> ADMIN
+    TENANT --> HOOKS
+    ADMIN --> HOOKS
+    HOOKS --> CLIENT
+    APPLY --> CLIENT
+    TENANT -. 202 lifecycle .-> APPLY
+    ADMIN -. 202 lifecycle .-> APPLY
+    CLIENT --> API
+    AUTH --> SIDEBAR
+    AUTH --> TENANT
+    AUTH --> ADMIN

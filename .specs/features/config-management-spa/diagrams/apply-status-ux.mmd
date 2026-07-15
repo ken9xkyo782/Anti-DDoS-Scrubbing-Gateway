@@ -1,0 +1,47 @@
+%% Diagram: Configuration Management SPA — async apply-status UX (AD-034)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    actor U as User
+    participant S as Config screen
+    participant M as useMutation (TanStack)
+    participant C as apiClient
+    participant API as Control-plane API
+    participant AS as useApplyStatus
+    participant FB as Toast / StatusBadge
+
+    U->>S: Submit create / edit / delete
+    S->>M: mutate(payload)
+    M->>C: POST / PATCH / DELETE /services...
+    C->>API: request (credentials: include)
+    alt 422 validation / domain rejection
+        API-->>C: 4xx {detail}
+        C-->>M: ApiError(detail)
+        M-->>S: inline field / toast error
+    else 202 accepted
+        API-->>C: 202 {apply_status, version, active_version}
+        C-->>M: ApplyMutationResponse
+        M->>S: invalidate queries (list refresh)
+        M->>FB: toast "Change queued — applying…"
+        S->>AS: enable poll(serviceId)
+        loop every 1s while pending | queued | applying
+            AS->>C: GET /services/{id}/apply-status
+            C->>API: request
+            API-->>AS: ApplyStatusView
+            AS->>FB: StatusBadge = current state
+        end
+        alt reaches active
+            AS->>FB: success toast + active badge
+        else reaches failed
+            AS->>FB: error toast + last_error + still-live active_version
+        else 30s soft-timeout
+            AS->>FB: "taking longer than expected" (slow 5s poll)
+        end
+    end
