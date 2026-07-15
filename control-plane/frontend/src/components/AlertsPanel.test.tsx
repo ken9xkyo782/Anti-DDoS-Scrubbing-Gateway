@@ -47,7 +47,7 @@ describe('AlertsPanel', () => {
 
     render(<AlertsPanel />)
 
-    expect(screen.getByText('critical')).toHaveStyle({ color: '#b42318' })
+    expect(screen.getByText('critical')).toHaveStyle({ color: 'var(--color-critical)' })
     expect(screen.getByText('firing')).toBeInTheDocument()
     expect(screen.getByText('resolved')).toBeInTheDocument()
     expect(screen.getByText('sent')).toBeInTheDocument()
