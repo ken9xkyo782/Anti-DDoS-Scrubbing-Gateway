@@ -206,3 +206,49 @@ async def test_alert_admin_rule_and_channel_configuration_is_audited_and_secrets
     assert await db_session.scalar(
         select(AuditEvent.id).where(AuditEvent.action == "alert.channel.create")
     )
+
+
+async def test_alert_acknowledges_own_firing_alert_without_resolving_and_admin_exports(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
+    tenant = Tenant(name="Alerts ack tenant")
+    service = ProtectedService(tenant=tenant, name="alerts-ack", cidr_or_ip="203.0.113.92/32")
+    db_session.add_all([tenant, service])
+    await db_session.flush()
+    admin = await user(db_session, "alerts-export-admin", Role.admin)
+    tenant_user = await user(db_session, "alerts-ack-tenant", Role.tenant_user, tenant)
+    instance = Alert(
+        rule_key="attack_onset",
+        scope=AlertScope.service,
+        scope_key=str(service.id),
+        service_id=service.id,
+        tenant_id=tenant.id,
+        service_name=service.name,
+        severity=AlertSeverity.warning,
+        state=AlertState.firing,
+        context={"title": "Attack"},
+        fire_streak=1,
+        clear_streak=0,
+        first_observed_at=datetime(2026, 7, 14, tzinfo=UTC),
+    )
+    db_session.add(instance)
+    await db_session.flush()
+    session_store = store(redis_client)
+    async for client in client_for(db_session, session_store):
+        await login(client, session_store, tenant_user)
+        acknowledged = await client.post(f"/alerts/{instance.id}/ack")
+        tenant_export = await client.get("/alerts/export?format=json")
+        await login(client, session_store, admin)
+        exported_json = await client.get("/alerts/export?format=json")
+        exported_csv = await client.get("/alerts/export?format=csv")
+
+    await db_session.refresh(instance)
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["state"] == "firing"
+    assert instance.acknowledged_at is not None
+    assert tenant_export.status_code == 403
+    assert exported_json.status_code == 200
+    assert exported_json.json()["alerts"][0]["id"] == str(instance.id)
+    assert exported_csv.status_code == 200
+    assert "attack_onset" in exported_csv.text
+    assert await db_session.scalar(select(AuditEvent.id).where(AuditEvent.action == "alert.acknowledge"))
