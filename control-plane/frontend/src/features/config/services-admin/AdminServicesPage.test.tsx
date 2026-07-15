@@ -35,10 +35,24 @@ vi.mock('../../../hooks/useApplyStatus', () => ({
 
 // Mock Select component to render as a native HTML select to facilitate testing-library interactions
 vi.mock('../../../ui', async () => {
-  const actual = await vi.importActual('../../../ui') as any
+  const actual = await vi.importActual<typeof import('../../../ui')>('../../../ui')
   return {
     ...actual,
-    Select: ({ options, value, onValueChange, 'aria-label': ariaLabel, id, disabled }: any) => (
+    Select: ({
+      options,
+      value,
+      onValueChange,
+      'aria-label': ariaLabel,
+      id,
+      disabled,
+    }: {
+      options: { value: string; label: string }[]
+      value?: string
+      onValueChange?: (value: string) => void
+      'aria-label'?: string
+      id?: string
+      disabled?: boolean
+    }) => (
       <select
         id={id}
         value={value ?? ''}
@@ -46,7 +60,7 @@ vi.mock('../../../ui', async () => {
         aria-label={ariaLabel}
         disabled={disabled}
       >
-        {options.map((opt: any) => (
+        {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
           </option>
@@ -129,44 +143,44 @@ describe('AdminServicesPage', () => {
       data: defaultTenants,
       isLoading: false,
       error: null,
-    } as any)
+    } as never)
 
     vi.mocked(useServices).mockReturnValue({
       data: mockServicesData,
       isLoading: false,
       isError: false,
       error: null,
-    } as any)
+    } as never)
 
     vi.mocked(useCreateService).mockReturnValue({
       mutateAsync: mockCreateMutate,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useUpdateService).mockReturnValue({
       mutateAsync: mockUpdateMutate,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useUpdateServicePlan).mockReturnValue({
       mutateAsync: mockUpdatePlanMutate,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useDeleteService).mockReturnValue({
       mutateAsync: mockDeleteMutate,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useEnableService).mockReturnValue({
       mutateAsync: mockEnableMutate,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useDisableService).mockReturnValue({
       mutateAsync: mockDisableMutate,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useApplyStatus).mockImplementation((id: string | null) => {
       if (id === 'srv-1') {
@@ -183,7 +197,7 @@ describe('AdminServicesPage', () => {
             latest_job: null,
           },
           takingLonger: false,
-        } as any
+        } as never
       }
       if (id === 'srv-2') {
         return {
@@ -199,9 +213,9 @@ describe('AdminServicesPage', () => {
             latest_job: null,
           },
           takingLonger: false,
-        } as any
+        } as never
       }
-      return { data: undefined, takingLonger: false } as any
+      return { data: undefined, takingLonger: false } as never
     })
   })
 

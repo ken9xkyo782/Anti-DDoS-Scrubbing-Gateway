@@ -6,20 +6,20 @@ import { apiClient, ApiError } from '../../../api/client'
 vi.mock('../../../api/client', () => ({
   apiClient: vi.fn(),
   ApiError: class ApiError extends Error {
-    constructor(public status: number, message: string, public detail?: any) {
+    constructor(public status: number, message: string, public detail?: unknown) {
       super(message)
     }
   },
-  fieldErrorsFrom422: (detail: any) => {
+  fieldErrorsFrom422: (detail: unknown): Record<string, string> => {
     if (Array.isArray(detail)) {
       const errs: Record<string, string> = {}
-      detail.forEach((err: any) => {
-        const fieldName = err.loc[err.loc.length - 1]
+      detail.forEach((err: { loc: (string | number)[]; msg: string }) => {
+        const fieldName = String(err.loc[err.loc.length - 1])
         errs[fieldName] = err.msg
       })
       return errs
     }
-    return detail
+    return {}
   },
 }))
 

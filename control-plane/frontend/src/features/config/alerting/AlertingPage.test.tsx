@@ -30,17 +30,29 @@ global.ResizeObserver = vi.fn().mockImplementation(() => ({
 }))
 
 vi.mock('../../../ui', async () => {
-  const actual = await vi.importActual('../../../ui') as any
+  const actual = await vi.importActual<typeof import('../../../ui')>('../../../ui')
   return {
     ...actual,
-    Select: ({ options, value, onValueChange, 'aria-label': ariaLabel, disabled }: any) => (
+    Select: ({
+      options,
+      value,
+      onValueChange,
+      'aria-label': ariaLabel,
+      disabled,
+    }: {
+      options: { value: string; label: string }[]
+      value?: string
+      onValueChange?: (value: string) => void
+      'aria-label'?: string
+      disabled?: boolean
+    }) => (
       <select
         value={value ?? ''}
         onChange={(e) => onValueChange && onValueChange(e.target.value)}
         aria-label={ariaLabel}
         disabled={disabled}
       >
-        {options.map((opt: any) => (
+        {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
           </option>
@@ -109,39 +121,39 @@ describe('AlertingPage & Components', () => {
       isLoading: false,
       isError: false,
       error: null,
-    } as any)
+    } as never)
 
     vi.mocked(useUpdateAlertRule).mockReturnValue({
       mutateAsync: mockUpdateAlertRule,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useNotificationChannels).mockReturnValue({
       data: defaultChannelsData,
       isLoading: false,
       isError: false,
       error: null,
-    } as any)
+    } as never)
 
     vi.mocked(useCreateNotificationChannel).mockReturnValue({
       mutateAsync: mockCreateChannel,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useUpdateNotificationChannel).mockReturnValue({
       mutateAsync: mockUpdateChannel,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useDeleteNotificationChannel).mockReturnValue({
       mutateAsync: mockDeleteChannel,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useTestNotificationChannel).mockReturnValue({
       mutateAsync: mockTestChannel,
       isPending: false,
-    } as any)
+    } as never)
   })
 
   afterEach(() => {

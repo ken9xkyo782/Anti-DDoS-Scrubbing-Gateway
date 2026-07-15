@@ -25,17 +25,29 @@ vi.mock('../../../hooks/resources/useTenants', () => ({
 }))
 
 vi.mock('../../../ui', async () => {
-  const actual = await vi.importActual('../../../ui') as any
+  const actual = await vi.importActual<typeof import('../../../ui')>('../../../ui')
   return {
     ...actual,
-    Select: ({ options, value, onValueChange, 'aria-label': ariaLabel, disabled }: any) => (
+    Select: ({
+      options,
+      value,
+      onValueChange,
+      'aria-label': ariaLabel,
+      disabled,
+    }: {
+      options: { value: string; label: string }[]
+      value?: string
+      onValueChange?: (value: string) => void
+      'aria-label'?: string
+      disabled?: boolean
+    }) => (
       <select
         value={value ?? ''}
         onChange={(e) => onValueChange && onValueChange(e.target.value)}
         aria-label={ariaLabel}
         disabled={disabled}
       >
-        {options.map((opt: any) => (
+        {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
           </option>

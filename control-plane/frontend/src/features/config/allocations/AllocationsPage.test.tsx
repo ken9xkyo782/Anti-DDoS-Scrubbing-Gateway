@@ -60,22 +60,22 @@ describe('AllocationsPage & AllocationForm', () => {
       data: defaultTenants,
       isLoading: false,
       error: null,
-    } as any)
+    } as never)
 
     vi.mocked(useCreateAllocation).mockReturnValue({
       mutateAsync: mockCreateAllocation,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useRevokeAllocation).mockReturnValue({
       mutateAsync: mockRevokeAllocation,
       isPending: false,
-    } as any)
+    } as never)
 
     vi.mocked(useCheckOverlap).mockReturnValue({
       mutateAsync: mockCheckOverlap,
       isPending: false,
-    } as any)
+    } as never)
   })
 
   afterEach(() => {
@@ -95,7 +95,7 @@ describe('AllocationsPage & AllocationForm', () => {
       vi.mocked(useAuth).mockReturnValue({
         principal: mockTenantPrincipal,
         isLoading: false,
-      } as any)
+      } as never)
 
       vi.mocked(useMyAllocations).mockReturnValue({
         data: [
@@ -111,7 +111,7 @@ describe('AllocationsPage & AllocationForm', () => {
         ],
         isLoading: false,
         error: null,
-      } as any)
+      } as never)
     })
 
     it('renders read-only tenant allocations list', () => {
@@ -129,7 +129,7 @@ describe('AllocationsPage & AllocationForm', () => {
       vi.mocked(useAuth).mockReturnValue({
         principal: mockAdminPrincipal,
         isLoading: false,
-      } as any)
+      } as never)
 
       vi.mocked(useAllocations).mockReturnValue({
         data: [
@@ -148,7 +148,7 @@ describe('AllocationsPage & AllocationForm', () => {
         ],
         isLoading: false,
         error: null,
-      } as any)
+      } as never)
     })
 
     it('renders admin allocations list with actions and tenant selector', () => {
@@ -177,7 +177,7 @@ describe('AllocationsPage & AllocationForm', () => {
       const apiError = new ApiError(409, 'Conflict', {
         message: 'Allocation is still in use',
         blockers: ['protected_service:web-service'],
-      } as any)
+      } as never)
       mockRevokeAllocation.mockRejectedValueOnce(apiError)
 
       renderComponent()

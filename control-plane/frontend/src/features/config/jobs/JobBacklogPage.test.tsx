@@ -12,15 +12,29 @@ vi.mock('../../../ui', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../ui')>()
   return {
     ...original,
-    Select: ({ options, value, onValueChange, 'aria-label': ariaLabel, id, disabled }: any) => (
+    Select: ({
+      options,
+      value,
+      onValueChange,
+      'aria-label': ariaLabel,
+      id,
+      disabled,
+    }: {
+      options: { value: string; label: string }[]
+      value?: string
+      onValueChange?: (value: string) => void
+      'aria-label'?: string
+      id?: string
+      disabled?: boolean
+    }) => (
       <select
         id={id}
         aria-label={ariaLabel}
         value={value}
-        onChange={(e) => onValueChange(e.target.value)}
+        onChange={(e) => onValueChange?.(e.target.value)}
         disabled={disabled}
       >
-        {options.map((opt: any) => (
+        {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
           </option>
@@ -76,7 +90,7 @@ describe('JobBacklogPage', () => {
       data: mockJobs,
       isLoading: false,
       error: null,
-    } as any)
+    } as never)
   })
 
   afterEach(() => {
@@ -117,7 +131,7 @@ describe('JobBacklogPage', () => {
       data: [],
       isLoading: true,
       error: null,
-    } as any)
+    } as never)
 
     const { container } = render(<JobBacklogPage />)
     expect(container.querySelector('[class*="skeleton"]')).toBeInTheDocument()
@@ -128,7 +142,7 @@ describe('JobBacklogPage', () => {
       data: [],
       isLoading: false,
       error: { message: 'Database failure' },
-    } as any)
+    } as never)
 
     render(<JobBacklogPage />)
     expect(screen.getByText('Database failure')).toBeDefined()
