@@ -389,4 +389,51 @@ All 26 SLRD reqs are placed: SLRD-01..06 (lookup + verdicts) → `service.h` + `
 config maps + seed) → `active_config`/`service_map`/`service_inner_*` + loader/test seed helpers +
 `pkt_meta` fields; SLRD-19..22 (ARP) → ARP redirect branch; SLRD-23..26 (verification) → dp-unit decision
 tests + `make smoke` + `TESTING.md`. Ready to break into tasks.
+
+---
+
+## Design amendment — L2 next-hop rewrite (2026-07-20, AD-DP-01, SLRD-27..29)
+
+The header-preservation assumption in "Architecture Overview" ("the program mutates **no** packet bytes")
+held only for a **pure L2 transparent bridge**. The first routed deployment broke it (ingress dst MAC =
+gateway IN MAC, not the backend's), so the redirect now conditionally rewrites the L2 addresses. See
+spec Amendment (SLRD-27..29) for the requirements and the empirical root cause.
+
+**Implementation (in `xdp_gateway.bpf.c`):**
+
+```c
+static __always_inline void l3_rewrite_nexthop(struct xdp_md *ctx, struct pkt_meta *meta)
+{
+    struct ethhdr *eth = (void *)(long)ctx->data;
+    struct bpf_fib_lookup fib = {};
+    if (meta->eth_proto != ETH_P_IP) return;               /* ARP → verbatim (SLRD-29) */
+    if ((void *)(eth + 1) > (void *)(long)ctx->data_end) return;
+    fib.family = AF_INET;
+    fib.ipv4_src = meta->src_ip; fib.ipv4_dst = meta->dst_ip;
+    fib.ifindex = ctx->ingress_ifindex;
+    if (bpf_fib_lookup(ctx, &fib, sizeof(fib), BPF_FIB_LOOKUP_DIRECT) != BPF_FIB_LKUP_RET_SUCCESS)
+        return;                                            /* transparent-bridge fallback (SLRD-28) */
+    __builtin_memcpy(eth->h_dest, fib.dmac, ETH_ALEN);     /* next-hop / backend MAC (SLRD-27) */
+    __builtin_memcpy(eth->h_source, fib.smac, ETH_ALEN);   /* OUT MAC */
+}
+```
+
+`redirect_out` and `redirect_out_bypass` now take `struct xdp_md *ctx` and call `l3_rewrite_nexthop`
+immediately before `bpf_redirect_map`. `ctx` is threaded from `xdp_gateway` → `service_lookup_redirect`
+→ `whitelist_stage`/`fair_admit_stage` (the VIP-admit and committed/burst-admit redirect sites) and the
+bypass site — all already carried `ctx`, so no new plumbing on the hot path beyond the parameter.
+
+**Design decisions added to "Tech Decisions":**
+
+| Decision | Choice | Rationale |
+| --- | --- | --- |
+| Next-hop resolution | **`bpf_fib_lookup(BPF_FIB_LOOKUP_DIRECT)`** per packet | Uses the live kernel FIB/neigh, so it tracks route/ARP changes with zero control-plane plumbing; `DIRECT` skips policy rules (we already decided to forward). |
+| Fallback on non-SUCCESS | **Forward verbatim** (no rewrite) | Preserves pure-transparent-bridge and veth-smoke behavior (FIB has no route there) and rides out transient `NO_NEIGH` during ARP warmup. Keeps existing tests green. |
+| TTL | **Not decremented** even in routed mode | Honors SLRD-08 header-preservation intent; avoids TTL=1 drops and the incremental-checksum cost; hop stays L3-invisible. |
+| Egress on ixgbe-class NIC | **Requires `XDP_PASS` on OUT** (devmap TX rings) | `ndo_xdp_xmit` needs an attached XDP prog on the target; loader attaches IN only. Documented in `README.md`; loader auto-attach is a follow-up. |
+
+**Test note:** contrary to the original Research note ("`BPF_PROG_TEST_RUN` does not process
+`XDP_REDIRECT`"), the current kernel **does** return `retval=XDP_REDIRECT` under test-run and reflects
+the pre-redirect packet **data** mutation in `data_out`. The MAC rewrite is therefore now assertable
+device-free (the devmap xmit itself is still not executed), which is how SLRD-27 was verified.
 </content>
