@@ -377,11 +377,14 @@ def _vip_flags(service: ServiceConfig) -> int:
 
 
 def _rule_flags(rule: AllowRule) -> int:
-    return (
-        (_RULE_F_ENABLED if rule.enabled else 0)
-        | (_RULE_F_PPS_SET if rule.pps is not None else 0)
-        | (_RULE_F_BPS_SET if rule.bps is not None else 0)
-    )
+    # The v2 apply wire format (apply_snapshot.h, APPLY_SNAPSHOT_RULE_SIZE == 10)
+    # carries only src/dst ports, proto and flags per rule -- it has NO field for
+    # per-rule pps/bps values. Emitting RULE_F_PPS_SET / RULE_F_BPS_SET here would
+    # make the data plane enforce a token bucket that is seeded with zero tokens
+    # (rl_bucket_consume never admits), silently black-holing 100% of the rule's
+    # traffic as rate_limit_drop. Until the wire format is extended to carry the
+    # values, per-rule rate limits are NOT enforced and the flags must stay clear.
+    return _RULE_F_ENABLED if rule.enabled else 0
 
 
 def _list_flags(entries: tuple[tuple[int, bytes], ...], *, active: bool) -> int:

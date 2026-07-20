@@ -99,6 +99,16 @@ sudo ip link set dev <out-iface> xdpdrv obj <xdp_pass.o> sec xdp   # detach: xdp
 priority, because the hot path treats array position as first-match order. The `bps` field is bytes per
 second; the future worker must convert any control-plane unit before writing the map.
 
+**Per-rule `pps`/`bps` rate-limits are NOT plumbed through the control-plane apply path.** The v2 apply
+wire format (`src/apply_snapshot.h`, `APPLY_SNAPSHOT_RULE_SIZE == 10`) carries only ports, proto and
+flags per rule — no rate values. A writer that sets `RULE_F_PPS_SET`/`RULE_F_BPS_SET` without also
+seeding tokens makes `rl_bucket_consume` admit nothing, so **100% of that rule's traffic drops as
+`rate_limit_drop`** (verified 2026-07-20 on service `118.107.78.137:2283`). The control-plane worker
+(`_rule_flags`) therefore emits only `RULE_F_ENABLED`; per-rule rate-limits are a no-op until the wire
+format is extended (schema bump). Use the service **VIP ceiling** (`vip_pps`/`vip_bps`, which *is*
+carried) or the **`ServicePlan`** committed/ceiling for bandwidth control. The demo loader can still
+seed per-rule limits directly into the map struct for data-plane testing.
+
 `RULE_PROTO_ANY` matches only TCP, UDP, and ICMP. GRE, ESP, and other non-TCP/UDP/ICMP IPv4 protocols
 are unmatchable in v1 and drop with `not_allowed`, even when a service has a match-all `any` rule.
 Sustained `not_allowed` from tunnel traffic is expected behavior, not a loader or map-seeding failure.
