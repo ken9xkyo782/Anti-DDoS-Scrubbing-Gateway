@@ -8,3 +8,4 @@ __pycache__/
 .run/
 .gemini
 .agent
+.claude
