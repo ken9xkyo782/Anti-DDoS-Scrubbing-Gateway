@@ -7,7 +7,14 @@
 #include "pkt_meta.h"
 #include "service.h"
 
-static __always_inline int redirect_out(struct pkt_meta *meta);
+#ifndef AF_INET
+#define AF_INET 2
+#endif
+
+static __always_inline void l3_rewrite_nexthop(struct xdp_md *ctx,
+					       struct pkt_meta *meta);
+static __always_inline int redirect_out(struct xdp_md *ctx,
+					struct pkt_meta *meta);
 static __always_inline void write_test_meta(const struct pkt_meta *meta);
 
 #include "rules.h"
@@ -128,11 +135,50 @@ static __always_inline int test_fair_spin_lock_probe(struct pkt_meta *meta)
 #endif
 }
 
-static __always_inline int redirect_out(struct pkt_meta *meta)
+/*
+ * L3 next-hop rewrite for routed (non-transparent-bridge) deployments. When the
+ * gateway has IPs on IN/OUT and forwards by route, ingress frames to a service
+ * carry the gateway's own IN MAC as destination, so a verbatim redirect reaches
+ * the backend with the wrong dst MAC and is dropped at L2. bpf_fib_lookup
+ * resolves the egress next-hop; on success we rewrite the outer Ethernet dst/src
+ * MAC. On any non-SUCCESS result (ARP, pure L2 transparent bridge, unresolved
+ * neighbor, or veth smoke tests with no route) the frame is left untouched, so
+ * the original transparent-bridge behavior is preserved as a fallback.
+ */
+static __always_inline void l3_rewrite_nexthop(struct xdp_md *ctx,
+					       struct pkt_meta *meta)
+{
+	void *data = (void *)(long)ctx->data;
+	void *data_end = (void *)(long)ctx->data_end;
+	struct ethhdr *eth = data;
+	struct bpf_fib_lookup fib = {};
+	int rc;
+
+	if (meta->eth_proto != ETH_P_IP)
+		return;
+	if ((void *)(eth + 1) > data_end)
+		return;
+
+	fib.family = AF_INET;
+	fib.ipv4_src = meta->src_ip;
+	fib.ipv4_dst = meta->dst_ip;
+	fib.ifindex = ctx->ingress_ifindex;
+
+	rc = bpf_fib_lookup(ctx, &fib, sizeof(fib), BPF_FIB_LOOKUP_DIRECT);
+	if (rc != BPF_FIB_LKUP_RET_SUCCESS)
+		return;
+
+	__builtin_memcpy(eth->h_dest, fib.dmac, ETH_ALEN);
+	__builtin_memcpy(eth->h_source, fib.smac, ETH_ALEN);
+}
+
+static __always_inline int redirect_out(struct xdp_md *ctx,
+					struct pkt_meta *meta)
 {
 	meta->verdict = PKT_VERDICT_REDIRECT;
 	write_test_meta(meta);
 	svc_stat_clean(meta);
+	l3_rewrite_nexthop(ctx, meta);
 	return bpf_redirect_map(&tx_devmap, 0, XDP_DROP);
 }
 
@@ -206,7 +252,7 @@ int xdp_gateway(struct xdp_md *ctx)
 	case ETH_P_IPV6:
 		return record_drop(&meta, DR_IPV6_UNSUPPORTED);
 	case ETH_P_ARP:
-		return redirect_out(&meta);
+		return redirect_out(ctx, &meta);
 	case ETH_P_IP:
 		res = parse_ipv4(&cur, data_end, &meta);
 		if (res == PARSE_FRAGMENT)
@@ -218,7 +264,7 @@ int xdp_gateway(struct xdp_md *ctx)
 		if (res != PARSE_OK)
 			return record_drop(&meta, DR_MALFORMED_IPV4);
 		if (node_control_bypass())
-			return redirect_out_bypass(&meta);
+			return redirect_out_bypass(ctx, &meta);
 
 		return service_lookup_redirect(ctx, &meta);
 	default:
