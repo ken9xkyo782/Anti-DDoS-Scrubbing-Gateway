@@ -63,6 +63,41 @@ The loader seed path is intentionally small. It writes one CIDR or port for smok
 the 16..23 global-bloom expansion band, snapshot replacement, and bulk map population to the M4
 builder.
 
+## Forwarding: transparent bridge vs. routed next-hop rewrite
+
+`redirect_out` (and `redirect_out_bypass`) call `l3_rewrite_nexthop()` before
+`bpf_redirect_map(&tx_devmap, 0, XDP_DROP)`. This makes the clean-path forward work in **two
+deployment topologies**, chosen per packet by `bpf_fib_lookup(BPF_FIB_LOOKUP_DIRECT)`:
+
+- **Transparent bridge (bump-in-the-wire):** IN/OUT share the backend's L2 segment and the ingress
+  frame already carries the backend's dst MAC. `bpf_fib_lookup` returns non-`SUCCESS` (no route/neigh),
+  so the frame is forwarded **verbatim** — the original header-preserving behavior.
+- **Routed (L3 next-hop):** the gateway has IPs on IN/OUT, `ip_forward=1`, and upstream routes traffic
+  to it, so ingress frames carry the gateway's own IN MAC. On `SUCCESS` the helper rewrites
+  `eth->h_dest` = resolved next-hop MAC and `eth->h_source` = OUT MAC, then redirects. Without this,
+  a verbatim redirect reaches the backend with the wrong dst MAC and is dropped at L2.
+
+The rewrite runs only for `ETH_P_IP`; ARP is always forwarded verbatim. **TTL is never decremented**
+in either mode (the hop stays L3-transparent), so no IPv4 checksum recompute is needed.
+
+Verify with the `xdp:xdp_redirect` / `xdp:xdp_redirect_err` / `xdp:xdp_devmap_xmit` tracepoints, or run
+the program under `BPF_PROG_TEST_RUN` and inspect the output frame's dst/src MAC (test-run executes the
+FIB lookup and the rewrite; the devmap xmit itself is a no-op there).
+
+### OUT interface must allow XDP TX (devmap redirect target)
+
+Some NIC drivers (e.g. Intel `ixgbe`, `i40e`, `ice`) only allocate XDP TX rings when an XDP program is
+attached to the interface. The loader attaches XDP to **IN only**, so a devmap redirect to such an OUT
+interface fails at `ndo_xdp_xmit` — packets are counted `clean` (the verdict) but dropped silently at
+egress and `xdp:xdp_redirect_err` increments. Workaround until the loader auto-attaches: put a minimal
+`XDP_PASS` program on OUT in native mode:
+
+```bash
+sudo ip link set dev <out-iface> xdpdrv obj <xdp_pass.o> sec xdp   # detach: xdpdrv off
+```
+
+`veth` (used by the smoke tests) does not need this, which is why the issue only surfaces on real NICs.
+
 ## Allow rules and tunnel traffic
 
 `src/rules.h` is the M4 map-build contract for allow rules. Rule blocks must be pre-sorted by ascending
