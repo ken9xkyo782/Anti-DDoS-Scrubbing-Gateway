@@ -212,14 +212,14 @@ async def test_create_service_overlap_returns_409(
             db_session,
             tenant=tenant,
             name="wide",
-            cidr_or_ip="203.0.113.0/25",
+            cidr_or_ip="203.0.113.10/32",
         )
         response = await client.post(
             "/services",
             json={
                 "tenant_id": str(tenant.id),
                 "name": "nested",
-                "cidr_or_ip": "203.0.113.64/26",
+                "cidr_or_ip": "203.0.113.10/32",
             },
         )
 
@@ -454,3 +454,54 @@ async def test_cross_tenant_service_access_is_zero_leak_404(
     assert response.status_code == 404
     assert "secret-edge" not in response.text
     assert str(own_tenant.id) not in response.text
+
+
+async def test_create_service_api_non_32_cidr_rejected(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "api-non-32-admin")
+    tenant = await create_tenant(db_session, "API Non-32 Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        response = await client.post(
+            "/services",
+            json={
+                "tenant_id": str(tenant.id),
+                "name": "wide",
+                "cidr_or_ip": "203.0.113.0/24",
+            },
+        )
+    assert response.status_code == 422
+    assert "Service destination must be a single host" in response.text
+
+
+async def test_update_service_api_non_32_cidr_rejected(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "api-non-32-update-admin")
+    tenant = await create_tenant(db_session, "API Non-32 Update Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        service = await create_service_via_api(
+            client,
+            db_session,
+            tenant=tenant,
+            name="valid",
+            cidr_or_ip="203.0.113.10/32",
+        )
+        response = await client.patch(
+            f"/services/{service.id}",
+            json={
+                "cidr_or_ip": "203.0.113.0/24",
+            },
+        )
+    assert response.status_code == 422
+    assert "Service destination must be a single host" in response.text

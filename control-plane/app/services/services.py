@@ -77,6 +77,13 @@ async def create_service(
     committed = committed_clean_gbps if committed_clean_gbps is not None else Decimal("0")
     ceiling = ceiling_clean_gbps if ceiling_clean_gbps is not None else Decimal("0")
     _validate_plan(committed, ceiling)
+
+    if cidr_or_ip.num_addresses != 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Service destination must be a single host (e.g., a /32 CIDR)",
+        )
+
     await _require_destination_scope(db, tenant_id, cidr_or_ip)
     conflict = await _find_conflicting_service(db, cidr_or_ip)
     if conflict is not None:
@@ -164,6 +171,11 @@ async def update_service(
     _authorize_actor_for_tenant(actor, service.tenant_id)
 
     if cidr_or_ip is not None and str(cidr_or_ip) != str(service.cidr_or_ip):
+        if cidr_or_ip.num_addresses != 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Service destination must be a single host (e.g., a /32 CIDR)",
+            )
         await _require_destination_scope(db, service.tenant_id, cidr_or_ip)
         conflict = await _find_conflicting_service(db, cidr_or_ip, exclude_service_id=service.id)
         if conflict is not None:
@@ -468,3 +480,18 @@ def _overlap_error(conflict: ProtectedService) -> HTTPException:
 
 def _cidr_value(cidr: IPv4Network) -> object:
     return cast(str(cidr), CIDR)
+
+
+async def list_non_host_services(db: AsyncSession) -> list[ServiceRecord]:
+    statement = select(ProtectedService).options(
+        selectinload(ProtectedService.plan),
+        selectinload(ProtectedService.tenant),
+        selectinload(ProtectedService.creator),
+    )
+    services = (await db.execute(statement)).scalars().all()
+    non_host = []
+    for service in services:
+        net = IPv4Network(service.cidr_or_ip)
+        if net.num_addresses != 1:
+            non_host.append(_record_from_loaded(service))
+    return non_host

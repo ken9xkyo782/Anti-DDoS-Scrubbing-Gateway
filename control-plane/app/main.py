@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routers import (
-    allocations,
     alerts,
+    allocations,
     apply_status,
     auth,
     billing,

@@ -190,7 +190,7 @@ async def test_create_service_overlap_returns_409(db_session: AsyncSession) -> N
     admin = await create_admin(db_session, "overlap-service-admin")
     tenant = await create_tenant(db_session, "Overlap Service Tenant")
     await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
-    await create_service(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/25")
+    await create_service(db_session, tenant=tenant, actor=admin, cidr="203.0.113.10/32")
 
     with pytest.raises(HTTPException) as exc_info:
         await create_service(
@@ -198,7 +198,7 @@ async def test_create_service_overlap_returns_409(db_session: AsyncSession) -> N
             tenant=tenant,
             actor=admin,
             name="nested",
-            cidr="203.0.113.64/26",
+            cidr="203.0.113.10/32",
         )
 
     assert exc_info.value.status_code == 409
@@ -511,3 +511,90 @@ async def test_list_and_get_services_scope_admin_and_tenant_user(
     assert [row.service.id for row in tenant_rows] == [own.service.id]
     assert own_loaded.service.id == own.service.id
     assert exc_info.value.status_code == 404
+
+
+async def test_create_service_non_32_cidr_rejected(db_session: AsyncSession) -> None:
+    admin = await create_admin(db_session, "non-32-admin")
+    tenant = await create_tenant(db_session, "Non-32 Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    from ipaddress import IPv4Network
+    with pytest.raises(HTTPException) as exc_info:
+        await service_service.create_service(
+            db_session,
+            tenant_id=tenant.id,
+            name="wide",
+            cidr_or_ip=IPv4Network("203.0.113.0/24"),
+            actor=admin,
+        )
+    assert exc_info.value.status_code == 422
+    assert "Service destination must be a single host" in str(exc_info.value.detail)
+
+
+async def test_update_service_non_32_cidr_rejected(db_session: AsyncSession) -> None:
+    admin = await create_admin(db_session, "non-32-update-admin")
+    tenant = await create_tenant(db_session, "Non-32 Update Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    # Create a valid /32 service first
+    from ipaddress import IPv4Network
+    record = await service_service.create_service(
+        db_session,
+        tenant_id=tenant.id,
+        name="valid",
+        cidr_or_ip=IPv4Network("203.0.113.10/32"),
+        actor=admin,
+    )
+
+    # Try updating it to a /24
+    with pytest.raises(HTTPException) as exc_info:
+        await service_service.update_service(
+            db_session,
+            service_id=record.service.id,
+            actor=admin,
+            cidr_or_ip=IPv4Network("203.0.113.0/24"),
+        )
+    assert exc_info.value.status_code == 422
+    assert "Service destination must be a single host" in str(exc_info.value.detail)
+
+
+async def test_list_non_host_services_includes_non_32(db_session: AsyncSession) -> None:
+    admin = await create_admin(db_session, "non-32-report-admin")
+    tenant = await create_tenant(db_session, "Non-32 Report Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="198.51.100.0/24")
+
+    # Seed a non-32 service directly in the database to bypass create validation
+    from decimal import Decimal
+
+    from app.db.models import ApplyStatus, ProtectedService, ServicePlan
+    non_host_svc = ProtectedService(
+        tenant_id=tenant.id,
+        name="direct-non-host",
+        cidr_or_ip="203.0.113.0/24",
+        apply_status=ApplyStatus.pending,
+        version=1,
+    )
+    plan = ServicePlan(
+        service=non_host_svc,
+        committed_clean_gbps=Decimal("0"),
+        ceiling_clean_gbps=Decimal("0"),
+        billing_metric="p95_clean_bps",
+    )
+    db_session.add_all([non_host_svc, plan])
+    await db_session.flush()
+
+    # Seed a normal /32 service
+    from ipaddress import IPv4Network
+    await service_service.create_service(
+        db_session,
+        tenant_id=tenant.id,
+        name="valid",
+        cidr_or_ip=IPv4Network("198.51.100.10/32"),
+        actor=admin,
+    )
+
+    non_host_records = await service_service.list_non_host_services(db_session)
+    assert len(non_host_records) >= 1
+    non_host_ids = {r.service.id for r in non_host_records}
+    assert non_host_svc.id in non_host_ids
