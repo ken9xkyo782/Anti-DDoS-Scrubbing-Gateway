@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import ProtectedService
+from app.services.nexthop_metrics import record_resolve_result
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,8 @@ class NextHopResolver:
             enabled_dp_ids.add(dp_id)
             ip_net = ipaddress.ip_network(cidr_or_ip, strict=False)
             ip_str = str(ip_net.network_address)
-            await self.writer.resolve(dp_id, ip_str)
+            success = await self.writer.resolve(dp_id, ip_str)
+            record_resolve_result(dp_id, success)
 
         active_dp_ids = await self.writer.get_active_dp_ids()
         for dp_id in active_dp_ids:
@@ -219,7 +221,8 @@ class NextHopResolver:
             try:
                 if op == "resolve":
                     assert ip is not None
-                    await self.writer.resolve(dp_id, ip)
+                    success = await self.writer.resolve(dp_id, ip)
+                    record_resolve_result(dp_id, success)
                 elif op == "evict":
                     await self.writer.evict(dp_id)
             except Exception:

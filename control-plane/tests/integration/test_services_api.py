@@ -27,6 +27,7 @@ def make_store(redis_client: Redis) -> RedisSessionStore:
 async def make_client(
     db_session: AsyncSession,
     store: RedisSessionStore,
+    nexthop_writer: object = None,
 ) -> AsyncGenerator[AsyncClient, None]:
     app = FastAPI()
     app.include_router(services.router)
@@ -36,6 +37,8 @@ async def make_client(
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_session_store] = lambda: store
+    if nexthop_writer is not None:
+        app.dependency_overrides[services.get_nexthop_writer] = lambda: nexthop_writer
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -505,3 +508,63 @@ async def test_update_service_api_non_32_cidr_rejected(
         )
     assert response.status_code == 422
     assert "Service destination must be a single host" in response.text
+
+
+async def test_admin_can_trigger_nexthop_resolve_and_read_status(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    from app.worker.nexthop_resolver import FakeNextHopWriter
+
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "nexthop-trigger-admin")
+    tenant = await create_tenant(db_session, "Nexthop Trigger Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    fake_writer = FakeNextHopWriter(resolve_results=[True])
+
+    async for client in make_client(db_session, store, nexthop_writer=fake_writer):
+        await authenticate(client, store, admin)
+        service = await create_service_via_api(
+            client,
+            db_session,
+            tenant=tenant,
+            name="nh-trigger-svc",
+            cidr_or_ip="203.0.113.50/32",
+        )
+        trigger_res = await client.post(f"/services/{service.id}/resolve-nexthop")
+        status_res = await client.get(f"/services/{service.id}/nexthop")
+
+    assert trigger_res.status_code == 200
+    assert trigger_res.json()["dp_id"] > 0
+    assert trigger_res.json()["success_count"] >= 1
+    assert status_res.status_code == 200
+    assert status_res.json()["dp_id"] == trigger_res.json()["dp_id"]
+    assert status_res.json()["success_count"] >= 1
+
+
+async def test_non_admin_cannot_trigger_nexthop_resolve(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "nexthop-rbac-admin")
+    tenant = await create_tenant(db_session, "Nexthop RBAC Tenant")
+    tenant_user = await create_tenant_user(
+        db_session, username="nexthop-tenant-user", tenant=tenant
+    )
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        service = await create_service_via_api(
+            client,
+            db_session,
+            tenant=tenant,
+            name="nh-rbac-svc",
+            cidr_or_ip="203.0.113.51/32",
+        )
+        await authenticate(client, store, tenant_user)
+        trigger_res = await client.post(f"/services/{service.id}/resolve-nexthop")
+
+    assert trigger_res.status_code == 403
