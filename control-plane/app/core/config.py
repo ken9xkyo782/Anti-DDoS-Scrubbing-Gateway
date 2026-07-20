@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     worker_alert_backlog_threshold: int = Field(default=100, ge=1)
     worker_alert_stuck_applying_seconds: float = Field(default=300.0, gt=0)
     worker_alert_telemetry_stale_seconds: float = Field(default=60.0, gt=0)
+    worker_nexthop_enabled: bool = True
+    worker_nexthop_resolve_interval_seconds: float = Field(default=1800.0, gt=0)
+    worker_nexthop_probe_timeout_seconds: float = Field(default=5.0, gt=0)
+    worker_nexthop_probe_retries: int = Field(default=3, ge=1)
 
     feed_fetch_connect_timeout_seconds: float = Field(default=5.0, gt=0)
     feed_fetch_read_timeout_seconds: float = Field(default=10.0, gt=0)

@@ -23,6 +23,7 @@ from app.services.apply import APPLY_QUEUE_KEY, enqueue_service_update, mark_app
 from app.services.node_control import set_maintenance
 from app.services.services import bump_version
 from app.worker.applier import ServiceConfig
+from app.worker.handlers import configure_nexthop_resolver
 from app.worker.processor import process_job, reconcile_once
 
 pytestmark = pytest.mark.integration
@@ -496,3 +497,79 @@ async def test_reconcile_once_processes_queued_jobs_by_created_at_and_id(
     assert second_service.active_version == 1
     assert second_job.status == JobStatus.succeeded
     assert applier.versions == [2, 1]
+
+
+async def test_process_job_triggers_nexthop_resolve_on_enabled_service_apply(
+    committed_db: async_sessionmaker[AsyncSession],
+) -> None:
+    service_id, job_id = await enqueue_job(
+        name="nexthop-trigger-resolve",
+        cidr_or_ip="203.0.113.80/32",
+        version=1,
+    )
+    async with committed_db() as db:
+        service = await db.get(ProtectedService, service_id)
+        assert service is not None
+        service.enabled = True
+        await db.commit()
+
+    resolve_calls: list[tuple[int, str]] = []
+    evict_calls: list[int] = []
+
+    class FakeNexthop:
+        def request_resolve(self, dp_id: int, ip: str) -> None:
+            resolve_calls.append((dp_id, ip))
+
+        def request_evict(self, dp_id: int) -> None:
+            evict_calls.append(dp_id)
+
+    configure_nexthop_resolver(FakeNexthop())
+    try:
+        applier = RecordingApplier()
+        await process_job(job_id, session_factory=committed_db, applier=applier)
+        async with committed_db() as db:
+            service = await db.get(ProtectedService, service_id)
+            assert service is not None
+            dp_id = service.dp_id
+        assert resolve_calls == [(dp_id, "203.0.113.80")]
+        assert evict_calls == []
+    finally:
+        configure_nexthop_resolver(None)
+
+
+async def test_process_job_triggers_nexthop_evict_on_disabled_service_apply(
+    committed_db: async_sessionmaker[AsyncSession],
+) -> None:
+    service_id, job_id = await enqueue_job(
+        name="nexthop-trigger-evict",
+        cidr_or_ip="203.0.113.81/32",
+        version=1,
+    )
+    async with committed_db() as db:
+        service = await db.get(ProtectedService, service_id)
+        assert service is not None
+        service.enabled = False
+        await db.commit()
+
+    resolve_calls: list[tuple[int, str]] = []
+    evict_calls: list[int] = []
+
+    class FakeNexthop:
+        def request_resolve(self, dp_id: int, ip: str) -> None:
+            resolve_calls.append((dp_id, ip))
+
+        def request_evict(self, dp_id: int) -> None:
+            evict_calls.append(dp_id)
+
+    configure_nexthop_resolver(FakeNexthop())
+    try:
+        applier = RecordingApplier()
+        await process_job(job_id, session_factory=committed_db, applier=applier)
+        async with committed_db() as db:
+            service = await db.get(ProtectedService, service_id)
+            assert service is not None
+            dp_id = service.dp_id
+        assert resolve_calls == []
+        assert evict_calls == [dp_id]
+    finally:
+        configure_nexthop_resolver(None)

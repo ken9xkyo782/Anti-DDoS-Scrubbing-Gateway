@@ -519,6 +519,7 @@ async def test_create_service_non_32_cidr_rejected(db_session: AsyncSession) -> 
     await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
 
     from ipaddress import IPv4Network
+
     with pytest.raises(HTTPException) as exc_info:
         await service_service.create_service(
             db_session,
@@ -538,6 +539,7 @@ async def test_update_service_non_32_cidr_rejected(db_session: AsyncSession) -> 
 
     # Create a valid /32 service first
     from ipaddress import IPv4Network
+
     record = await service_service.create_service(
         db_session,
         tenant_id=tenant.id,
@@ -568,6 +570,7 @@ async def test_list_non_host_services_includes_non_32(db_session: AsyncSession) 
     from decimal import Decimal
 
     from app.db.models import ApplyStatus, ProtectedService, ServicePlan
+
     non_host_svc = ProtectedService(
         tenant_id=tenant.id,
         name="direct-non-host",
@@ -586,6 +589,7 @@ async def test_list_non_host_services_includes_non_32(db_session: AsyncSession) 
 
     # Seed a normal /32 service
     from ipaddress import IPv4Network
+
     await service_service.create_service(
         db_session,
         tenant_id=tenant.id,

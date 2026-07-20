@@ -738,5 +738,43 @@ async def test_worker_cancels_the_billing_lane_on_stop(
     assert cancelled.is_set()
 
 
+async def test_worker_runtime_spawns_and_stops_nexthop_lane(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class RecordingNextHop:
+        def request_resolve(self, dp_id: int, ip: str) -> None:
+            pass
+
+        def request_evict(self, dp_id: int) -> None:
+            pass
+
+        async def run_loop(self, stop: asyncio.Event) -> None:
+            started.set()
+            await stop.wait()
+            stopped.set()
+
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(),
+        redis=redis_client,
+        session_factory=committed_db,
+        nexthop=RecordingNextHop(),
+    )
+    task = asyncio.create_task(worker.run(stop))
+
+    await asyncio.wait_for(started.wait(), timeout=2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert stopped.is_set()
+
+
 async def _noop() -> None:
     return None

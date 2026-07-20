@@ -37,6 +37,7 @@ async def _bootstrap_admin() -> None:
 
 async def _non_host_services_report() -> None:
     from app.services.services import list_non_host_services
+
     session_factory = get_session_factory()
     async with session_factory() as session:
         try:
