@@ -121,12 +121,12 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] Create/update rejects a destination whose network is not a single host (`ip_network(dest,strict=False).num_addresses != 1`) with a 422 field error; a bare host and an explicit `/32` are accepted.
-- [ ] Existing overlap + tenant-allocation guards still fire (unchanged behavior).
-- [ ] A read-only report lists existing non-`/32` services (no auto-conversion — D-035-M).
-- [ ] Integration cases: `/24` → 422; host/`/32` → 201; overlap + allocation guards; report lists a seeded non-host row.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `≥ B_cp + 3` (state exact live)
+- [x] Create/update rejects a destination whose network is not a single host (`ip_network(dest,strict=False).num_addresses != 1`) with a 422 field error; a bare host and an explicit `/32` are accepted.
+- [x] Existing overlap + tenant-allocation guards still fire (unchanged behavior).
+- [x] A read-only report lists existing non-`/32` services (no auto-conversion — D-035-M).
+- [x] Integration cases: `/24` → 422; host/`/32` → 201; overlap + allocation guards; report lists a seeded non-host row.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `≥ B_cp + 3` (state exact live)
 
 **Tests:** integration
 **Gate:** full
