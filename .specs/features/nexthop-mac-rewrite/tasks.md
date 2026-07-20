@@ -168,11 +168,11 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `NextHopLane` Protocol + `asyncio.create_task(nexthop.run_loop(stop))` spawned + drained on shutdown; constructed with `DpstatNextHopWriter` + `worker_nexthop_resolve_interval_seconds` (1800), `worker_nexthop_probe_timeout_seconds`, `worker_nexthop_probe_retries`, reuse `dpstat` binary path.
-- [ ] After a successful `SERVICE_UPDATE` apply → `nexthop.request_resolve(dp_id, ip)`; on a disable/delete apply → `request_evict(dp_id)`.
-- [ ] Integration cases: runtime spawns/stops the lane; a processed apply fires `request_resolve` (assert via a fake); a disable fires `request_evict`.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `≥ B_cp + 3` (state exact live)
+- [x] `NextHopLane` Protocol + `asyncio.create_task(nexthop.run_loop(stop))` spawned + drained on shutdown; constructed with `DpstatNextHopWriter` + `worker_nexthop_resolve_interval_seconds` (1800), `worker_nexthop_probe_timeout_seconds`, `worker_nexthop_probe_retries`, reuse `dpstat` binary path.
+- [x] After a successful `SERVICE_UPDATE` apply → `nexthop.request_resolve(dp_id, ip)`; on a disable/delete apply → `request_evict(dp_id)`.
+- [x] Integration cases: runtime spawns/stops the lane; a processed apply fires `request_resolve` (assert via a fake); a disable fires `request_evict`.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: 587 (net +3 from 584)
 
 **Tests:** integration
 **Gate:** full
