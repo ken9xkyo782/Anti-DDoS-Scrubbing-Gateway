@@ -1,0 +1,38 @@
+%% Diagram: Static next-hop L2 rewrite — component/data-flow (AD-035)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+graph TD
+    subgraph CP["Control-plane / Worker"]
+        APPLY["Apply pipeline<br/>processor.py post-apply hook"]
+        RES["NextHopResolver lane<br/>worker/nexthop_resolver.py<br/>30-min tick + resolve queue"]
+        DB[("PostgreSQL<br/>ProtectedService<br/>dp_id, cidr_or_ip /32")]
+        APPLY -- "request_resolve(dp_id, ip)" --> RES
+        RES -- "read enabled services" --> DB
+        RES -- "exec subprocess" --> DPSTAT
+    end
+    subgraph DP["Data-plane privileged C (CAP_NET_RAW + CAP_BPF)"]
+        DPSTAT["dpstat resolve-nexthop / evict-nexthop"]
+        OUT_IF["OUT iface"]
+        TXDEV["tx_devmap[0]<br/>existing pin: OUT ifindex"]
+        NHMAP[["nexthop_map (pinned, unslotted)<br/>dp_id to {dst_mac, src_mac, resolved, last_resolved}"]]
+        DPSTAT -- "ARP request (AF_PACKET)" --> OUT_IF
+        OUT_IF -- "ARP reply: dst MAC" --> DPSTAT
+        DPSTAT -- "read OUT ifindex + live MAC/IP" --> TXDEV
+        DPSTAT -- "bpf_map_update / delete_elem" --> NHMAP
+    end
+    subgraph HOT["XDP hot path (xdp_gateway.bpf.c)"]
+        RO["redirect_out(ctx, meta)"]
+        DROP["XDP_DROP + counter[16] + svc_stat_drop"]
+        RO -- "lookup nexthop_map[meta.service_id]" --> NHMAP
+        RO -- "resolved: memcpy dst/src MAC + bpf_redirect_map" --> TXDEV
+        RO -- "unresolved/missing: record_drop DR_NEXTHOP_UNRESOLVED" --> DROP
+    end
+    LOADER["loader.c"] -. "pin (no seed)" .-> NHMAP
+    LOADER -. "populate OUT ifindex" .-> TXDEV
