@@ -46,15 +46,15 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `struct nexthop { u8 dst_mac[6]; u8 src_mac[6]; u8 resolved; u8 _pad; u64 last_resolved_ns; }` + `nexthop_map` (`HASH`, `BPF_F_NO_PREALLOC`, `max_entries=1024`, key `u32 dp_id`) in `nexthop.h`; `_Static_assert` on value size.
-- [ ] `nexthop_rewrite(ctx, meta)` returns `0`=rewritten (`memcpy` dst/src MAC after eth bounds-check), `<0`=must drop; hot path leaves IP dst/ports/**TTL**/checksum unchanged.
-- [ ] `DR_NEXTHOP_UNRESOLVED = 16` appended (`DROP_REASON_COUNT` 16→17, cap 32, `_Static_assert` holds) + `drop_reason_name[16]="nexthop_unresolved"`.
-- [ ] `redirect_out()` = resolve-first, fail-closed: unresolved/missing → `record_drop(meta, DR_NEXTHOP_UNRESOLVED)` **before** `svc_stat_clean`; on success set `PKT_VERDICT_REDIRECT` + `svc_stat_clean` + `bpf_redirect_map`.
-- [ ] `l3_rewrite_nexthop` (fib) + its forward-decl **deleted**; `node_control.h` `redirect_out_bypass` no longer rewrites (verbatim; `(void)ctx`).
-- [ ] dp-unit cases: (a) seeded resolved entry → SYN → `XDP_REDIRECT`, dst=dst_mac, src=src_mac, IP/port/**TTL** intact; (b) no/`resolved=0` entry → `XDP_DROP` + `counter_map[16]`==1 + `svc_stat` drop bucket; (c) recovery after seeding a resolved entry; (d) bypass-on undeclared IPv4 → verbatim redirect (unchanged L2). Seed the map directly with `bpf_map_update_elem` in the harness.
-- [ ] Program loads **native + verifier-clean**; if `NO_PREALLOC HASH` visibility disappoints on the runner kernel, fall back to `ARRAY`-indexed-by-`dp_id` (same value struct/hot path) and note it.
-- [ ] Gate check passes: `make test`
-- [ ] Test count: `≥ B_dp + 4` (net after deleting any committed fib-rewrite cases; state exact live; no silent deletions)
+- [x] `struct nexthop { u8 dst_mac[6]; u8 src_mac[6]; u8 resolved; u8 _pad; u64 last_resolved_ns; }` + `nexthop_map` (`HASH`, `BPF_F_NO_PREALLOC`, `max_entries=1024`, key `u32 dp_id`) in `nexthop.h`; `_Static_assert` on value size.
+- [x] `nexthop_rewrite(ctx, meta)` returns `0`=rewritten (`memcpy` dst/src MAC after eth bounds-check), `<0`=must drop; hot path leaves IP dst/ports/**TTL**/checksum unchanged.
+- [x] `DR_NEXTHOP_UNRESOLVED = 16` appended (`DROP_REASON_COUNT` 16→17, cap 32, `_Static_assert` holds) + `drop_reason_name[16]="nexthop_unresolved"`.
+- [x] `redirect_out()` = resolve-first, fail-closed: unresolved/missing → `record_drop(meta, DR_NEXTHOP_UNRESOLVED)` **before** `svc_stat_clean`; on success set `PKT_VERDICT_REDIRECT` + `svc_stat_clean` + `bpf_redirect_map`.
+- [x] `l3_rewrite_nexthop` (fib) + its forward-decl **deleted**; `node_control.h` `redirect_out_bypass` no longer rewrites (verbatim; `(void)ctx`).
+- [x] dp-unit cases: (a) seeded resolved entry → SYN → `XDP_REDIRECT`, dst=dst_mac, src=src_mac, IP/port/**TTL** intact; (b) no/`resolved=0` entry → `XDP_DROP` + `counter_map[16]`==1 + `svc_stat` drop bucket; (c) recovery after seeding a resolved entry; (d) bypass-on undeclared IPv4 → verbatim redirect (unchanged L2). Seed the map directly with `bpf_map_update_elem` in the harness.
+- [x] Program loads **native + verifier-clean**; if `NO_PREALLOC HASH` visibility disappoints on the runner kernel, fall back to `ARRAY`-indexed-by-`dp_id` (same value struct/hot path) and note it.
+- [x] Gate check passes: `make test`
+- [x] Test count: `≥ B_dp + 4` (net after deleting any committed fib-rewrite cases; state exact live; no silent deletions)
 
 **Tests:** dp-unit
 **Gate:** quick
