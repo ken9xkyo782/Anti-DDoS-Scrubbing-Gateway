@@ -101,6 +101,7 @@ smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_bypass.sh
 	$(TEST_DIR)/smoke_fairness.sh
 	$(TEST_DIR)/smoke_apply.sh
+	$(TEST_DIR)/smoke_nexthop.sh
 
 $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SRC_DIR)/node_control.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz

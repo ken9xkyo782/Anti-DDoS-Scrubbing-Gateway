@@ -34,6 +34,7 @@ cleanup()
 	ip link del "${SINK_IF}" 2>/dev/null || true
 	ip link del "${OUT_IF}" 2>/dev/null || true
 	bpftool net detach xdp dev "${SINK_IF}" 2>/dev/null || true
+	rm -rf /sys/fs/bpf/xdp_gateway 2>/dev/null || true
 	rm -f "${PASS_PIN}" "${PASS_SRC}" "${PASS_OBJ}"
 	rm -f "${LOG}"
 }
@@ -70,6 +71,7 @@ ${BPF_CLANG:-clang} -g -O2 -target bpf -D__TARGET_ARCH_${ARCH} \
 bpftool prog load "${PASS_OBJ}" "${PASS_PIN}" type xdp
 bpftool net attach xdp pinned "${PASS_PIN}" dev "${SINK_IF}"
 
+DPSTAT=${DPSTAT:-./build/dpstat}
 SERVICE_DEST=10.0.0.2 "${LOADER}" "${IN_IF}" "${OUT_IF}" >"${LOG}" 2>&1 &
 LOADER_PID=$!
 
@@ -79,6 +81,8 @@ if ! kill -0 "${LOADER_PID}" 2>/dev/null; then
 	echo "loader exited before smoke could send a frame" >&2
 	exit 1
 fi
+
+"${DPSTAT}" set-nexthop 1 aa:aa:aa:aa:aa:aa bb:bb:bb:bb:bb:bb
 
 if ! python3 - "${SRC_IF}" "${SINK_IF}" <<'PY'
 import select
