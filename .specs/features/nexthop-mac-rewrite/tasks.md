@@ -73,12 +73,12 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `NEXTHOP_MAP_PIN_PATH PIN_DIR "/nexthop_map"`; pinned in the runtime-map set + unpinned on cleanup; **no seed** (empty = fail-closed).
-- [ ] `dpstat resolve-nexthop <dp_id> <ipv4>`: read OUT ifindex from `tx_devmap[0]` → `if_indextoname` → src_mac/spa via `ioctl`; send `ARPOP_REQUEST`, recv `ARPOP_REPLY` (`spa==target`) with bounded `retries×timeout`; on reply `bpf_map_update_elem(nexthop_map, dp_id, {dst=reply.sha, src=src_mac, resolved=1, last_resolved_ns=now}, BPF_ANY)` → exit 0; on exhaustion mark `resolved=0` → exit non-zero.
-- [ ] `dpstat evict-nexthop <dp_id>` (`bpf_map_delete_elem`); `dpstat set-nexthop <dp_id> <dst_mac> [<src_mac>]` (no-ARP manual writer, for ops + the DT3 smoke); `dpstat nexthop` dump.
-- [ ] `snapshot --json` gains `"nexthop":[{dp_id,dst_mac,src_mac,resolved,age_s}...]` + node `nexthop_unresolved` count; a missing pinned map stays an offline/error condition (not a partial snapshot).
-- [ ] Gate check passes: `make bpf skel loader apply dpstat` (builds clean; `make apply` golden self-test still green)
-- [ ] Test count: `B_dp` unchanged (real map write + ARP verified by the DT3 privileged smoke, per the DP build-gated-tooling pattern)
+- [x] `NEXTHOP_MAP_PIN_PATH PIN_DIR "/nexthop_map"`; pinned in the runtime-map set + unpinned on cleanup; **no seed** (empty = fail-closed).
+- [x] `dpstat resolve-nexthop <dp_id> <ipv4>`: read OUT ifindex from `tx_devmap[0]` → `if_indextoname` → src_mac/spa via `ioctl`; send `ARPOP_REQUEST`, recv `ARPOP_REPLY` (`spa==target`) with bounded `retries×timeout`; on reply `bpf_map_update_elem(nexthop_map, dp_id, {dst=reply.sha, src=src_mac, resolved=1, last_resolved_ns=now}, BPF_ANY)` → exit 0; on exhaustion mark `resolved=0` → exit non-zero.
+- [x] `dpstat evict-nexthop <dp_id>` (`bpf_map_delete_elem`); `dpstat set-nexthop <dp_id> <dst_mac> [<src_mac>]` (no-ARP manual writer, for ops + the DT3 smoke); `dpstat nexthop` dump.
+- [x] `snapshot --json` gains `"nexthop":[{dp_id,dst_mac,src_mac,resolved,age_s}...]` + node `nexthop_unresolved` count; a missing pinned map stays an offline/error condition (not a partial snapshot).
+- [x] Gate check passes: `make bpf skel loader apply dpstat` (builds clean; `make apply` golden self-test still green)
+- [x] Test count: `B_dp` unchanged (real map write + ARP verified by the DT3 privileged smoke, per the DP build-gated-tooling pattern)
 
 **Tests:** none (build gate; covered by DT3)
 **Gate:** build
@@ -145,11 +145,11 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `NextHopWriter` Protocol (`resolve(dp_id, ip)->bool`, `evict(dp_id)->bool`); `DpstatNextHopWriter` (subprocess-exec `resolve-nexthop`/`evict-nexthop` with timeout, mirrors `DpstatBypassWriter`); `FakeNextHopWriter` recording calls.
-- [ ] `NextHopResolver.request_resolve(dp_id, ip)` / `request_evict(dp_id)` enqueue onto an `asyncio.Queue` drained promptly; `resolve_once()` reads enabled services (`dp_id`, `cidr_or_ip`) from DB, resolves each, and **evicts** entries not in the enabled set; `run_loop(stop)` drains the queue + `resolve_once()` every `interval` (immediate on start).
-- [ ] Integration cases (`committed_db` + `FakeNextHopWriter`): reconcile resolves enabled services; a failed resolve marks/leaves unresolved (fail-closed, no keep-last); disable/delete → evict; `request_resolve` drains promptly; interval loop ticks + stops on the event.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `≥ B_cp + 6` (state exact live)
+- [x] `NextHopWriter` Protocol (`resolve(dp_id, ip)->bool`, `evict(dp_id)->bool`); `DpstatNextHopWriter` (subprocess-exec `resolve-nexthop`/`evict-nexthop` with timeout, mirrors `DpstatBypassWriter`); `FakeNextHopWriter` recording calls.
+- [x] `NextHopResolver.request_resolve(dp_id, ip)` / `request_evict(dp_id)` enqueue onto an `asyncio.Queue` drained promptly; `resolve_once()` reads enabled services (`dp_id`, `cidr_or_ip`) from DB, resolves each, and **evicts** entries not in the enabled set; `run_loop(stop)` drains the queue + `resolve_once()` every `interval` (immediate on start).
+- [x] Integration cases (`committed_db` + `FakeNextHopWriter`): reconcile resolves enabled services; a failed resolve marks/leaves unresolved (fail-closed, no keep-last); disable/delete → evict; `request_resolve` drains promptly; interval loop ticks + stops on the event.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: 583
 
 **Tests:** integration
 **Gate:** full
