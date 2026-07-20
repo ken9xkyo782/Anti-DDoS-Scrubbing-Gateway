@@ -409,7 +409,7 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 
 	meta->wl_state = WL_STATE_HIT_ADMIT;
 	meta->rule_idx = RULE_IDX_NONE;
-	return redirect_out(meta);
+	return redirect_out(ctx, meta);
 }
 #endif
 
