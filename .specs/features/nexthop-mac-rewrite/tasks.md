@@ -97,12 +97,12 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] Load gateway on veth, seed one enabled service; `dpstat set-nexthop <dp_id> <peer_mac>` → crafted IPv4 frame egresses with dst/src MAC rewritten, **TTL + IPv4 checksum unchanged**.
-- [ ] `dpstat resolve-nexthop <dp_id> <peer_ip>` against a veth peer answering ARP → entry becomes `resolved=1` with the peer's MAC; the next frame rewrites to it.
-- [ ] With no entry (or `evict-nexthop`) → the matched-service frame is **dropped**, `snapshot --json` shows `nexthop_unresolved` incremented.
-- [ ] Ctrl-C detaches cleanly and removes pins.
-- [ ] Gate check passes: `make test && sudo make smoke` (all smokes green, serial)
-- [ ] Test count: `make test` unchanged; `smoke_nexthop.sh` passes
+- [x] Load gateway on veth, seed one enabled service; `dpstat set-nexthop <dp_id> <peer_mac>` → crafted IPv4 frame egresses with dst/src MAC rewritten, **TTL + IPv4 checksum unchanged**.
+- [x] `dpstat resolve-nexthop <dp_id> <peer_ip>` against a veth peer answering ARP → entry becomes `resolved=1` with the peer's MAC; the next frame rewrites to it.
+- [x] With no entry (or `evict-nexthop`) → the matched-service frame is **dropped**, `snapshot --json` shows `nexthop_unresolved` incremented.
+- [x] Ctrl-C detaches cleanly and removes pins.
+- [x] Gate check passes: `make test && sudo make smoke` (all smokes green, serial)
+- [x] Test count: `make test` unchanged; `smoke_nexthop.sh` passes
 
 **Tests:** dp-integration
 **Gate:** full
