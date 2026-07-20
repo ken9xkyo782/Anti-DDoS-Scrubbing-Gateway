@@ -189,3 +189,99 @@ async def test_health_exposes_desired_and_effective_bypass_drift_when_reader_is_
     assert response.json()["maintenance"]["desired"] is True
     assert response.json()["maintenance"]["effective"] is True
     assert response.json()["xdp_mode"] == "offline"
+
+
+async def test_node_health_reports_unresolved_services_count(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    from app.db.models import ProtectedService
+    from app.worker.telemetry_reader import NextHopEntry
+
+    store = make_store(redis_client)
+    tenant = Tenant(name="Unresolved Services Tenant")
+    db_session.add(tenant)
+    await db_session.flush()
+    admin = await create_user(db_session, username="node-unresolved-admin", role=Role.admin)
+
+    svc1 = ProtectedService(
+        tenant_id=tenant.id,
+        name="svc-resolved",
+        cidr_or_ip="203.0.113.10/32",
+        dp_id=10,
+        enabled=True,
+    )
+    svc2 = ProtectedService(
+        tenant_id=tenant.id,
+        name="svc-unresolved",
+        cidr_or_ip="203.0.113.11/32",
+        dp_id=11,
+        enabled=True,
+    )
+    db_session.add_all([svc1, svc2])
+    await db_session.flush()
+
+    snapshot_mixed = TelemetrySnapshot(
+        ts_ns=1_000_000_000,
+        active_slot=1,
+        active_version=1,
+        xdp_mode="native",
+        xdp_prog_id=1,
+        xdp_ifindex=1,
+        node=NodeCounters(counters={}, sample_stats={}, bloom_stats={}),
+        services=(),
+        nexthops=(
+            NextHopEntry(
+                dp_id=10,
+                dst_mac="00:11:22:33:44:55",
+                src_mac="aa:bb:cc:dd:ee:ff",
+                resolved=True,
+                age_s=5,
+            ),
+            NextHopEntry(
+                dp_id=11,
+                dst_mac="00:00:00:00:00:00",
+                src_mac="aa:bb:cc:dd:ee:ff",
+                resolved=False,
+                age_s=0,
+            ),
+        ),
+    )
+    snapshot_all_resolved = TelemetrySnapshot(
+        ts_ns=2_000_000_000,
+        active_slot=1,
+        active_version=1,
+        xdp_mode="native",
+        xdp_prog_id=1,
+        xdp_ifindex=1,
+        node=NodeCounters(counters={}, sample_stats={}, bloom_stats={}),
+        services=(),
+        nexthops=(
+            NextHopEntry(
+                dp_id=10,
+                dst_mac="00:11:22:33:44:55",
+                src_mac="aa:bb:cc:dd:ee:ff",
+                resolved=True,
+                age_s=5,
+            ),
+            NextHopEntry(
+                dp_id=11,
+                dst_mac="00:11:22:33:44:56",
+                src_mac="aa:bb:cc:dd:ee:ff",
+                resolved=True,
+                age_s=2,
+            ),
+        ),
+    )
+
+    reader = FakeTelemetryReader(snapshots=[snapshot_mixed, snapshot_all_resolved])
+
+    async for client in make_client(db_session, store, reader):
+        await authenticate(client, store, admin)
+        res_mixed = await client.get("/node/health")
+        res_resolved = await client.get("/node/health")
+
+    assert res_mixed.status_code == 200
+    assert res_mixed.json()["unresolved_services"] == 1
+    assert res_resolved.status_code == 200
+    assert res_resolved.json()["unresolved_services"] == 0
