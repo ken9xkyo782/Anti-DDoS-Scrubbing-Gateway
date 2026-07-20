@@ -3,7 +3,7 @@
 **Spec:** `.specs/features/nexthop-mac-rewrite/spec.md`
 **Context:** `.specs/features/nexthop-mac-rewrite/context.md`
 **Design ID:** AD-035
-**Status:** Approved (2026-07-20)
+**Status:** Implemented and Verified (2026-07-20)
 
 ---
 

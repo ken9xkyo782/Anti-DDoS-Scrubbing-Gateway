@@ -63,26 +63,21 @@ The loader seed path is intentionally small. It writes one CIDR or port for smok
 the 16..23 global-bloom expansion band, snapshot replacement, and bulk map population to the M4
 builder.
 
-## Forwarding: transparent bridge vs. routed next-hop rewrite
+## Forwarding: map-based next-hop L2 rewrite (supersedes packet-time fib_lookup)
 
-`redirect_out` (and `redirect_out_bypass`) call `l3_rewrite_nexthop()` before
-`bpf_redirect_map(&tx_devmap, 0, XDP_DROP)`. This makes the clean-path forward work in **two
-deployment topologies**, chosen per packet by `bpf_fib_lookup(BPF_FIB_LOOKUP_DIRECT)`:
+`redirect_out` looks up the matched service's next-hop entry in the pinned, unslotted `nexthop_map` (keyed by `dp_id`), rewrites `eth->h_dest` to `dst_mac` and `eth->h_source` to `src_mac`, then redirects via `bpf_redirect_map(&tx_devmap, 0, XDP_DROP)`.
 
-- **Transparent bridge (bump-in-the-wire):** IN/OUT share the backend's L2 segment and the ingress
-  frame already carries the backend's dst MAC. `bpf_fib_lookup` returns non-`SUCCESS` (no route/neigh),
-  so the frame is forwarded **verbatim** — the original header-preserving behavior.
-- **Routed (L3 next-hop):** the gateway has IPs on IN/OUT, `ip_forward=1`, and upstream routes traffic
-  to it, so ingress frames carry the gateway's own IN MAC. On `SUCCESS` the helper rewrites
-  `eth->h_dest` = resolved next-hop MAC and `eth->h_source` = OUT MAC, then redirects. Without this,
-  a verbatim redirect reaches the backend with the wrong dst MAC and is dropped at L2.
+- **Out-of-band resolution:** The control-plane worker (or `dpstat resolve-nexthop <dp_id> <ipv4>`) resolves next-hop MACs via ARP on `OUT` and populates `nexthop_map`.
+- **Fail-closed:** An unresolved or absent next-hop entry drops the frame with `DR_NEXTHOP_UNRESOLVED` (index 16) before clean statistics are recorded — mis-forwarding wrong-MAC frames is prevented.
+- **Single-host service:** Protected service destinations are single IPv4 host addresses (`/32` or bare host).
+- **Bypass mode:** Soft-bypass forwards traffic verbatim with no L2 rewrite or FIB lookup.
+- **Zero packet-time FIB lookup:** `bpf_fib_lookup` is superseded and removed from the redirect path. TTL and IPv4 checksum remain intact.
 
-The rewrite runs only for `ETH_P_IP`; ARP is always forwarded verbatim. **TTL is never decremented**
-in either mode (the hop stays L3-transparent), so no IPv4 checksum recompute is needed.
-
-Verify with the `xdp:xdp_redirect` / `xdp:xdp_redirect_err` / `xdp:xdp_devmap_xmit` tracepoints, or run
-the program under `BPF_PROG_TEST_RUN` and inspect the output frame's dst/src MAC (test-run executes the
-FIB lookup and the rewrite; the devmap xmit itself is a no-op there).
+`dpstat` subcommands:
+- `dpstat resolve-nexthop <dp_id> <ipv4>`: ARP-probes target on OUT interface and writes resolved entry.
+- `dpstat evict-nexthop <dp_id>`: deletes map entry on service disable/delete.
+- `dpstat set-nexthop <dp_id> <dst_mac> [<src_mac>]`: manual next-hop MAC seed for testing/ops.
+- `dpstat nexthop`: dumps next-hop entries and resolution status.
 
 ### OUT interface must allow XDP TX (devmap redirect target)
 

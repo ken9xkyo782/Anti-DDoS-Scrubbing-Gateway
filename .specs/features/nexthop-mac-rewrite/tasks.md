@@ -2,7 +2,7 @@
 
 **Design:** `.specs/features/nexthop-mac-rewrite/design.md` (AD-035)
 **Spec:** `.specs/features/nexthop-mac-rewrite/spec.md` (NHR-01..21)
-**Status:** Draft (awaiting approval → Execute)
+**Status:** Complete
 
 **Baselines pinned live at Execute:** `B_dp` = current `data-plane/ make test` head (TESTING.md records 130; AD-DP-01's +3 is uncommitted — pin the real head at Execute). `B_cp` = current `control-plane/ pytest -q` head. Each task states its added-test floor and keeps the total monotonic.
 
@@ -191,10 +191,10 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] `/node/health` reports `unresolved_services` (enabled services with `resolved=0`/absent) from the snapshot `"nexthop"` block; a resolved↔unresolved transition is log/telemetry-observable.
-- [ ] Integration cases (`FakeTelemetryReader` with a nexthop block): mixed resolved/unresolved → correct count; all-resolved → 0.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `≥ B_cp + 2` (state exact live)
+- [x] `/node/health` reports `unresolved_services` (enabled services with `resolved=0`/absent) from the snapshot `"nexthop"` block; a resolved↔unresolved transition is log/telemetry-observable.
+- [x] Integration cases (`FakeTelemetryReader` with a nexthop block): mixed resolved/unresolved → correct count; all-resolved → 0.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: 588
 
 **Tests:** integration
 **Gate:** full
@@ -213,11 +213,11 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `coding-guidelines`
 
 **Done when:**
-- [ ] Admin `POST` "resolve now" for a service triggers an out-of-band resolve (reuses `request_resolve`); non-admin denied.
-- [ ] Per-service resolve success/failure counts + last-resolved age readable.
-- [ ] Integration cases: admin trigger enqueues a resolve; RBAC denial; metrics reflect fake outcomes.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `≥ B_cp + 2` (state exact live)
+- [x] Admin `POST` "resolve now" for a service triggers an out-of-band resolve (reuses `request_resolve`); non-admin denied.
+- [x] Per-service resolve success/failure counts + last-resolved age readable.
+- [x] Integration cases: admin trigger enqueues a resolve; RBAC denial; metrics reflect fake outcomes.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: 590
 
 **Tests:** integration
 **Gate:** full
@@ -236,10 +236,10 @@ Phase view:
 **Tools:** MCP: NONE · Skill: `docs-writer`
 
 **Done when:**
-- [ ] `data-plane/README.md` next-hop section rewritten (map-based, fail-closed, `dpstat` subcommands, bypass=verbatim); PRD §8.2 note updated; the `bpf_fib_lookup` mechanism marked superseded.
-- [ ] Single-IPv4-host service constraint documented.
-- [ ] Gate check passes: docs build/lint if any (else prose review); no code gate.
-- [ ] Test count: n/a (docs)
+- [x] `data-plane/README.md` next-hop section rewritten (map-based, fail-closed, `dpstat` subcommands, bypass=verbatim); PRD §8.2 note updated; the `bpf_fib_lookup` mechanism marked superseded.
+- [x] Single-IPv4-host service constraint documented.
+- [x] Gate check passes: docs build/lint if any (else prose review); no code gate.
+- [x] Test count: n/a (docs)
 
 **Tests:** none
 **Gate:** none (docs)

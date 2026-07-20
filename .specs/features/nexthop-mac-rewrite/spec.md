@@ -2,7 +2,7 @@
 
 **Feature slug:** `nexthop-mac-rewrite`
 **ID category:** `NHR`
-**Status:** Spec drafted (awaiting approval → Design)
+**Status:** Implemented and Verified
 **Supersedes:** the packet-time `bpf_fib_lookup` mechanism shipped as AD-DP-01 / `service-lookup-redirect` amendment **SLRD-27..29**.
 
 ---
