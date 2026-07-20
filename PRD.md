@@ -59,7 +59,10 @@ MVP v1 tập trung vào một gateway node đơn lẻ, chạy native XDP trên s
 - `IN`: nhận traffic từ upstream/WAN.
 - `OUT`: chuyển traffic sạch sang backend/clean zone.
 
-Gateway hoạt động theo mô hình L2 transparent bridge inbound-only: packet sạch được giữ nguyên header L3, không giảm TTL, không cập nhật IP checksum, không route qua Linux kernel networking stack, và được XDP redirect từ `IN` sang `OUT` theo static port pair.
+Gateway hoạt động inbound-only, giữ nguyên header L3 của packet sạch (không giảm TTL, không cập nhật IP checksum, không route qua Linux kernel networking stack) và XDP redirect từ `IN` sang `OUT` theo static port pair. Bước chuyển tiếp L2 hỗ trợ **hai kiểu triển khai**, tự chọn qua `bpf_fib_lookup` tại thời điểm redirect (bổ sung 2026-07-20 — xem §8.2 ghi chú, AD-DP-01/SLRD-27):
+
+- **Transparent bridge (bump-in-the-wire):** khi frame vào đã mang sẵn dst MAC của backend (IN/OUT cùng L2 segment, không định tuyến), gateway forward **verbatim** — giữ nguyên toàn bộ header L2.
+- **Routed deployment (L3 next-hop):** khi gateway có IP trên IN/OUT và upstream định tuyến traffic tới nó, `bpf_fib_lookup` phân giải next-hop và gateway **rewrite dst/src MAC** (dst = MAC next-hop/backend, src = MAC cổng OUT) trước khi redirect. TTL vẫn **không** bị giảm nên hop giữ tính trong suốt ở L3.
 
 ## 3. Mục tiêu và chỉ số thành công
 
@@ -360,7 +363,7 @@ Ghi chú kỹ thuật:
 
 - Service lookup được đặt sớm để xác định ngữ cảnh bảo vệ và whitelist/VIP; đây là lookup metadata rẻ, không phải vòng lặp rule.
 - Hardcoded UDP amplification ports chạy sau whitelist/VIP nhưng trước bogon/blacklist/rule để vừa fail-fast reflection phổ biến vừa bảo toàn ngoại lệ VIP. Dynamic blocked-port bitmap chỉ áp dụng sau service match để tránh chi phí map lookup trên traffic không phục vụ.
-- Vì MVP là L2 transparent bridge, các requirement L3 như `TTL decrement`, `incremental checksum`, `neighbor unresolved`, `ARP next-hop refresh` không thuộc data-plane forwarding chính của v1.
+- Chuyển tiếp mặc định giữ nguyên header L3 (không `TTL decrement`, không `incremental checksum`). **Bổ sung 2026-07-20 (AD-DP-01 / SLRD-27..29):** để hỗ trợ triển khai **routed (L3 next-hop)** — gateway có IP trên IN/OUT, `ip_forward=1`, upstream định tuyến tới gateway — bước redirect gọi `bpf_fib_lookup(BPF_FIB_LOOKUP_DIRECT)` và **rewrite L2 dst/src MAC** sang next-hop khi lookup trả `SUCCESS`; khi không phân giải được (transparent bridge thuần, ARP, hoặc neighbor chưa resolve) frame được forward **verbatim** — fallback giữ nguyên hành vi cũ. TTL không bị giảm ở cả hai chế độ nên `neighbor unresolved`/`ARP next-hop refresh` (đường về DSR) vẫn ngoài phạm vi forwarding chính. **Yêu cầu vận hành:** nếu `OUT` là NIC cần XDP TX ring riêng (vd Intel `ixgbe`), phải attach một XDP program (vd `XDP_PASS`) lên `OUT` để `ndo_xdp_xmit`/devmap redirect hoạt động; thiếu bước này gói bị đếm `clean` nhưng drop im lặng ở egress (`xdp_redirect_err`).
 - Nhánh service match `Không` phân biệt 2 trường hợp: IP **chưa khai báo service** → `service_miss`; service tồn tại nhưng **`disabled`** → `service_disabled` (disable là ngắt chủ đích, không pass-through).
 - Vòng lặp allow-rule là **first-match theo `priority` tăng dần**; rule khớp đầu tiên là terminal (kể cả khi hết quota → `rate_limit_drop`), không fall-through.
 - Trên nhánh non-VIP, sau khi allow-rule match và còn quota per-rule, packet đi qua **thang admit committed/burst** (8.4): committed bucket còn token → admit; nếu không, burst bucket + node headroom → admit, ngược lại drop `service_ceiling_drop` (burst cạn) hoặc `congestion_drop` (node bão hòa). Đây là điểm cưỡng chế băng thông sạch phục vụ chargeback theo Gbps sạch và fairness per-service. Nhánh whitelist/VIP dùng VIP ceiling riêng, không đi qua thang admit này.
