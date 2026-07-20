@@ -47,6 +47,8 @@
 #define SAMPLE_CONFIG_PIN_PATH PIN_DIR "/sample_config"
 #define SAMPLE_STATS_PIN_PATH PIN_DIR "/sample_stats"
 #define BLOOM_STATS_PIN_PATH PIN_DIR "/bloom_stats"
+#define NEXTHOP_MAP_PIN_PATH PIN_DIR "/nexthop_map"
+#define TX_DEVMAP_PIN_PATH PIN_DIR "/tx_devmap"
 #define DEFAULT_SAMPLE_RATE_PER_SEC 256
 #define DEFAULT_SAMPLE_BURST 64
 #define DEFAULT_SEED_VIP_PPS 1000
@@ -203,7 +205,9 @@ static int set_config_pin_paths(struct xdp_gateway_bpf *skel)
 	    set_pin_path(skel->maps.gbl_meta, GBL_META_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.active_config, ACTIVE_CONFIG_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.node_control, NODE_CONTROL_PIN_PATH) != 0 ||
-	    set_pin_path(skel->maps.bypass_counter, BYPASS_COUNTER_PIN_PATH) != 0)
+	    set_pin_path(skel->maps.bypass_counter, BYPASS_COUNTER_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.nexthop_map, NEXTHOP_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.tx_devmap, TX_DEVMAP_PIN_PATH) != 0)
 		return -1;
 
 	return 0;
@@ -257,6 +261,8 @@ static void unpin_config_maps(struct xdp_gateway_bpf *skel)
 	unpin_map(skel->maps.active_config, "active_config");
 	unpin_map(skel->maps.node_control, "node_control");
 	unpin_map(skel->maps.bypass_counter, "bypass_counter");
+	unpin_map(skel->maps.nexthop_map, "nexthop_map");
+	unpin_map(skel->maps.tx_devmap, "tx_devmap");
 }
 
 static int pin_observability_maps(struct xdp_gateway_bpf *skel)
@@ -319,6 +325,10 @@ static int pin_config_maps(struct xdp_gateway_bpf *skel)
 	if (pin_map(skel->maps.node_control, "node_control") != 0)
 		goto rollback;
 	if (pin_map(skel->maps.bypass_counter, "bypass_counter") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.nexthop_map, "nexthop_map") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.tx_devmap, "tx_devmap") != 0)
 		goto rollback;
 
 	return 0;

@@ -18,6 +18,15 @@
 #include "blacklist.h"
 #include "node_control.h"
 #include "service.h"
+#include "nexthop.h"
+
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+#include <linux/if_packet.h>
+#include <net/ethernet.h>
 
 #define PIN_DIR "/sys/fs/bpf/xdp_gateway"
 #define ACTIVE_CONFIG_PIN_PATH PIN_DIR "/active_config"
@@ -29,6 +38,8 @@
 #define SAMPLE_STATS_PIN_PATH PIN_DIR "/sample_stats"
 #define BLOOM_STATS_PIN_PATH PIN_DIR "/bloom_stats"
 #define SVC_STAT_PIN_PATH PIN_DIR "/svc_stat_map"
+#define NEXTHOP_MAP_PIN_PATH PIN_DIR "/nexthop_map"
+#define TX_DEVMAP_PIN_PATH PIN_DIR "/tx_devmap"
 
 static volatile sig_atomic_t exiting;
 
@@ -46,6 +57,10 @@ static void usage(const char *prog)
 	fprintf(stderr, "       %s active_config\n", prog);
 	fprintf(stderr, "       %s set-bypass 0|1\n", prog);
 	fprintf(stderr, "       %s snapshot --json [--ifindex N]\n", prog);
+	fprintf(stderr, "       %s resolve-nexthop <dp_id> <ipv4>\n", prog);
+	fprintf(stderr, "       %s evict-nexthop <dp_id>\n", prog);
+	fprintf(stderr, "       %s set-nexthop <dp_id> <dst_mac> [<src_mac>]\n", prog);
+	fprintf(stderr, "       %s nexthop\n", prog);
 }
 
 static int open_pinned_map(const char *path)
@@ -334,6 +349,31 @@ static void print_service_snapshot(const struct service_snapshot *snapshot)
 	putchar('}');
 }
 
+static __u64 get_monotonic_ns(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+		return 0;
+	return (__u64)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+
+static void print_nexthop_snapshot(__u32 dp_id, const struct nexthop *nh, __u64 now)
+{
+	__u64 age_s = 0;
+	if (now > nh->last_resolved_ns && nh->last_resolved_ns > 0) {
+		age_s = (now - nh->last_resolved_ns) / 1000000000ULL;
+	}
+
+	printf("{\"dp_id\":%u,\"dst_mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+	       "\"src_mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+	       "\"resolved\":%s,\"age_s\":%llu}",
+	       dp_id,
+	       nh->dst_mac[0], nh->dst_mac[1], nh->dst_mac[2], nh->dst_mac[3], nh->dst_mac[4], nh->dst_mac[5],
+	       nh->src_mac[0], nh->src_mac[1], nh->src_mac[2], nh->src_mac[3], nh->src_mac[4], nh->src_mac[5],
+	       nh->resolved ? "true" : "false",
+	       (unsigned long long)age_s);
+}
+
 static int get_snapshot_timestamp(__u64 *timestamp_ns)
 {
 	struct timespec timestamp;
@@ -443,6 +483,7 @@ static int cmd_snapshot(int argc, char **argv)
 	int stats_fd = -1;
 	int bloom_fd = -1;
 	int svc_fd = -1;
+	int nexthop_fd = -1;
 	int ifindex;
 	int possible_cpus;
 	int err = 1;
@@ -476,6 +517,9 @@ static int cmd_snapshot(int argc, char **argv)
 		goto out;
 	svc_fd = open_pinned_map(SVC_STAT_PIN_PATH);
 	if (svc_fd < 0)
+		goto out;
+	nexthop_fd = open_pinned_map(NEXTHOP_MAP_PIN_PATH);
+	if (nexthop_fd < 0)
 		goto out;
 
 	if (bpf_map_lookup_elem(active_fd, &active_key, &active) != 0) {
@@ -521,7 +565,28 @@ static int cmd_snapshot(int argc, char **argv)
 			putchar(',');
 		print_service_snapshot(&services.items[i]);
 	}
-	fputs("]}\n", stdout);
+	fputs("]", stdout);
+
+	fputs(",\"nexthop\":[", stdout);
+	__u32 nh_key;
+	__u32 nh_next_key;
+	const __u32 *nh_current_key = NULL;
+	int nh_idx = 0;
+	__u64 now_ns = get_monotonic_ns();
+	while (bpf_map_get_next_key(nexthop_fd, nh_current_key, &nh_next_key) == 0) {
+		struct nexthop nh;
+		if (bpf_map_lookup_elem(nexthop_fd, &nh_next_key, &nh) == 0) {
+			if (nh_idx)
+				putchar(',');
+			print_nexthop_snapshot(nh_next_key, &nh, now_ns);
+			nh_idx++;
+		}
+		nh_key = nh_next_key;
+		nh_current_key = &nh_key;
+	}
+	fputs("]", stdout);
+
+	fputs("}\n", stdout);
 	err = 0;
 
 out:
@@ -540,6 +605,8 @@ out:
 		close(bloom_fd);
 	if (svc_fd >= 0)
 		close(svc_fd);
+	if (nexthop_fd >= 0)
+		close(nexthop_fd);
 	return err;
 }
 
@@ -852,6 +919,369 @@ static int cmd_active_config(void)
 	return 0;
 }
 
+static int parse_mac(const char *text, unsigned char *mac)
+{
+	unsigned int val[6];
+	if (sscanf(text, "%x:%x:%x:%x:%x:%x",
+		   &val[0], &val[1], &val[2], &val[3], &val[4], &val[5]) != 6) {
+		return -1;
+	}
+	for (int i = 0; i < 6; i++) {
+		if (val[i] > 255)
+			return -1;
+		mac[i] = (unsigned char)val[i];
+	}
+	return 0;
+}
+
+static int cmd_resolve_nexthop(int argc, char **argv)
+{
+	__u32 dp_id;
+	struct in_addr target_ip;
+	int devmap_fd, map_fd, sock = -1;
+	__u32 dev_key = 0;
+	__u32 out_ifindex = 0;
+	char ifname[IFNAMSIZ];
+	struct ifreq ifr;
+	unsigned char src_mac[6];
+	__u32 spa = 0;
+	int err = 1;
+
+	if (argc != 2)
+		return 2;
+
+	__u64 parsed_id;
+	if (parse_u64(argv[0], &parsed_id) != 0 || parsed_id > 0xffffffff) {
+		fprintf(stderr, "invalid dp_id: %s\n", argv[0]);
+		return 2;
+	}
+	dp_id = (__u32)parsed_id;
+
+	if (inet_pton(AF_INET, argv[1], &target_ip) != 1) {
+		fprintf(stderr, "invalid target IPv4: %s\n", argv[1]);
+		return 2;
+	}
+
+	devmap_fd = open_pinned_map(TX_DEVMAP_PIN_PATH);
+	if (devmap_fd < 0)
+		return 1;
+
+	if (bpf_map_lookup_elem(devmap_fd, &dev_key, &out_ifindex) != 0) {
+		fprintf(stderr, "failed to lookup tx_devmap[0]: %s\n", strerror(errno));
+		close(devmap_fd);
+		return 1;
+	}
+	close(devmap_fd);
+
+	if (!if_indextoname(out_ifindex, ifname)) {
+		fprintf(stderr, "failed to resolve interface name for index %u: %s\n", out_ifindex, strerror(errno));
+		return 1;
+	}
+
+	sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
+	if (sock < 0) {
+		fprintf(stderr, "failed to open AF_PACKET raw socket: %s\n", strerror(errno));
+		return 1;
+	}
+
+	memset(&ifr, 0, sizeof(ifr));
+	snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
+	if (ioctl(sock, SIOCGIFHWADDR, &ifr) != 0) {
+		fprintf(stderr, "failed to get source MAC for %s: %s\n", ifname, strerror(errno));
+		goto out;
+	}
+	memcpy(src_mac, ifr.ifr_hwaddr.sa_data, 6);
+
+	memset(&ifr, 0, sizeof(ifr));
+	snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
+	if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
+		struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+		spa = sin->sin_addr.s_addr;
+	} else {
+		spa = 0;
+	}
+
+	struct sockaddr_ll sll = {};
+	sll.sll_family = AF_PACKET;
+	sll.sll_ifindex = (int)out_ifindex;
+	sll.sll_protocol = htons(ETH_P_ARP);
+	if (bind(sock, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
+		fprintf(stderr, "failed to bind socket to %s: %s\n", ifname, strerror(errno));
+		goto out;
+	}
+
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 200000;
+	if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+		fprintf(stderr, "failed to set socket receive timeout: %s\n", strerror(errno));
+		goto out;
+	}
+
+	struct arp_packet {
+		struct ethhdr eth;
+		struct ether_arp arp;
+	} __attribute__((packed)) req, resp;
+
+	memset(&req, 0, sizeof(req));
+	memset(req.eth.h_dest, 0xff, ETH_ALEN);
+	memcpy(req.eth.h_source, src_mac, ETH_ALEN);
+	req.eth.h_proto = htons(ETH_P_ARP);
+
+	req.arp.ea_hdr.ar_hrd = htons(ARPHRD_ETHER);
+	req.arp.ea_hdr.ar_pro = htons(ETH_P_IP);
+	req.arp.ea_hdr.ar_hln = ETH_ALEN;
+	req.arp.ea_hdr.ar_pln = 4;
+	req.arp.ea_hdr.ar_op = htons(ARPOP_REQUEST);
+	memcpy(req.arp.arp_sha, src_mac, ETH_ALEN);
+	memcpy(req.arp.arp_spa, &spa, 4);
+	memset(req.arp.arp_tha, 0, ETH_ALEN);
+	memcpy(req.arp.arp_tpa, &target_ip.s_addr, 4);
+
+	int resolved = 0;
+	unsigned char dst_mac[6] = {};
+
+	for (int retry = 0; retry < 3; retry++) {
+		if (sendto(sock, &req, sizeof(req), 0, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
+			fprintf(stderr, "failed to send ARP request (retry %d): %s\n", retry, strerror(errno));
+			continue;
+		}
+
+		while (1) {
+			ssize_t n = recv(sock, &resp, sizeof(resp), 0);
+			if (n < 0) {
+				if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+					break;
+				}
+				fprintf(stderr, "failed to receive packet: %s\n", strerror(errno));
+				break;
+			}
+			if (n < (ssize_t)sizeof(struct arp_packet))
+				continue;
+
+			if (resp.eth.h_proto == htons(ETH_P_ARP) &&
+			    resp.arp.ea_hdr.ar_op == htons(ARPOP_REPLY) &&
+			    memcmp(resp.arp.arp_spa, &target_ip.s_addr, 4) == 0) {
+				memcpy(dst_mac, resp.arp.arp_sha, ETH_ALEN);
+				resolved = 1;
+				break;
+			}
+		}
+		if (resolved)
+			break;
+	}
+
+	map_fd = open_pinned_map(NEXTHOP_MAP_PIN_PATH);
+	if (map_fd < 0)
+		goto out;
+
+	struct nexthop nh = {};
+	memcpy(nh.src_mac, src_mac, ETH_ALEN);
+	nh.last_resolved_ns = get_monotonic_ns();
+
+	if (resolved) {
+		memcpy(nh.dst_mac, dst_mac, ETH_ALEN);
+		nh.resolved = 1;
+		if (bpf_map_update_elem(map_fd, &dp_id, &nh, BPF_ANY) != 0) {
+			fprintf(stderr, "failed to update nexthop_map for dp_id %u: %s\n", dp_id, strerror(errno));
+			close(map_fd);
+			goto out;
+		}
+		printf("Resolved next-hop for dp_id %u to MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
+		       dp_id, dst_mac[0], dst_mac[1], dst_mac[2], dst_mac[3], dst_mac[4], dst_mac[5]);
+		err = 0;
+	} else {
+		nh.resolved = 0;
+		if (bpf_map_update_elem(map_fd, &dp_id, &nh, BPF_ANY) != 0) {
+			fprintf(stderr, "failed to update nexthop_map with unresolved entry for dp_id %u: %s\n", dp_id, strerror(errno));
+		}
+		fprintf(stderr, "ARP resolution timed out for IP %s\n", argv[1]);
+		close(map_fd);
+		goto out;
+	}
+	close(map_fd);
+
+out:
+	if (sock >= 0)
+		close(sock);
+	return err;
+}
+
+static int cmd_evict_nexthop(int argc, char **argv)
+{
+	__u32 dp_id;
+	int fd;
+	int err = 1;
+
+	if (argc != 1)
+		return 2;
+
+	__u64 parsed_id;
+	if (parse_u64(argv[0], &parsed_id) != 0 || parsed_id > 0xffffffff) {
+		fprintf(stderr, "invalid dp_id: %s\n", argv[0]);
+		return 2;
+	}
+	dp_id = (__u32)parsed_id;
+
+	fd = open_pinned_map(NEXTHOP_MAP_PIN_PATH);
+	if (fd < 0)
+		return 1;
+
+	if (bpf_map_delete_elem(fd, &dp_id) != 0) {
+		if (errno == ENOENT) {
+			printf("Next-hop for dp_id %u not found (nothing to evict)\n", dp_id);
+			err = 0;
+		} else {
+			fprintf(stderr, "failed to delete nexthop for dp_id %u: %s\n", dp_id, strerror(errno));
+		}
+		goto out;
+	}
+
+	printf("Evicted next-hop for dp_id %u\n", dp_id);
+	err = 0;
+
+out:
+	close(fd);
+	return err;
+}
+
+static int cmd_set_nexthop(int argc, char **argv)
+{
+	__u32 dp_id;
+	unsigned char dst_mac[6];
+	unsigned char src_mac[6];
+	int map_fd;
+	int err = 1;
+
+	if (argc < 2 || argc > 3)
+		return 2;
+
+	__u64 parsed_id;
+	if (parse_u64(argv[0], &parsed_id) != 0 || parsed_id > 0xffffffff) {
+		fprintf(stderr, "invalid dp_id: %s\n", argv[0]);
+		return 2;
+	}
+	dp_id = (__u32)parsed_id;
+
+	if (parse_mac(argv[1], dst_mac) != 0) {
+		fprintf(stderr, "invalid dst MAC address: %s\n", argv[1]);
+		return 2;
+	}
+
+	if (argc == 3) {
+		if (parse_mac(argv[2], src_mac) != 0) {
+			fprintf(stderr, "invalid src MAC address: %s\n", argv[2]);
+			return 2;
+		}
+	} else {
+		int devmap_fd = open_pinned_map(TX_DEVMAP_PIN_PATH);
+		if (devmap_fd < 0)
+			return 1;
+		__u32 dev_key = 0;
+		__u32 out_ifindex = 0;
+		if (bpf_map_lookup_elem(devmap_fd, &dev_key, &out_ifindex) != 0) {
+			fprintf(stderr, "failed to lookup tx_devmap[0]: %s\n", strerror(errno));
+			close(devmap_fd);
+			return 1;
+		}
+		close(devmap_fd);
+
+		char ifname[IFNAMSIZ];
+		if (!if_indextoname(out_ifindex, ifname)) {
+			fprintf(stderr, "failed to get interface name for index %u: %s\n", out_ifindex, strerror(errno));
+			return 1;
+		}
+
+		int sock = socket(AF_INET, SOCK_DGRAM, 0);
+		if (sock < 0) {
+			fprintf(stderr, "failed to open socket: %s\n", strerror(errno));
+			return 1;
+		}
+		struct ifreq ifr;
+		memset(&ifr, 0, sizeof(ifr));
+		snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
+		if (ioctl(sock, SIOCGIFHWADDR, &ifr) != 0) {
+			fprintf(stderr, "failed to get HW addr for %s: %s\n", ifname, strerror(errno));
+			close(sock);
+			return 1;
+		}
+		close(sock);
+		memcpy(src_mac, ifr.ifr_hwaddr.sa_data, 6);
+	}
+
+	map_fd = open_pinned_map(NEXTHOP_MAP_PIN_PATH);
+	if (map_fd < 0)
+		return 1;
+
+	struct nexthop nh = {};
+	memcpy(nh.dst_mac, dst_mac, 6);
+	memcpy(nh.src_mac, src_mac, 6);
+	nh.resolved = 1;
+	nh.last_resolved_ns = get_monotonic_ns();
+
+	if (bpf_map_update_elem(map_fd, &dp_id, &nh, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to update nexthop_map: %s\n", strerror(errno));
+		close(map_fd);
+		return 1;
+	}
+
+	printf("Manually set next-hop for dp_id %u: dst=%02x:%02x:%02x:%02x:%02x:%02x, src=%02x:%02x:%02x:%02x:%02x:%02x\n",
+	       dp_id, dst_mac[0], dst_mac[1], dst_mac[2], dst_mac[3], dst_mac[4], dst_mac[5],
+	       src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5]);
+	err = 0;
+	close(map_fd);
+	return err;
+}
+
+static int cmd_nexthop(int argc, char **argv)
+{
+	(void)argv;
+	if (argc != 0)
+		return 2;
+
+	int map_fd = open_pinned_map(NEXTHOP_MAP_PIN_PATH);
+	if (map_fd < 0)
+		return 1;
+
+	printf("dp_id  dst_mac            src_mac            resolved  age_s\n");
+	__u32 key;
+	__u32 next_key;
+	const __u32 *current_key = NULL;
+	int err;
+	__u64 now = get_monotonic_ns();
+
+	while ((err = bpf_map_get_next_key(map_fd, current_key, &next_key)) == 0) {
+		struct nexthop nh;
+		if (bpf_map_lookup_elem(map_fd, &next_key, &nh) != 0) {
+			fprintf(stderr, "failed to read nexthop_map[%u]: %s\n", next_key, strerror(errno));
+			close(map_fd);
+			return 1;
+		}
+
+		__u64 age_s = 0;
+		if (now > nh.last_resolved_ns && nh.last_resolved_ns > 0) {
+			age_s = (now - nh.last_resolved_ns) / 1000000000ULL;
+		}
+
+		printf("%-5u  %02x:%02x:%02x:%02x:%02x:%02x  %02x:%02x:%02x:%02x:%02x:%02x  %-8s  %llu\n",
+		       next_key,
+		       nh.dst_mac[0], nh.dst_mac[1], nh.dst_mac[2], nh.dst_mac[3], nh.dst_mac[4], nh.dst_mac[5],
+		       nh.src_mac[0], nh.src_mac[1], nh.src_mac[2], nh.src_mac[3], nh.src_mac[4], nh.src_mac[5],
+		       nh.resolved ? "true" : "false", (unsigned long long)age_s);
+
+		key = next_key;
+		current_key = &key;
+	}
+	if (errno != ENOENT) {
+		fprintf(stderr, "failed to iterate nexthop_map: %s\n", strerror(errno));
+		close(map_fd);
+		return 1;
+	}
+
+	close(map_fd);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *prog = argv[0];
@@ -874,6 +1304,14 @@ int main(int argc, char **argv)
 		err = argc == 2 ? cmd_active_config() : 2;
 	else if (strcmp(argv[1], "snapshot") == 0)
 		err = cmd_snapshot(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "resolve-nexthop") == 0)
+		err = cmd_resolve_nexthop(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "evict-nexthop") == 0)
+		err = cmd_evict_nexthop(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "set-nexthop") == 0)
+		err = cmd_set_nexthop(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "nexthop") == 0)
+		err = cmd_nexthop(argc - 2, argv + 2);
 	else
 		err = 2;
 

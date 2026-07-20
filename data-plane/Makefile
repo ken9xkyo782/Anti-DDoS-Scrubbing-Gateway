@@ -71,7 +71,7 @@ $(LOADER): $(LOADER_SRC) $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SRC_DIR)/blac
 
 dpstat: $(DPSTAT)
 
-$(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/blacklist.h | $(BUILD_DIR)
+$(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/nexthop.h | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 apply: $(APPLY) $(TEST_SNAPSHOT_BIN)
