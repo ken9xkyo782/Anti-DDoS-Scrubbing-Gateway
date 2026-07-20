@@ -31,8 +31,8 @@ API_PORT       ?= 8000
 ADMIN_USER     ?= admin
 ADMIN_PASSWORD ?= change-me-please
 COOKIE_SECURE  ?= false
-IN_IFACE       ?= xdpgwin0
-OUT_IFACE      ?= xdpgwout0
+IN_IFACE       ?= enp94s0f0
+OUT_IFACE      ?= enp134s0f1
 SERVICE_DEST   ?= 10.0.0.2
 # Cặp veth demo chỉ được tự tạo khi dùng đúng tên interface mặc định dưới đây.
 DEMO_IN  := xdpgwin0
