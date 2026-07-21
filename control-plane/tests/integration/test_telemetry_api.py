@@ -445,6 +445,7 @@ async def test_node_telemetry_and_health_are_admin_only_and_expose_live_state(
         "active_slot": 1,
         "map_version": 7,
         "map_error_count": 3,
+        "unresolved_services": 0,
         "node_clean_bps": 4_000,
         "node_capacity_bps": 40_000_000_000,
         "window_start": now.isoformat().replace("+00:00", "Z"),

@@ -13,8 +13,6 @@ class RuleCreateRequest(BaseModel):
     src_port_hi: int | None = None
     dst_port_lo: int | None = None
     dst_port_hi: int | None = None
-    pps: int | None = None
-    bps: int | None = None
     enabled: bool = True
 
 
@@ -25,8 +23,6 @@ class RulePatchRequest(BaseModel):
     src_port_hi: int | None = None
     dst_port_lo: int | None = None
     dst_port_hi: int | None = None
-    pps: int | None = None
-    bps: int | None = None
     enabled: bool | None = None
 
 
@@ -47,8 +43,6 @@ class RuleResponse(BaseModel):
     src_port_hi: int | None
     dst_port_lo: int | None
     dst_port_hi: int | None
-    pps: int | None
-    bps: int | None
     enabled: bool
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime

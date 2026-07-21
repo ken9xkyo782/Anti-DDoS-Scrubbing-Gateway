@@ -285,3 +285,32 @@ async def test_cross_tenant_rule_access_returns_zero_leak_404(
     assert response.status_code == 404
     assert "rules-api-service" not in response.text
     assert str(own_tenant.id) not in response.text
+
+
+async def test_rule_creation_ignores_pps_and_bps(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "rules-api-rate-admin")
+    tenant = await create_tenant(db_session, "Rules API Rate Tenant")
+    service = await create_service(db_session, tenant=tenant, actor=admin)
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        response = await client.post(
+            f"/services/{service.service.id}/rules",
+            json={
+                "priority": 10,
+                "protocol": "tcp",
+                "pps": 1000,
+                "bps": 10000,
+            },
+        )
+        assert response.status_code == 202
+        
+        listed = await client.get(f"/services/{service.service.id}/rules")
+        assert listed.status_code == 200
+        rule_data = listed.json()[0]
+        assert "pps" not in rule_data
+        assert "bps" not in rule_data

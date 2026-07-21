@@ -39,8 +39,6 @@ async def create_rule(
         src_port_hi=payload.src_port_hi,
         dst_port_lo=payload.dst_port_lo,
         dst_port_hi=payload.dst_port_hi,
-        pps=payload.pps,
-        bps=payload.bps,
         enabled=payload.enabled,
     )
     return _apply_mutation_response(result.service)
@@ -85,8 +83,6 @@ async def update_rule(
         src_port_hi=payload.src_port_hi,
         dst_port_lo=payload.dst_port_lo,
         dst_port_hi=payload.dst_port_hi,
-        pps=payload.pps,
-        bps=payload.bps,
         enabled=payload.enabled,
     )
     return _apply_mutation_response(result.service)
@@ -150,8 +146,6 @@ def _rule_response(rule: AllowRule, *, warnings: list[str] | None = None) -> Rul
         src_port_hi=rule.src_port_hi,
         dst_port_lo=rule.dst_port_lo,
         dst_port_hi=rule.dst_port_hi,
-        pps=rule.pps,
-        bps=rule.bps,
         enabled=rule.enabled,
         warnings=warnings or [],
         created_at=rule.created_at,

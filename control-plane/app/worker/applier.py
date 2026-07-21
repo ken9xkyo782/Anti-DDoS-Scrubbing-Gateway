@@ -27,7 +27,7 @@ from app.services.feed_reconcile import MAX_GLOBAL_DENY_ENTRIES, GlobalDenySnaps
 logger = logging.getLogger(__name__)
 
 APPLY_SNAPSHOT_MAGIC = b"XDPGWAP1"
-APPLY_SNAPSHOT_SCHEMA_VERSION = 2
+APPLY_SNAPSHOT_SCHEMA_VERSION = 3
 APPLY_SNAPSHOT_KIND_SERVICE_FULL = 1
 APPLY_SNAPSHOT_KIND_GLOBAL_DENY = 2
 _GBPS = 1_000_000_000
@@ -35,6 +35,8 @@ _WL_F_ACTIVE = 1 << 0
 _WL_F_HAS_BROAD = 1 << 1
 _VIP_F_PPS_SET = 1 << 0
 _VIP_F_BPS_SET = 1 << 1
+_SVC_RL_F_PPS_SET = 1 << 0
+_SVC_RL_F_BPS_SET = 1 << 1
 _RULE_F_ENABLED = 1 << 0
 _RULE_F_PPS_SET = 1 << 1
 _RULE_F_BPS_SET = 1 << 2
@@ -58,6 +60,8 @@ class ServiceConfig:
     enabled: bool
     vip_pps: int | None
     vip_bps: int | None
+    service_pps: int | None
+    service_bps: int | None
     plan: ServicePlan | None
     rules: tuple[AllowRule, ...]
     whitelist: tuple[WhitelistEntry, ...]
@@ -254,7 +258,7 @@ async def load_node_config(db: AsyncSession) -> tuple[ServiceConfig, ...]:
 
 
 def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
-    """Encode the explicit v2 SERVICE_FULL apply_snapshot.h wire format."""
+    """Encode the explicit v3 SERVICE_FULL apply_snapshot.h wire format."""
     payload = bytearray()
     payload.extend(APPLY_SNAPSHOT_MAGIC)
     payload.extend(
@@ -270,13 +274,14 @@ def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
         whitelist = tuple(_cidr_parts(entry.source_cidr) for entry in service.whitelist)
         blacklist = tuple(_cidr_parts(entry.source_cidr) for entry in service.blacklist)
         vip_flags = _vip_flags(service)
+        svc_rl_flags = _svc_rl_flags(service)
         wl_flags = _list_flags(whitelist, active=bool(whitelist))
         bl_flags = 0
         committed_bps, ceiling_bps = _plan_rates(service.plan)
 
         payload.extend(
             struct.pack(
-                "<I4sIBBBQQQQBH",
+                "<I4sIBBBQQQQBQQBH",
                 dst_prefixlen,
                 dst_addr,
                 service.dp_id,
@@ -288,6 +293,9 @@ def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
                 service.vip_pps or 0,
                 service.vip_bps or 0,
                 vip_flags,
+                service.service_pps or 0,
+                service.service_bps or 0,
+                svc_rl_flags,
                 len(service.rules),
             )
         )
@@ -340,6 +348,8 @@ def _service_config(service: ProtectedService) -> ServiceConfig:
         enabled=service.enabled,
         vip_pps=service.vip_pps,
         vip_bps=service.vip_bps,
+        service_pps=service.service_pps,
+        service_bps=service.service_bps,
         plan=service.plan,
         rules=tuple(sorted(service.rules, key=lambda rule: rule.priority)),
         whitelist=tuple(sorted(service.whitelist_entries, key=lambda entry: entry.source_cidr)),
@@ -373,6 +383,13 @@ def _plan_rates(plan: ServicePlan | None) -> tuple[int, int]:
 def _vip_flags(service: ServiceConfig) -> int:
     return (_VIP_F_PPS_SET if service.vip_pps is not None else 0) | (
         _VIP_F_BPS_SET if service.vip_bps is not None else 0
+    )
+
+
+def _svc_rl_flags(service: ServiceConfig) -> int:
+    return (
+        (_SVC_RL_F_PPS_SET if service.service_pps is not None else 0) |
+        (_SVC_RL_F_BPS_SET if service.service_bps is not None else 0)
     )
 
 

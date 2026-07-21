@@ -568,3 +568,64 @@ async def test_non_admin_cannot_trigger_nexthop_resolve(
         trigger_res = await client.post(f"/services/{service.id}/resolve-nexthop")
 
     assert trigger_res.status_code == 403
+
+
+async def test_service_rate_limit_fields_api_round_trip(
+    db_session: AsyncSession,
+    redis_client: Redis,
+) -> None:
+    store = make_store(redis_client)
+    admin = await create_admin(db_session, "svc-rl-admin")
+    tenant = await create_tenant(db_session, "Svc RL Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+
+    async for client in make_client(db_session, store):
+        await authenticate(client, store, admin)
+        
+        # Test creation with valid service rate limits
+        create_res = await client.post(
+            "/services",
+            json={
+                "tenant_id": str(tenant.id),
+                "name": "rl-svc",
+                "cidr_or_ip": "203.0.113.80/32",
+                "service_pps": 5000,
+                "service_bps": 100000,
+            },
+        )
+        assert create_res.status_code == 202
+        
+        # Query service and check rates
+        services_res = await client.get("/services")
+        assert services_res.status_code == 200
+        service_data = [s for s in services_res.json() if s["name"] == "rl-svc"][0]
+        assert service_data["service_pps"] == 5000
+        assert service_data["service_bps"] == 100000
+        
+        # Test PATCH updates
+        patch_res = await client.patch(
+            f"/services/{service_data['id']}",
+            json={
+                "service_pps": 2500,
+                "service_bps": 50000,
+            },
+        )
+        assert patch_res.status_code == 202
+        
+        # Verify PATCH updates
+        get_res = await client.get(f"/services/{service_data['id']}")
+        assert get_res.status_code == 200
+        assert get_res.json()["service_pps"] == 2500
+        assert get_res.json()["service_bps"] == 50000
+
+        # Test schema validation rejects negative values
+        neg_res = await client.post(
+            "/services",
+            json={
+                "tenant_id": str(tenant.id),
+                "name": "rl-svc-neg",
+                "cidr_or_ip": "203.0.113.81/32",
+                "service_pps": -5,
+            },
+        )
+        assert neg_res.status_code == 422

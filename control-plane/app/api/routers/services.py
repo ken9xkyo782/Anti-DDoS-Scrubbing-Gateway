@@ -58,6 +58,8 @@ async def create_service(
         mode=payload.mode,
         vip_pps=payload.vip_pps,
         vip_bps=payload.vip_bps,
+        service_pps=payload.service_pps,
+        service_bps=payload.service_bps,
         committed_clean_gbps=(
             payload.plan.committed_clean_gbps if payload.plan is not None else None
         ),
@@ -110,6 +112,8 @@ async def update_service(
         mode=payload.mode,
         vip_pps=payload.vip_pps,
         vip_bps=payload.vip_bps,
+        service_pps=payload.service_pps,
+        service_bps=payload.service_bps,
     )
     return _apply_mutation_response(record.service)
 
@@ -322,6 +326,8 @@ def _service_response(
         enabled=service.enabled,
         vip_pps=service.vip_pps,
         vip_bps=service.vip_bps,
+        service_pps=service.service_pps,
+        service_bps=service.service_bps,
         apply_status=service.apply_status,
         version=service.version,
         active_version=service.active_version,

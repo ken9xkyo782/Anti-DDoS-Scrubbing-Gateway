@@ -23,6 +23,8 @@ def test_serialize_node_snapshot_matches_apply_snapshot_golden_fixture() -> None
         enabled=True,
         vip_pps=1_000,
         vip_bps=8_000_000,
+        service_pps=None,
+        service_bps=None,
         plan=ServicePlan(
             committed_clean_gbps=Decimal("1"),
             ceiling_clean_gbps=Decimal("2"),
@@ -51,6 +53,8 @@ def test_serialize_node_snapshot_matches_apply_snapshot_golden_fixture() -> None
         enabled=True,
         vip_pps=None,
         vip_bps=None,
+        service_pps=None,
+        service_bps=None,
         plan=ServicePlan(
             committed_clean_gbps=Decimal("0"),
             ceiling_clean_gbps=Decimal("0.5"),
@@ -63,4 +67,4 @@ def test_serialize_node_snapshot_matches_apply_snapshot_golden_fixture() -> None
     snapshot = serialize_node_snapshot((rich, minimal))
 
     assert snapshot == GOLDEN_FIXTURE.read_bytes()
-    assert snapshot[8:20] == b"\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00"
+    assert snapshot[8:20] == b"\x03\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00"

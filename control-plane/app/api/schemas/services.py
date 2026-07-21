@@ -19,6 +19,8 @@ class ServiceCreateRequest(BaseModel):
     mode: ServiceMode = ServiceMode.allow_rule_only
     vip_pps: int | None = None
     vip_bps: int | None = None
+    service_pps: int | None = Field(default=None, ge=0)
+    service_bps: int | None = Field(default=None, ge=0)
     plan: ServicePlanCreateRequest | None = None
 
 
@@ -28,6 +30,8 @@ class ServicePatchRequest(BaseModel):
     mode: ServiceMode | None = None
     vip_pps: int | None = None
     vip_bps: int | None = None
+    service_pps: int | None = Field(default=None, ge=0)
+    service_bps: int | None = Field(default=None, ge=0)
 
 
 class ServicePlanPatchRequest(BaseModel):
@@ -58,6 +62,8 @@ class ServiceResponse(BaseModel):
     enabled: bool
     vip_pps: int | None
     vip_bps: int | None
+    service_pps: int | None
+    service_bps: int | None
     apply_status: ApplyStatus
     version: int
     active_version: int | None

@@ -64,6 +64,8 @@ async def create_service(
     mode: ServiceMode = ServiceMode.allow_rule_only,
     vip_pps: int | None = None,
     vip_bps: int | None = None,
+    service_pps: int | None = None,
+    service_bps: int | None = None,
     committed_clean_gbps: Decimal | None = None,
     ceiling_clean_gbps: Decimal | None = None,
     billing_metric: str = DEFAULT_BILLING_METRIC,
@@ -99,6 +101,8 @@ async def create_service(
         enabled=False,
         vip_pps=vip_pps,
         vip_bps=vip_bps,
+        service_pps=service_pps,
+        service_bps=service_bps,
         apply_status=ApplyStatus.pending,
         version=1,
         created_by=actor.id if actor is not None else None,
@@ -165,6 +169,8 @@ async def update_service(
     mode: ServiceMode | None = None,
     vip_pps: int | None = None,
     vip_bps: int | None = None,
+    service_pps: int | None = None,
+    service_bps: int | None = None,
     ip: str | None = None,
 ) -> ServiceRecord:
     service = await _require_service(db, service_id)
@@ -189,6 +195,10 @@ async def update_service(
         service.vip_pps = vip_pps
     if vip_bps is not None:
         service.vip_bps = vip_bps
+    if service_pps is not None:
+        service.service_pps = service_pps
+    if service_bps is not None:
+        service.service_bps = service_bps
 
     service = await bump_version(db, service.id)
     await enqueue_service_update(db, service, actor, ChangeTrigger.service)

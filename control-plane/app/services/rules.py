@@ -33,8 +33,6 @@ async def create_rule(
     src_port_hi: int | None = None,
     dst_port_lo: int | None = None,
     dst_port_hi: int | None = None,
-    pps: int | None = None,
-    bps: int | None = None,
     enabled: bool = True,
     ip: str | None = None,
 ) -> RuleMutationResult:
@@ -61,8 +59,6 @@ async def create_rule(
         src_port_hi=src_port_hi,
         dst_port_lo=dst_port_lo,
         dst_port_hi=dst_port_hi,
-        pps=pps,
-        bps=bps,
         enabled=enabled,
     )
     db.add(rule)
@@ -130,8 +126,6 @@ async def update_rule(
     src_port_hi: int | None = None,
     dst_port_lo: int | None = None,
     dst_port_hi: int | None = None,
-    pps: int | None = None,
-    bps: int | None = None,
     enabled: bool | None = None,
     ip: str | None = None,
 ) -> RuleMutationResult:
@@ -163,10 +157,6 @@ async def update_rule(
         rule.dst_port_lo = dst_port_lo
     if dst_port_hi is not None:
         rule.dst_port_hi = dst_port_hi
-    if pps is not None:
-        rule.pps = pps
-    if bps is not None:
-        rule.bps = bps
     if enabled is not None:
         rule.enabled = enabled
 
