@@ -1,3 +1,4 @@
+import ipaddress
 import uuid
 from ipaddress import IPv4Network
 from typing import Annotated
@@ -5,8 +6,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.routers.telemetry import get_telemetry_reader
 from app.api.schemas.apply import ApplyMutationResponse
 from app.api.schemas.services import (
+    NextHopStatusResponse,
     ServiceCreateRequest,
     ServiceDisableRequest,
     ServicePatchRequest,
@@ -15,6 +18,7 @@ from app.api.schemas.services import (
     ServiceResponse,
 )
 from app.core.cidr import CidrValidationError, parse_ipv4_cidr, reject_reserved
+from app.core.config import get_settings
 from app.core.deps import (
     Principal,
     get_current_user,
@@ -23,7 +27,10 @@ from app.core.deps import (
 )
 from app.db.models import ProtectedService, Role, User
 from app.db.session import get_db
+from app.services import nexthop_metrics
 from app.services import services as service_service
+from app.worker.nexthop_resolver import DpstatNextHopWriter
+from app.worker.telemetry_reader import TelemetryReader
 
 router = APIRouter(prefix="/services", tags=["services"])
 
@@ -186,6 +193,84 @@ async def update_service_plan(
         ceiling_clean_gbps=payload.ceiling_clean_gbps,
     )
     return _apply_mutation_response(result.service)
+
+
+async def get_nexthop_writer() -> DpstatNextHopWriter:
+    settings = get_settings()
+    return DpstatNextHopWriter(
+        binary=settings.worker_telemetry_binary_path,
+        timeout_seconds=settings.worker_nexthop_probe_timeout_seconds,
+    )
+
+
+@router.post(
+    "/{service_id}/resolve-nexthop",
+    response_model=NextHopStatusResponse,
+)
+@router.post(
+    "/{service_id}/nexthop/resolve",
+    response_model=NextHopStatusResponse,
+)
+async def resolve_service_nexthop(
+    service_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_admin_principal)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    writer: Annotated[DpstatNextHopWriter, Depends(get_nexthop_writer)],
+    reader: Annotated[TelemetryReader, Depends(get_telemetry_reader)],
+) -> NextHopStatusResponse:
+    service = await load_service_for_principal(db, service_id, principal)
+    ip_net = ipaddress.ip_network(service.cidr_or_ip, strict=False)
+    ip_str = str(ip_net.network_address)
+    success = await writer.resolve(service.dp_id, ip_str)
+    nexthop_metrics.record_resolve_result(service.dp_id, success)
+
+    snapshot = await reader.snapshot()
+    nh = (
+        next((item for item in snapshot.nexthops if item.dp_id == service.dp_id), None)
+        if snapshot is not None
+        else None
+    )
+    metrics = nexthop_metrics.get_resolve_metrics(service.dp_id)
+
+    return NextHopStatusResponse(
+        dp_id=service.dp_id,
+        dst_mac=nh.dst_mac if nh is not None else None,
+        src_mac=nh.src_mac if nh is not None else None,
+        resolved=nh.resolved if nh is not None else False,
+        age_s=nh.age_s if nh is not None else None,
+        success_count=metrics["success_count"],
+        failure_count=metrics["failure_count"],
+    )
+
+
+@router.get(
+    "/{service_id}/nexthop",
+    response_model=NextHopStatusResponse,
+)
+async def get_service_nexthop(
+    service_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    reader: Annotated[TelemetryReader, Depends(get_telemetry_reader)],
+) -> NextHopStatusResponse:
+    service = await load_service_for_principal(db, service_id, principal)
+    snapshot = await reader.snapshot()
+    nh = (
+        next((item for item in snapshot.nexthops if item.dp_id == service.dp_id), None)
+        if snapshot is not None
+        else None
+    )
+    metrics = nexthop_metrics.get_resolve_metrics(service.dp_id)
+
+    return NextHopStatusResponse(
+        dp_id=service.dp_id,
+        dst_mac=nh.dst_mac if nh is not None else None,
+        src_mac=nh.src_mac if nh is not None else None,
+        resolved=nh.resolved if nh is not None else False,
+        age_s=nh.age_s if nh is not None else None,
+        success_count=metrics["success_count"],
+        failure_count=metrics["failure_count"],
+    )
 
 
 async def _load_actor(db: AsyncSession, principal: Principal) -> User | None:

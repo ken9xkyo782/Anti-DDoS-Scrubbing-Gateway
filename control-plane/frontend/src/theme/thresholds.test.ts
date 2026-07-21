@@ -35,6 +35,6 @@ describe('threshold severities', () => {
   it('maps each severity to a distinct color', () => {
     expect(severityColor('ok')).not.toBe(severityColor('warning'))
     expect(severityColor('warning')).not.toBe(severityColor('critical'))
-    expect(severityColor('critical')).toBe('#b42318')
+    expect(severityColor('critical')).toBe('var(--color-critical)')
   })
 })

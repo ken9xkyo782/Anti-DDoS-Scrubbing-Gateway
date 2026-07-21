@@ -134,6 +134,43 @@ class NodeCounters:
 
 
 @dataclass(frozen=True, slots=True)
+class NextHopEntry:
+    dp_id: int
+    dst_mac: str
+    src_mac: str
+    resolved: bool
+    age_s: int
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> NextHopEntry:
+        resolved = payload["resolved"]
+        if not isinstance(resolved, bool):
+            raise ValueError("expected a boolean for resolved")
+        dst_mac = payload["dst_mac"]
+        if not isinstance(dst_mac, str):
+            raise ValueError("expected a string for dst_mac")
+        src_mac = payload["src_mac"]
+        if not isinstance(src_mac, str):
+            raise ValueError("expected a string for src_mac")
+        return cls(
+            dp_id=_integer(payload["dp_id"]),
+            dst_mac=dst_mac,
+            src_mac=src_mac,
+            resolved=resolved,
+            age_s=_integer(payload["age_s"]),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "dp_id": self.dp_id,
+            "dst_mac": self.dst_mac,
+            "src_mac": self.src_mac,
+            "resolved": self.resolved,
+            "age_s": self.age_s,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class TelemetrySnapshot:
     ts_ns: int
     active_slot: int
@@ -143,6 +180,7 @@ class TelemetrySnapshot:
     xdp_ifindex: int
     node: NodeCounters
     services: tuple[ServiceCounters, ...]
+    nexthops: tuple[NextHopEntry, ...] = ()
     bypass_active: bool = False
     bypass_pkts: int = 0
     bypass_bytes: int = 0
@@ -158,6 +196,11 @@ class TelemetrySnapshot:
         if not isinstance(services, list):
             raise ValueError("expected services list")
 
+        nexthop_list = payload.get("nexthop", [])
+        if not isinstance(nexthop_list, list):
+            raise ValueError("expected nexthop list")
+        nexthops = tuple(NextHopEntry.from_dict(_mapping(item)) for item in nexthop_list)
+
         xdp_mode = xdp["mode"]
         if not isinstance(xdp_mode, str):
             raise ValueError("expected XDP mode")
@@ -171,6 +214,7 @@ class TelemetrySnapshot:
             xdp_ifindex=_integer(xdp["ifindex"]),
             node=NodeCounters.from_dict(_mapping(payload["node"])),
             services=tuple(ServiceCounters.from_dict(_mapping(service)) for service in services),
+            nexthops=nexthops,
             bypass_active=bool(_integer(node_control.get("bypass", 0))),
             bypass_pkts=_integer(bypass.get("pkts", 0)),
             bypass_bytes=_integer(bypass.get("bytes", 0)),
@@ -189,6 +233,8 @@ class TelemetrySnapshot:
             "node": self.node.to_dict(),
             "services": [service.to_dict() for service in self.services],
         }
+        if self.nexthops:
+            payload["nexthop"] = [nh.to_dict() for nh in self.nexthops]
         if self._has_bypass_blocks or self.bypass_active or self.bypass_pkts or self.bypass_bytes:
             payload["node_control"] = {"bypass": int(self.bypass_active)}
             payload["bypass"] = {"pkts": self.bypass_pkts, "bytes": self.bypass_bytes}

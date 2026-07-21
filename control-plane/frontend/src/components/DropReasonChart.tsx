@@ -1,29 +1,38 @@
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 
+import { DROP_REASON_PALETTE, tooltipContentStyle, tooltipItemStyle, tooltipLabelStyle } from './chartTheme'
+import styles from './dashboard.module.css'
+
 interface DropReasonChartProps {
   dropByReason: Record<string, number>
 }
-
-const COLORS = ['#dc3545', '#fd7e14', '#ffc107', '#6f42c1', '#0dcaf0']
 
 export function DropReasonChart({ dropByReason }: DropReasonChartProps) {
   const data = Object.entries(dropByReason).map(([name, value]) => ({ name, value }))
 
   return (
-    <section aria-label="Drops by reason">
-      <h3>Drop reasons</h3>
+    <section aria-label="Drops by reason" className={styles.section}>
+      <h3 className={styles.title}>Drop reasons</h3>
       {data.length === 0 ? (
-        <p>No dropped packets in this window.</p>
+        <p className={styles.empty}>No dropped packets in this window.</p>
       ) : (
-        <div style={{ height: 220, width: '100%' }}>
+        <div className={styles.chart}>
           <ResponsiveContainer>
             <PieChart>
-              <Pie data={data} dataKey="value" nameKey="name" label>
+              <Pie data={data} dataKey="value" nameKey="name" innerRadius="45%" outerRadius="80%" paddingAngle={2} label>
                 {data.map((entry, index) => (
-                  <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
+                  <Cell
+                    key={entry.name}
+                    fill={DROP_REASON_PALETTE[index % DROP_REASON_PALETTE.length]}
+                    stroke="none"
+                  />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip
+                contentStyle={tooltipContentStyle}
+                itemStyle={tooltipItemStyle}
+                labelStyle={tooltipLabelStyle}
+              />
               <Legend />
             </PieChart>
           </ResponsiveContainer>

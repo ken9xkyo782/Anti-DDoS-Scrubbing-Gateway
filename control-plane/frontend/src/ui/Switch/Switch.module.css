@@ -1,0 +1,62 @@
+/* Switch.module.css */
+
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  padding: 0;
+  background-color: var(--gray-200);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  outline: none;
+  box-shadow: var(--shadow-1);
+  transition: background-color var(--dur-fast) var(--ease-in-out),
+              box-shadow var(--dur-fast) var(--ease-in-out),
+              border-color var(--dur-fast) var(--ease-in-out);
+  user-select: none;
+  vertical-align: middle;
+}
+
+.root:hover:not(:disabled) {
+  background-color: var(--gray-300);
+}
+
+.root:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--focus-ring);
+}
+
+.root:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Checked State */
+.root[data-state="checked"] {
+  background-color: var(--accent);
+}
+
+.root[data-state="checked"]:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+/* Thumb */
+.thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background-color: var(--text-inverse);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-fast) var(--ease-in-out);
+  transform: translateX(3px);
+  will-change: transform;
+}
+
+/* Checked State for Thumb */
+.root[data-state="checked"] .thumb {
+  transform: translateX(21px);
+}

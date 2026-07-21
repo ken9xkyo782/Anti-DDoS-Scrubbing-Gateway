@@ -31,8 +31,8 @@ API_PORT       ?= 8000
 ADMIN_USER     ?= admin
 ADMIN_PASSWORD ?= change-me-please
 COOKIE_SECURE  ?= false
-IN_IFACE       ?= xdpgwin0
-OUT_IFACE      ?= xdpgwout0
+IN_IFACE       ?= enp94s0f0
+OUT_IFACE      ?= enp134s0f1
 SERVICE_DEST   ?= 10.0.0.2
 # Cặp veth demo chỉ được tự tạo khi dùng đúng tên interface mặc định dưới đây.
 DEMO_IN  := xdpgwin0
@@ -44,8 +44,9 @@ DEMO_OUT := xdpgwout0
         infra infra-down \
         build install cp-install fe-install migrate bootstrap setup \
         dp-build dp-veth dp-start dp-stop \
-        fe-build \
+        fe-build fe-dev \
         api-start api-stop worker-start worker-stop \
+        test dp-test cp-test fe-gate \
         clean
 
 # ============================================================================
@@ -221,6 +222,25 @@ fe-install: ## Cài phụ thuộc frontend (npm ci)
 
 fe-build: ## Build bản production của SPA
 	cd $(FRONTEND) && npm run build
+
+fe-dev: ## Chạy Vite dev server để kiểm thử SPA thủ công (cần API chạy + COOKIE_SECURE=false)
+	cd $(FRONTEND) && npm run dev
+
+# ============================================================================
+# Kiểm thử (gate tự động từng thành phần)
+# ============================================================================
+
+test: dp-test cp-test fe-gate ## Chạy toàn bộ gate tự động (data-plane + control-plane + frontend)
+
+dp-test: ## Gate data-plane: test đơn vị BPF_PROG_TEST_RUN (make test)
+	$(MAKE) -C $(DATA_PLANE) test
+
+cp-test: ## Gate control-plane: ruff + mypy + pytest (cần infra up + venv .[dev])
+	cd $(CONTROL_PLANE) && $(VENV)/bin/ruff check . && $(VENV)/bin/ruff format --check . \
+		&& $(VENV)/bin/mypy app/ && $(VENV)/bin/pytest -q
+
+fe-gate: ## Gate frontend: lint + typecheck + test (Vitest) + build production
+	cd $(FRONTEND) && npm run lint && npm run typecheck && npm run test -- --run && npm run build
 
 # ============================================================================
 # Vận hành

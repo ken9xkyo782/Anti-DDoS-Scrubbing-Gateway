@@ -1,4 +1,6 @@
+import ipaddress
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 
 from app.db.models import AgentJob, JobType
 from app.db.session import session_scope
@@ -12,13 +14,25 @@ class NoHandlerError(Exception):
     pass
 
 
+class NextHopLane(Protocol):
+    def request_resolve(self, dp_id: int, ip: str) -> None: ...
+    def request_evict(self, dp_id: int) -> None: ...
+
+
 _feed_runner: FeedRunner | None = None
+_nexthop_resolver: NextHopLane | None = None
 
 
 def configure_feed_runner(runner: FeedRunner | None) -> None:
     """Install worker-lifetime feed dependencies until the coordinator owns wiring."""
     global _feed_runner
     _feed_runner = runner
+
+
+def configure_nexthop_resolver(resolver: NextHopLane | None) -> None:
+    """Install worker-lifetime next-hop resolver dependency."""
+    global _nexthop_resolver
+    _nexthop_resolver = resolver
 
 
 async def handle_service_update(
@@ -30,6 +44,13 @@ async def handle_service_update(
     if config is None:
         raise RuntimeError("service missing")
     await applier.apply(config)
+    if _nexthop_resolver is not None:
+        if config.enabled:
+            ip_net = ipaddress.ip_network(config.cidr_or_ip, strict=False)
+            ip_str = str(ip_net.network_address)
+            _nexthop_resolver.request_resolve(config.dp_id, ip_str)
+        else:
+            _nexthop_resolver.request_evict(config.dp_id)
 
 
 async def handle_feed_sync(job: AgentJob, applier: Applier) -> None:

@@ -2,7 +2,7 @@
 
 **Design**: `.specs/features/config-management-spa/design.md` (AD-034)
 **Spec**: `.specs/features/config-management-spa/spec.md` (`CFG-01..53`)
-**Status**: Draft (awaiting approval → Execute)
+**Status**: In progress
 
 **Track**: single **frontend** track (`control-plane/frontend/`). Test type for every task = **fe-unit** (Vitest beside source). Gate for every code task = **fe** (`cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build`). Baseline `B_fe` = current `npm run test` total (≥34 from telemetry+alerting), **pinned live at Execute**; each task's Done-when adds its own tests and keeps the running total monotonic (no silent deletions).
 
@@ -59,11 +59,11 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-05 (theme persistence), D-034-1/9
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `radix-ui` (unified) pinned in `package.json`; `npm install` clean; React 19 peer range verified (no `--legacy-peer-deps`)
-- [ ] `tokens.css` defines color/space/type/radius/shadow/z/motion vars with a dark set via `@media (prefers-color-scheme: dark)` **and** `:root[data-theme="dark"]`; `base.css` resets + focus-visible ring; both imported once in `main.tsx`
-- [ ] `useTheme()` toggles `data-theme` and persists to `localStorage`; `thresholds.ts` helpers unchanged in API but colors sourced from tokens
-- [ ] `prefers-reduced-motion` respected; AA contrast in both themes (spot-checked)
-- [ ] Gate passes: `fe`; adds ≥2 fe-unit tests (useTheme, thresholds), total ≥ `B_fe`+2
+- [x] `radix-ui` (unified) pinned in `package.json`; `npm install` clean; React 19 peer range verified (no `--legacy-peer-deps`)
+- [x] `tokens.css` defines color/space/type/radius/shadow/z/motion vars with a dark set via `@media (prefers-color-scheme: dark)` **and** `:root[data-theme="dark"]`; `base.css` resets + focus-visible ring; both imported once in `main.tsx`
+- [x] `useTheme()` toggles `data-theme` and persists to `localStorage`; `thresholds.ts` helpers unchanged in API but colors sourced from tokens
+- [x] `prefers-reduced-motion` respected; AA contrast in both themes (spot-checked)
+- [x] Gate passes: `fe`; adds ≥2 fe-unit tests (useTheme, thresholds), total ≥ `B_fe`+2
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add design tokens, base styles, and theme toggle`
 
@@ -77,9 +77,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-04, D-034-1/5
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Each primitive renders with variants/sizes, disabled + loading states; `Field` wires label+hint+error to control via `aria-describedby`/`aria-invalid`
-- [ ] Radix `Select`/`Switch` keyboard + ARIA behavior intact; barrel exports all
-- [ ] Gate passes: `fe`; adds ≥6 fe-unit tests (roles/keyboard/disabled), total monotonic
+- [x] Each primitive renders with variants/sizes, disabled + loading states; `Field` wires label+hint+error to control via `aria-describedby`/`aria-invalid`
+- [x] Radix `Select`/`Switch` keyboard + ARIA behavior intact; barrel exports all
+- [x] Gate passes: `fe`; adds ≥6 fe-unit tests (roles/keyboard/disabled), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add form UI primitives`
 > Granularity: cohesive primitive **family** in one task (justified, not split) — mirrors sibling `[P]` panel-group tasks.
@@ -94,8 +94,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-04, CFG-06, D-034-1
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `Dialog` traps focus + Esc/overlay close (Radix); `ConfirmDialog` takes `tone`/`confirmLabel`/`onConfirm`; `Toaster` uses `aria-live`; `useToast()` API stable
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests (focus trap, confirm callback, toast announce), total monotonic
+- [x] `Dialog` traps focus + Esc/overlay close (Radix); `ConfirmDialog` takes `tone`/`confirmLabel`/`onConfirm`; `Toaster` uses `aria-live`; `useToast()` API stable
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests (focus trap, confirm callback, toast announce), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add overlay and navigation UI primitives`
 > Granularity: cohesive family (justified, not split).
@@ -110,8 +110,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-04, D-034-1
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `DataTable` renders columns/rows with sticky header, sortable columns, per-row action slot, and dedicated loading (Skeleton) / empty (EmptyState) / error states; `StatusBadge` maps each `apply_status` to a semantic token color
-- [ ] Gate passes: `fe`; adds ≥6 fe-unit tests (sort, empty, loading, status colors), total monotonic
+- [x] `DataTable` renders columns/rows with sticky header, sortable columns, per-row action slot, and dedicated loading (Skeleton) / empty (EmptyState) / error states; `StatusBadge` maps each `apply_status` to a semantic token color
+- [x] Gate passes: `fe`; adds ≥6 fe-unit tests (sort, empty, loading, status colors), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add data-display UI primitives`
 > Granularity: cohesive family (justified, not split).
@@ -126,9 +126,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-03 (types), CFG-07/13/24 (inline errors), D-034-3/8
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Non-2xx reads JSON `{detail}` (string OR FastAPI validation array) into `ApiError.detail`; `fieldErrorsFrom422` maps `loc`/`msg` → `{field: message}`; 401→login + 204 unchanged
-- [ ] `types.ts` interfaces (`ApplyStatus`, `ApplyMutationResponse`, `ApplyStatusView`, `ServiceResponse`, `RuleResponse`, `Whitelist/BlacklistEntryResponse`, `Tenant/User/Allocation/Feed/AlertRule/NotificationChannel/NodeHealth/NodeControlState/JobView`) match `app/api/schemas` field-for-field (no invented fields)
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (detail parse, 422 mapping, 401/204 preserved), total monotonic
+- [x] Non-2xx reads JSON `{detail}` (string OR FastAPI validation array) into `ApiError.detail`; `fieldErrorsFrom422` maps `loc`/`msg` → `{field: message}`; 401→login + 204 unchanged
+- [x] `types.ts` interfaces (`ApplyStatus`, `ApplyMutationResponse`, `ApplyStatusView`, `ServiceResponse`, `RuleResponse`, `Whitelist/BlacklistEntryResponse`, `Tenant/User/Allocation/Feed/AlertRule/NotificationChannel/NodeHealth/NodeControlState/JobView`) match `app/api/schemas` field-for-field (no invented fields)
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (detail parse, 422 mapping, 401/204 preserved), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): parse API error detail and add shared DTO types`
 
@@ -142,9 +142,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-03, D-034-4
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Polls every 1s while `apply_status ∈ {pending,queued,applying}`, stops at `active|failed`; after 30s emits `takingLonger` + slows to 5s; never fabricates `active`
-- [ ] `ApplyStatusIndicator` shows count of in-flight applies; hidden at zero
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (fake-timer state machine: settle-to-active, settle-to-failed, soft-timeout), total monotonic
+- [x] Polls every 1s while `apply_status ∈ {pending,queued,applying}`, stops at `active|failed`; after 30s emits `takingLonger` + slows to 5s; never fabricates `active`
+- [x] `ApplyStatusIndicator` shows count of in-flight applies; hidden at zero
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (fake-timer state machine: settle-to-active, settle-to-failed, soft-timeout), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add async apply-status hook and indicator`
 
@@ -158,9 +158,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-01, CFG-02, CFG-05, D-034-2/6
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Sidebar renders only role-permitted items (Overview/Manage[role]/Observe); admin-only routes wrapped in `ProtectedRoute allowedRoles={['admin']}` → `/forbidden`; Topbar has user menu + ThemeToggle + ApplyStatusIndicator
-- [ ] Existing dashboards/billing/alerts render under the new shell unchanged in behavior; responsive collapse < 1024px
-- [ ] Gate passes: `fe`; existing route/panel tests stay green; adds ≥4 fe-unit tests (role-filtered nav, admin-route block for tenant, session-expiry redirect), total monotonic
+- [x] Sidebar renders only role-permitted items (Overview/Manage[role]/Observe); admin-only routes wrapped in `ProtectedRoute allowedRoles={['admin']}` → `/forbidden`; Topbar has user menu + ThemeToggle + ApplyStatusIndicator
+- [x] Existing dashboards/billing/alerts render under the new shell unchanged in behavior; responsive collapse < 1024px
+- [x] Gate passes: `fe`; existing route/panel tests stay green; adds ≥4 fe-unit tests (role-filtered nav, admin-route block for tenant, session-expiry redirect), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): rebuild app shell with sidebar, topbar, and role nav`
 
@@ -174,8 +174,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-07..24 (data path), D-034-3
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] `useServices` (list/get/create/patch/enable/disable/delete), `useRules` (list/create/patch/delete/overlap-check), `useLists` (whitelist+blacklist list/add/remove); mutations invalidate the right query keys and surface `ApiError`
-- [ ] Gate passes: `fe`; adds ≥6 fe-unit tests (invalidation + error passthrough per hook), total monotonic
+- [x] `useServices` (list/get/create/patch/enable/disable/delete), `useRules` (list/create/patch/delete/overlap-check), `useLists` (whitelist+blacklist list/add/remove); mutations invalidate the right query keys and surface `ApiError`
+- [x] Gate passes: `fe`; adds ≥6 fe-unit tests (invalidation + error passthrough per hook), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add tenant resource query/mutation hooks`
 
@@ -189,9 +189,9 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-07..14, D-034-4/7
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Lists own services; create/edit via Dialog with client CIDR validation and 422→inline field errors; disable warns drop-all + confirm; delete confirms; committed/ceiling shown read-only
-- [ ] Each mutation shows `StatusBadge` progressing to a terminal state; empty state has a create CTA
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests (create happy, 422 inline, disable-confirm, apply badge, plan read-only), total monotonic
+- [x] Lists own services; create/edit via Dialog with client CIDR validation and 422→inline field errors; disable warns drop-all + confirm; delete confirms; committed/ceiling shown read-only
+- [x] Each mutation shows `StatusBadge` progressing to a terminal state; empty state has a create CTA
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests (create happy, 422 inline, disable-confirm, apply badge, plan read-only), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add tenant service management screen`
 
@@ -205,8 +205,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-15..19
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Rules listed ascending by `priority` (evaluation order visible); create enforces ≤16 + unique-priority client-side then surfaces API rejection; overlap-check preview shows shadow warnings; edit/delete surface apply-status
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (priority order, overlap warning, >16 guard, apply-status), total monotonic
+- [x] Rules listed ascending by `priority` (evaluation order visible); create enforces ≤16 + unique-priority client-side then surfaces API rejection; overlap-check preview shows shadow warnings; edit/delete surface apply-status
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (priority order, overlap warning, >16 guard, apply-status), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add service detail with allow-rules tab`
 
@@ -220,8 +220,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-20..24
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Whitelist + blacklist entries list/add/remove with client CIDR validation, confirm-on-remove, 422→inline, and apply-status feedback
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (add validation, remove confirm, api error inline, both lists), total monotonic
+- [x] Whitelist + blacklist entries list/add/remove with client CIDR validation, confirm-on-remove, 422→inline, and apply-status feedback
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (add validation, remove confirm, api error inline, both lists), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add whitelist and blacklist tabs`
 
@@ -235,8 +235,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-25..29
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Tenants list/create/patch/delete(confirm)/suspend/reactivate; Users list/create/patch/delete(confirm)/reset-password with role+tenant assignment; blocking API errors (revoke-in-use etc.) surfaced
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
+- [x] Tenants list/create/patch/delete(confirm)/suspend/reactivate; Users list/create/patch/delete(confirm)/reset-password with role+tenant assignment; blocking API errors (revoke-in-use etc.) surfaced
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin tenant and user management`
 
@@ -250,8 +250,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-30..33
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Allocate runs overlap-check before commit; revoke confirms and surfaces revoke-in-use (`TCA-16`) block; tenant sees own allocations read-only
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests, total monotonic
+- [x] Allocate runs overlap-check before commit; revoke confirms and surfaces revoke-in-use (`TCA-16`) block; tenant sees own allocations read-only
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin CIDR allocation management`
 
@@ -265,8 +265,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-34..37, D-034-7
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Lists services across tenants with filter + owning tenant; admin create requires `tenant_id` and may set plan inline; plan edit hits `/plan` and shows apply-status; enable/disable/delete work for any service
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (all-tenant list, tenant_id required on admin create, plan patch), total monotonic
+- [x] Lists services across tenants with filter + owning tenant; admin create requires `tenant_id` and may set plan inline; plan edit hits `/plan` and shows apply-status; enable/disable/delete work for any service
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (all-tenant list, tenant_id required on admin create, plan patch), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin service oversight and plan sizing`
 
@@ -280,8 +280,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-38..42
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Feed CRUD with URL + interval-range validation; manual `POST /feeds/{id}/sync` reflects the run; sync history from `/feeds/{id}/syncs`; global blacklist add/list/remove(confirm)
-- [ ] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
+- [x] Feed CRUD with URL + interval-range validation; manual `POST /feeds/{id}/sync` reflects the run; sync history from `/feeds/{id}/syncs`; global blacklist add/list/remove(confirm)
+- [x] Gate passes: `fe`; adds ≥5 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin threat-feed and global-blacklist management`
 
@@ -295,8 +295,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-43..46
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Rules list + per-rule threshold override; channels list/create/patch/delete(confirm); secret field write-only (never renders stored value); test-send shows result
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (threshold patch, write-only secret, test-send result), total monotonic
+- [x] Rules list + per-rule threshold override; channels list/create/patch/delete(confirm); secret field write-only (never renders stored value); test-send shows result
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (threshold patch, write-only secret, test-send result), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin alerting configuration`
 
@@ -310,8 +310,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-47..50
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Shows desired/effective bypass+maintenance from `/node/health`; bypass toggle confirms ("disables scrubbing") → `POST /node/bypass`; maintenance toggle explains queue-and-apply-on-exit → `POST /node/maintenance`; banner still shows active state
-- [ ] Gate passes: `fe`; adds ≥4 fe-unit tests (state read, bypass confirm, maintenance explain), total monotonic
+- [x] Shows desired/effective bypass+maintenance from `/node/health`; bypass toggle confirms ("disables scrubbing") → `POST /node/bypass`; maintenance toggle explains queue-and-apply-on-exit → `POST /node/maintenance`; banner still shows active state
+- [x] Gate passes: `fe`; adds ≥4 fe-unit tests (state read, bypass confirm, maintenance explain), total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add admin node bypass and maintenance controls`
 
@@ -325,8 +325,8 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: CFG-51..53
 **Tools**: Skill `coding-guidelines`; MCP: none
 **Done when**:
-- [ ] Change-password validates new password client-side + surfaces API errors; job backlog lists jobs with state/target; a `failed` service exposes `last_error` + still-live `active_version`
-- [ ] Gate passes: `fe`; adds ≥3 fe-unit tests, total monotonic
+- [x] Change-password validates new password client-side + surfaces API errors; job backlog lists jobs with state/target; a `failed` service exposes `last_error` + still-live `active_version`
+- [x] Gate passes: `fe`; adds ≥3 fe-unit tests, total monotonic
 **Tests**: fe-unit · **Gate**: fe
 **Commit**: `feat(config-spa): add account password change and job backlog`
 
@@ -340,10 +340,12 @@ T11 ─→ T19 [P]  (docs)
 **Requirement**: traceability/docs
 **Tools**: Skill `docs-writer`; MCP: none
 **Done when**:
-- [ ] Doc covers foundation, primitives, shell/IA, apply-status UX, and the screen→endpoint map; links the two rendered diagrams
-- [ ] No code change → `fe` lint/typecheck/build still green if any `src` doc-comment touched; else N/A
-**Tests**: none (docs) · **Gate**: fe (only if `src` touched) / none
-**Commit**: `docs(config-spa): document configuration screens and design system`
+- [x] Doc covers foundation, primitives, shell/IA, apply-status UX, and the screen→endpoint map; links the two rendered diagrams — `control-plane/frontend/README.md` rewritten (2026-07-15)
+- [x] No `src` change (README only) → `fe` gate N/A for this task
+**Tests**: none (docs) · **Gate**: none (docs only)
+**Commit**: `docs(config-spa): document configuration screens and design system` (not yet committed — awaiting user)
+
+**Status**: ✅ Done (2026-07-15). Grounded in the real routes (`App.tsx`), sidebar groups, `ui/` barrel, `hooks/resources/`, and `features/config/` on disk. README documents the design system, nav IA, apply-status UX, and the screen→endpoint map, and links both rendered diagrams. The dev-proxy gap below is noted truthfully in the README's *Develop and test* section.
 
 ---
 
@@ -419,9 +421,18 @@ Every code task writes its own fe-unit tests in the same task and runs the **fe*
 
 ---
 
+## Findings during Execute — RESOLVED (2026-07-15)
+
+Verified live while executing T19 (`control-plane/frontend`): typecheck/build/tests were green but the full **`fe` gate was RED** on two defects. **Both fixed the same day; the `fe` gate is now GREEN** (lint PASS · typecheck PASS · `npm run test -- --run` **48 files / 213 passed** · build PASS).
+
+1. **Lint — 64 problems (fixed).** Not just cosmetic `any`: the pass also uncovered **3 real `react-hooks/rules-of-hooks` bugs** in `AlertingPage.tsx` (delete/update/test channel mutation hooks were called *inside* handlers/callbacks) and **3 `react-hooks/set-state-in-effect`** (`AllocationForm`, `AllocationsPage`, `UserForm`), plus 56 `no-explicit-any` + 2 unused-vars. **Fixes**: lifted the AlertingPage mutation hooks to top level (the `FeedsPage` `?.id ?? ''` pattern) and moved the per-row test mutation into `ChannelRowActions` with `onTestStart`/`onTestResult` callbacks; replaced the auto-select effect with a derived `effectiveTenantId`; moved UserForm's admin-role tenant reset into the role handler; moved AllocationForm's debounce guard inside the timer; typed the `any`s with real DTOs — added `WebhookChannelConfig`/`EmailChannelConfig` + `NotificationChannelRequest` usage, exported `FeedFormPayload` (which also closed a real credential-omit type hole), and typed the admin service form payloads; test-double `any`s replaced with typed mock props / `as never`.
+2. **Vite dev proxy (fixed).** `vite.config.ts` now forwards every prefix the SPA calls — `/auth`, `/billing`, `/services`, `/node`, `/tenants`, `/users`, `/allocations`, `/me`, `/feeds`, `/blacklist`, `/alerts`, `/jobs` (enumerated from the hooks). README dev section updated to match.
+
+Nothing committed yet (awaiting user). `B_fe` now **213** across 48 files. With the gate green, the feature is functionally complete pending the user's commit decision.
+
 ## Notes
 
-- **Baselines pinned live at Execute**: `B_fe` = `npm run test` head total (≥34). Each task keeps the total monotonic and states its added-test floor.
+- **Baselines pinned live at Execute**: `B_fe` = `npm run test` head total (≥34). Each task keeps the total monotonic and states its added-test floor. Live at T19: **213** Vitest tests across 48 files.
 - **Radix pin**: T1 pins the exact `radix-ui` version + verifies the React 19 peer range (no `--legacy-peer-deps`); if a Radix component's import path differs under the unified package, adjust at T2/T3.
 - **Regression guard**: existing telemetry/billing/alerts panel + route tests must stay green through T7's shell rebuild (they assert text/roles, not pixels); any DOM-structure-coupled assertion touched is a minimal, flagged update within T7.
 - **Critical path**: T1→T4 (+T5 `[P]`) → T6 → T7 unlocks everything; T7→T8→T9→T10→T11 is the demoable **P1** slice; Phase-4 admin pages fan out `[P]`; P3+docs last.

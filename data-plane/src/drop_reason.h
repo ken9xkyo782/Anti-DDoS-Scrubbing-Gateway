@@ -21,7 +21,8 @@ enum drop_reason {
 	DR_INGRESS_CAP_DROP = 13,
 	DR_VIP_CEILING_DROP = 14,
 	DR_MAP_ERROR = 15,
-	DROP_REASON_COUNT = 16,
+	DR_NEXTHOP_UNRESOLVED = 16,
+	DROP_REASON_COUNT = 17,
 	DROP_REASON_CAP = 32,
 };
 
@@ -48,6 +49,7 @@ static const char *const drop_reason_name[DROP_REASON_COUNT] = {
 	[DR_INGRESS_CAP_DROP] = "ingress_cap_drop",
 	[DR_VIP_CEILING_DROP] = "vip_ceiling_drop",
 	[DR_MAP_ERROR] = "map_error",
+	[DR_NEXTHOP_UNRESOLVED] = "nexthop_unresolved",
 };
 #endif
 

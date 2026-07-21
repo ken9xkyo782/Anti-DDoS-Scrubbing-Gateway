@@ -329,5 +329,40 @@ How we know the feature is successful:
       the host stack or an unconfigured `OUT`.
 - [ ] Data-plane redirect/live-path test conventions added to `.specs/codebase/TESTING.md`; the program
       still passes the verifier and loads native on `IN`.
+
+---
+
+## Amendment — L2 next-hop rewrite for routed deployments (2026-07-20, AD-DP-01)
+
+**Trigger:** first real (non-veth) deployment on `cyberrange02` is **L3-routed**, not a pure L2
+transparent bridge: the gateway has IPs on both NICs (IN `118.107.64.250/29`, OUT `118.107.78.250/24`),
+`ip_forward=1`, and upstream routes the protected `/24` to it. Ingress frames therefore carry the
+**gateway's own IN MAC** as destination. The verbatim redirect (SLRD-09) sent those frames out `OUT`
+with that wrong dst MAC; the backend VM (`fa:16:3e:…`) dropped them at L2, so TCP never completed and
+clients got no response — while the `clean` counter still incremented (verdict = REDIRECT). Root cause
+confirmed empirically; see `[[redirect-no-mac-rewrite-l3-deploy]]` (project memory) and PRD §2 / §8.2.
+
+**Amends SLRD-09** (was: "preserve the full L2 header verbatim"). L2 preservation is now **conditional**:
+
+| Req | Requirement |
+| --- | --- |
+| **SLRD-27** | WHEN a clean/bypass IPv4 frame reaches redirect THEN the system SHALL resolve the egress next-hop via `bpf_fib_lookup(ctx, &fib, sizeof, BPF_FIB_LOOKUP_DIRECT)` keyed on `pkt_meta.dst_ip`/`src_ip`; on `BPF_FIB_LKUP_RET_SUCCESS` it SHALL rewrite `eth->h_dest = fib.dmac` and `eth->h_source = fib.smac` before `bpf_redirect_map`. |
+| **SLRD-28** | WHEN `bpf_fib_lookup` returns any non-`SUCCESS` result (no route/neighbor = pure transparent bridge, or `NO_NEIGH` during ARP warmup) THEN the system SHALL forward the frame **verbatim** (unchanged L2), preserving the original bridge behavior as a fallback. |
+| **SLRD-29** | WHEN the frame is ARP (SLRD-19) THEN the system SHALL **skip** the next-hop rewrite and forward verbatim; the rewrite applies to `ETH_P_IP` only. |
+
+**Unchanged:** SLRD-08 — **TTL and IPv4 checksum are still never modified** in either mode; the hop
+stays L3-transparent even when the L2 addresses are rewritten. No kernel routing is entered.
+
+**Operational dependency:** on a redirect **target** NIC that only allocates XDP TX rings when a program
+is attached (Intel `ixgbe`/`i40e`/`ice`), an `XDP_PASS` program must be attached to `OUT` or
+`ndo_xdp_xmit` fails (`clean` counted, silent egress drop, `xdp:xdp_redirect_err`). `veth` (smoke tests)
+is unaffected. Loader auto-attach of `XDP_PASS` on `OUT` is a tracked follow-up.
+
+**Verification (2026-07-20):** 133 dp-unit tests pass; program loads native + verifier-clean;
+`BPF_PROG_TEST_RUN` on a SYN with dst MAC = IN MAC yields retval `XDP_REDIRECT` and output dst MAC
+rewritten `00:1b:21:be:40:6e → fa:16:3e:ce:1f:88`, src → OUT MAC, IP dst/port/TTL intact;
+live tracepoints `xdp_redirect`/`xdp_devmap_xmit` fire with `xdp_redirect_err = 0`; backend serves
+HTTP 200. Implemented in `data-plane/src/xdp_gateway.bpf.c` (`l3_rewrite_nexthop`), with `ctx` threaded
+through `redirect_out`/`redirect_out_bypass` (`whitelist.h`, `fairness.h`, `node_control.h`).
 </content>
 </invoke>

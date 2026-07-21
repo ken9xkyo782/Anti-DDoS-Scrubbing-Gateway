@@ -65,3 +65,13 @@ class ServiceResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class NextHopStatusResponse(BaseModel):
+    dp_id: int
+    dst_mac: str | None = None
+    src_mac: str | None = None
+    resolved: bool = False
+    age_s: int | None = None
+    success_count: int = 0
+    failure_count: int = 0

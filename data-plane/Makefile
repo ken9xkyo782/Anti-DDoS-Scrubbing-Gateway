@@ -71,7 +71,7 @@ $(LOADER): $(LOADER_SRC) $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SRC_DIR)/blac
 
 dpstat: $(DPSTAT)
 
-$(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/blacklist.h | $(BUILD_DIR)
+$(DPSTAT): $(DPSTAT_SRC) $(SRC_DIR)/drop_event.h $(SRC_DIR)/drop_reason.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/nexthop.h | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 apply: $(APPLY) $(TEST_SNAPSHOT_BIN)
@@ -101,6 +101,7 @@ smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_bypass.sh
 	$(TEST_DIR)/smoke_fairness.sh
 	$(TEST_DIR)/smoke_apply.sh
+	$(TEST_DIR)/smoke_nexthop.sh
 
 $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SRC_DIR)/node_control.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz

@@ -1,0 +1,41 @@
+.layoutContainer {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+.contentArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.mainContent {
+  flex: 1;
+  padding: var(--space-6);
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .layoutContainer {
+    flex-direction: column;
+  }
+
+  .contentArea {
+    height: calc(100vh - 60px); /* Adjust for bottom nav bar */
+    margin-bottom: 60px;
+  }
+
+  .mainContent {
+    padding: var(--space-4);
+  }
+}

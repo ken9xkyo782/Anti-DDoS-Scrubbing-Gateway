@@ -2,9 +2,10 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthContext, type AuthContextValue } from '../auth/AuthContext'
 import type { NodeHealth } from '../hooks/useNodeTelemetry'
-import { AppLayout } from '../layout/AppLayout'
+import { AppShell } from '../layout/AppShell'
 
 const { useNodeHealth } = vi.hoisted(() => ({ useNodeHealth: vi.fn() }))
 
@@ -53,16 +54,26 @@ function renderAppShell() {
     logout: vi.fn(),
   }
 
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  })
+
   render(
-    <AuthContext.Provider value={auth}>
-      <MemoryRouter initialEntries={['/billing']}>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/billing" element={<h1>Billing</h1>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </AuthContext.Provider>,
+    <QueryClientProvider client={queryClient}>
+      <AuthContext.Provider value={auth}>
+        <MemoryRouter initialEntries={['/billing']}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/billing" element={<h1>Billing</h1>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    </QueryClientProvider>,
   )
 }
 

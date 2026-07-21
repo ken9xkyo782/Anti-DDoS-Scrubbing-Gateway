@@ -1,9 +1,9 @@
 export type Severity = 'ok' | 'warning' | 'critical'
 
 const SEVERITY_COLORS: Record<Severity, string> = {
-  ok: '#1a7f37',
-  warning: '#9a6700',
-  critical: '#b42318',
+  ok: 'var(--color-ok)',
+  warning: 'var(--color-warning)',
+  critical: 'var(--color-critical)',
 }
 
 // TDD §9.1 metric thresholds. Coloring is display-only: the dashboard never

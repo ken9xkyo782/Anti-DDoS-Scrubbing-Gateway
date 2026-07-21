@@ -63,11 +63,51 @@ The loader seed path is intentionally small. It writes one CIDR or port for smok
 the 16..23 global-bloom expansion band, snapshot replacement, and bulk map population to the M4
 builder.
 
+## Forwarding: map-based next-hop L2 rewrite (supersedes packet-time fib_lookup)
+
+`redirect_out` looks up the matched service's next-hop entry in the pinned, unslotted `nexthop_map` (keyed by `dp_id`), rewrites `eth->h_dest` to `dst_mac` and `eth->h_source` to `src_mac`, then redirects via `bpf_redirect_map(&tx_devmap, 0, XDP_DROP)`.
+
+- **Out-of-band resolution:** The control-plane worker (or `dpstat resolve-nexthop <dp_id> <ipv4>`) resolves next-hop MACs via ARP on `OUT` and populates `nexthop_map`.
+- **Fail-closed:** An unresolved or absent next-hop entry drops the frame with `DR_NEXTHOP_UNRESOLVED` (index 16) before clean statistics are recorded — mis-forwarding wrong-MAC frames is prevented.
+- **Single-host service:** Protected service destinations are single IPv4 host addresses (`/32` or bare host).
+- **Bypass mode:** Soft-bypass forwards traffic verbatim with no L2 rewrite or FIB lookup.
+- **Zero packet-time FIB lookup:** `bpf_fib_lookup` is superseded and removed from the redirect path. TTL and IPv4 checksum remain intact.
+
+`dpstat` subcommands:
+- `dpstat resolve-nexthop <dp_id> <ipv4>`: ARP-probes target on OUT interface and writes resolved entry.
+- `dpstat evict-nexthop <dp_id>`: deletes map entry on service disable/delete.
+- `dpstat set-nexthop <dp_id> <dst_mac> [<src_mac>]`: manual next-hop MAC seed for testing/ops.
+- `dpstat nexthop`: dumps next-hop entries and resolution status.
+
+### OUT interface must allow XDP TX (devmap redirect target)
+
+Some NIC drivers (e.g. Intel `ixgbe`, `i40e`, `ice`) only allocate XDP TX rings when an XDP program is
+attached to the interface. The loader attaches XDP to **IN only**, so a devmap redirect to such an OUT
+interface fails at `ndo_xdp_xmit` — packets are counted `clean` (the verdict) but dropped silently at
+egress and `xdp:xdp_redirect_err` increments. Workaround until the loader auto-attaches: put a minimal
+`XDP_PASS` program on OUT in native mode:
+
+```bash
+sudo ip link set dev <out-iface> xdpdrv obj <xdp_pass.o> sec xdp   # detach: xdpdrv off
+```
+
+`veth` (used by the smoke tests) does not need this, which is why the issue only surfaces on real NICs.
+
 ## Allow rules and tunnel traffic
 
 `src/rules.h` is the M4 map-build contract for allow rules. Rule blocks must be pre-sorted by ascending
 priority, because the hot path treats array position as first-match order. The `bps` field is bytes per
 second; the future worker must convert any control-plane unit before writing the map.
+
+**Per-rule `pps`/`bps` rate-limits are NOT plumbed through the control-plane apply path.** The v2 apply
+wire format (`src/apply_snapshot.h`, `APPLY_SNAPSHOT_RULE_SIZE == 10`) carries only ports, proto and
+flags per rule — no rate values. A writer that sets `RULE_F_PPS_SET`/`RULE_F_BPS_SET` without also
+seeding tokens makes `rl_bucket_consume` admit nothing, so **100% of that rule's traffic drops as
+`rate_limit_drop`** (verified 2026-07-20 on service `118.107.78.137:2283`). The control-plane worker
+(`_rule_flags`) therefore emits only `RULE_F_ENABLED`; per-rule rate-limits are a no-op until the wire
+format is extended (schema bump). Use the service **VIP ceiling** (`vip_pps`/`vip_bps`, which *is*
+carried) or the **`ServicePlan`** committed/ceiling for bandwidth control. The demo loader can still
+seed per-rule limits directly into the map struct for data-plane testing.
 
 `RULE_PROTO_ANY` matches only TCP, UDP, and ICMP. GRE, ESP, and other non-TCP/UDP/ICMP IPv4 protocols
 are unmatchable in v1 and drop with `not_allowed`, even when a service has a match-all `any` rule.

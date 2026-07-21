@@ -39,6 +39,7 @@ cleanup()
 	ip link del "${SINK_IF}" 2>/dev/null || true
 	ip link del "${OUT_IF}" 2>/dev/null || true
 	bpftool net detach xdp dev "${SINK_IF}" 2>/dev/null || true
+	rm -rf /sys/fs/bpf/xdp_gateway 2>/dev/null || true
 	rm -f "${PASS_PIN}" "${PASS_SRC}" "${PASS_OBJ}" "${LOG}"
 }
 
@@ -89,6 +90,8 @@ if ! kill -0 "${LOADER_PID}" 2>/dev/null; then
 	echo "loader exited before fairness smoke could send frames" >&2
 	exit 1
 fi
+
+"${DPSTAT}" set-nexthop 1 aa:aa:aa:aa:aa:aa bb:bb:bb:bb:bb:bb
 
 if ! python3 - "${SRC_IF}" "${SINK_IF}" <<'PY'
 import select

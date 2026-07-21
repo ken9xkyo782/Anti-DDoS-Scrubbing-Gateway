@@ -31,6 +31,7 @@ from app.db.models import (
     JobStatus,
     JobType,
     NodeHealthSnapshot,
+    ProtectedService,
     ServicePlan,
     TelemetryCounter,
     TelemetryScope,
@@ -184,6 +185,17 @@ async def get_node_health(
         activated_at=control.maintenance_activated_at,
     )
 
+    enabled_services = (
+        await db.scalars(select(ProtectedService.dp_id).where(ProtectedService.enabled.is_(True)))
+    ).all()
+    if snapshot is not None:
+        nexthop_map = {nh.dp_id: nh.resolved for nh in snapshot.nexthops}
+        unresolved_services = sum(
+            1 for dp_id in enabled_services if not nexthop_map.get(dp_id, False)
+        )
+    else:
+        unresolved_services = len(enabled_services)
+
     if health is None:
         return NodeHealthResponse(
             has_data=False,
@@ -205,6 +217,7 @@ async def get_node_health(
             maintenance=maintenance,
             bypass_pkts=snapshot.bypass_pkts if snapshot is not None else 0,
             bypass_bytes=snapshot.bypass_bytes if snapshot is not None else 0,
+            unresolved_services=unresolved_services,
         )
 
     return NodeHealthResponse(
@@ -227,6 +240,7 @@ async def get_node_health(
         maintenance=maintenance,
         bypass_pkts=snapshot.bypass_pkts if snapshot is not None else 0,
         bypass_bytes=snapshot.bypass_bytes if snapshot is not None else 0,
+        unresolved_services=unresolved_services,
     )
 
 

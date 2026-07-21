@@ -36,6 +36,7 @@ cleanup()
 	ip link del "${SRC_IF}" 2>/dev/null || true
 	ip link del "${SINK_IF}" 2>/dev/null || true
 	bpftool net detach xdp dev "${SINK_IF}" 2>/dev/null || true
+	rm -rf /sys/fs/bpf/xdp_gateway 2>/dev/null || true
 	rm -f "${LOG}" "${SNAPSHOT}" "${PASS_SRC}" "${PASS_OBJ}" "${PASS_PIN}"
 }
 
@@ -80,6 +81,8 @@ if ! kill -0 "${LOADER_PID}" 2>/dev/null; then
 	exit 1
 fi
 
+"${DPSTAT}" set-nexthop 1 aa:aa:aa:aa:aa:aa bb:bb:bb:bb:bb:bb
+
 before=$(${DPSTAT} active_config)
 before_slot=$(printf '%s\n' "${before}" | awk '$1 == "active_slot" {print $2}')
 before_version=$(printf '%s\n' "${before}" | awk '$1 == "version" {print $2}')
@@ -94,6 +97,7 @@ python3 "${TOOLS}" generate-small "${SNAPSHOT}"
 
 started_ns=$(date +%s%N)
 "${APPLY}" "${SNAPSHOT}"
+"${DPSTAT}" set-nexthop 2 aa:aa:aa:aa:aa:aa bb:bb:bb:bb:bb:bb
 elapsed_ms=$(( ($(date +%s%N) - started_ns) / 1000000 ))
 if [ "${elapsed_ms}" -ge 5000 ]; then
 	printf 'apply smoke took %sms, want <5000ms\n' "${elapsed_ms}" >&2

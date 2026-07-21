@@ -1,0 +1,237 @@
+/* theme/tokens.css */
+
+:root {
+  /* System Typography */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --font-size-xs: 0.75rem;     /* 12px */
+  --font-size-sm: 0.875rem;    /* 14px */
+  --font-size-base: 1rem;      /* 16px */
+  --font-size-lg: 1.125rem;    /* 18px */
+  --font-size-xl: 1.25rem;     /* 20px */
+  --font-size-2xl: 1.5rem;     /* 24px */
+  --font-size-3xl: 1.875rem;   /* 30px */
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-none: 1;
+  --line-height-tight: 1.25;
+  --line-height-snug: 1.375;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+
+  /* Spacing Scale (4px base) */
+  --space-1: 0.25rem;  /* 4px */
+  --space-2: 0.5rem;   /* 8px */
+  --space-3: 0.75rem;  /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-5: 1.25rem;  /* 20px */
+  --space-6: 1.5rem;   /* 24px */
+  --space-7: 2rem;     /* 32px */
+  --space-8: 3rem;     /* 48px */
+
+  /* Borders & Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* Z-index hierarchy */
+  --z-base: 0;
+  --z-sticky: 100;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-dropdown: 500;
+  --z-toast: 600;
+
+  /* Transitions & Motion */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+
+  /* Light Theme Color Palette (Default) */
+  --gray-50: #f8f9fa;
+  --gray-100: #f1f3f5;
+  --gray-200: #e9ecef;
+  --gray-300: #dee2e6;
+  --gray-400: #ced4da;
+  --gray-500: #adb5bd;
+  --gray-600: #868e96;
+  --gray-700: #495057;
+  --gray-800: #343a40;
+  --gray-900: #212529;
+
+  /* Brand / Primary */
+  --brand-50: #eef2ff;
+  --brand-100: #e0e7ff;
+  --brand-200: #c7d2fe;
+  --brand-300: #a5b4fc;
+  --brand-400: #818cf8;
+  --brand-500: #6366f1;
+  --brand-600: #4f46e5;
+  --brand-700: #4338ca;
+  --brand-800: #3730a3;
+  --brand-900: #312e81;
+
+  /* Functional Roles (Light) */
+  --bg: #f8f9fa;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --border: #e9ecef;
+  --border-hover: #dee2e6;
+  --border-focus: var(--brand-500);
+  
+  --text: #212529;
+  --text-muted: #667085;
+  --text-inverse: #ffffff;
+
+  --accent: var(--brand-600);
+  --accent-hover: var(--brand-700);
+  --accent-active: var(--brand-800);
+  --accent-bg: var(--brand-50);
+
+  /* Semantic Status Colors (Light) */
+  --color-ok: #1a7f37;
+  --color-ok-bg: #dafbe1;
+  --color-success: #1a7f37;
+  --color-success-bg: #dafbe1;
+
+  --color-warning: #9a6700;
+  --color-warning-bg: #fff8c5;
+
+  --color-critical: #b42318;
+  --color-critical-bg: #ffebe9;
+  --color-danger: #b42318;
+  --color-danger-bg: #ffebe9;
+
+  --color-info: #0969da;
+  --color-info-bg: #ddf4ff;
+
+  --focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.25);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-2: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-3: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Dark Theme Variables definition */
+:root[data-theme="dark"] {
+  --gray-50: #161b22;
+  --gray-100: #21262d;
+  --gray-200: #30363d;
+  --gray-300: #8b949e;
+  --gray-400: #c9d1d9;
+  --gray-500: #e6edf3;
+  --gray-600: #f0f6fc;
+  --gray-700: #f0f6fc;
+  --gray-800: #f0f6fc;
+  --gray-900: #ffffff;
+
+  /* Functional Roles (Dark) */
+  --bg: #0d1117;
+  --bg-elevated: #161b22;
+  --surface: #161b22;
+  --border: #21262d;
+  --border-hover: #30363d;
+  --border-focus: var(--brand-400);
+
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --text-inverse: #0d1117;
+
+  --accent: var(--brand-400);
+  --accent-hover: var(--brand-300);
+  --accent-active: var(--brand-200);
+  --accent-bg: rgba(99, 102, 241, 0.15);
+
+  /* Semantic Status Colors (Dark) */
+  --color-ok: #2ea043;
+  --color-ok-bg: rgba(46, 160, 67, 0.15);
+  --color-success: #2ea043;
+  --color-success-bg: rgba(46, 160, 67, 0.15);
+
+  --color-warning: #d29922;
+  --color-warning-bg: rgba(187, 128, 9, 0.15);
+
+  --color-critical: #f85149;
+  --color-critical-bg: rgba(248, 81, 73, 0.15);
+  --color-danger: #f85149;
+  --color-danger-bg: rgba(248, 81, 73, 0.15);
+
+  --color-info: #58a6ff;
+  --color-info-bg: rgba(88, 166, 255, 0.15);
+
+  --focus-ring: 0 0 0 3px rgba(129, 140, 248, 0.35);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-2: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* System preferences dark mode (applied automatically if no data-theme override is present) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --gray-50: #161b22;
+    --gray-100: #21262d;
+    --gray-200: #30363d;
+    --gray-300: #8b949e;
+    --gray-400: #c9d1d9;
+    --gray-500: #e6edf3;
+    --gray-600: #f0f6fc;
+    --gray-700: #f0f6fc;
+    --gray-800: #f0f6fc;
+    --gray-900: #ffffff;
+
+    --bg: #0d1117;
+    --bg-elevated: #161b22;
+    --surface: #161b22;
+    --border: #21262d;
+    --border-hover: #30363d;
+    --border-focus: var(--brand-400);
+
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --text-inverse: #0d1117;
+
+    --accent: var(--brand-400);
+    --accent-hover: var(--brand-300);
+    --accent-active: var(--brand-200);
+    --accent-bg: rgba(99, 102, 241, 0.15);
+
+    --color-ok: #2ea043;
+    --color-ok-bg: rgba(46, 160, 67, 0.15);
+    --color-success: #2ea043;
+    --color-success-bg: rgba(46, 160, 67, 0.15);
+
+    --color-warning: #d29922;
+    --color-warning-bg: rgba(187, 128, 9, 0.15);
+
+    --color-critical: #f85149;
+    --color-critical-bg: rgba(248, 81, 73, 0.15);
+    --color-danger: #f85149;
+    --color-danger-bg: rgba(248, 81, 73, 0.15);
+
+    --color-info: #58a6ff;
+    --color-info-bg: rgba(88, 166, 255, 0.15);
+
+    --focus-ring: 0 0 0 3px rgba(129, 140, 248, 0.35);
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-2: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    --shadow-3: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Reduced Motion Override */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+}

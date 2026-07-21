@@ -1,0 +1,41 @@
+/* Field.module.css */
+
+.fieldContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  width: 100%;
+}
+
+.label {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text);
+  user-select: none;
+}
+
+.requiredAsterisk {
+  color: var(--color-critical);
+}
+
+.controlWrapper {
+  position: relative;
+  width: 100%;
+}
+
+.hint {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
+
+.error {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  color: var(--color-critical);
+  margin-top: var(--space-1);
+  font-weight: var(--font-weight-medium);
+}

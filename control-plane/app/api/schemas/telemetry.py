@@ -123,3 +123,4 @@ class NodeHealthResponse(BaseModel):
     maintenance: NodeControlStateResponse
     bypass_pkts: int
     bypass_bytes: int
+    unresolved_services: int = 0

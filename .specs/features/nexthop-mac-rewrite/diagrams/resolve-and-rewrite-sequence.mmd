@@ -1,0 +1,49 @@
+%% Diagram: Declare/resolve + hot-path rewrite — sequence (AD-035)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    autonumber
+    participant OP as Tenant/Admin
+    participant API as Control-plane API
+    participant WK as Worker (apply + NextHopResolver)
+    participant DS as dpstat (privileged C)
+    participant BE as Backend / OUT segment
+    participant NH as nexthop_map (BPF)
+    participant XDP as XDP hot path
+
+    Note over OP,XDP: Declare + immediate resolve
+    OP->>API: create/enable service (single IPv4 /32)
+    API->>API: validate single-host dest (reject CIDR)
+    API-->>WK: enqueue SERVICE_UPDATE apply job
+    WK->>WK: apply config, mark_active
+    WK->>DS: request_resolve(dp_id, service_ip)
+    DS->>BE: ARP request (service_ip on OUT)
+    BE-->>DS: ARP reply (dst MAC)
+    DS->>NH: update dp_id -> {dst_mac, OUT src_mac, resolved=1}
+
+    Note over WK,NH: Periodic refresh (every 30 min)
+    WK->>DS: resolve_once() per enabled service + evict others
+    DS->>BE: ARP request
+    alt reply within bounded retries
+        BE-->>DS: ARP reply
+        DS->>NH: refresh entry (RCU-atomic)
+    else no reply after N retries
+        DS->>NH: mark resolved=0 (fail-closed)
+    end
+
+    Note over XDP,NH: Hot path per clean frame
+    XDP->>NH: lookup nexthop_map[meta.service_id]
+    alt resolved
+        NH-->>XDP: {dst_mac, src_mac}
+        XDP->>XDP: memcpy eth dst/src (TTL intact) + redirect OUT
+    else unresolved / missing
+        NH-->>XDP: (none)
+        XDP->>XDP: record_drop(DR_NEXTHOP_UNRESOLVED) -> XDP_DROP
+    end

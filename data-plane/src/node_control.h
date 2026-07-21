@@ -55,8 +55,10 @@ static __always_inline void bypass_count(const struct pkt_meta *meta)
 	__sync_fetch_and_add(&stat->bytes, meta->frame_len);
 }
 
-static __always_inline int redirect_out_bypass(struct pkt_meta *meta)
+static __always_inline int redirect_out_bypass(struct xdp_md *ctx,
+					       struct pkt_meta *meta)
 {
+	(void)ctx;
 	meta->verdict = PKT_VERDICT_REDIRECT;
 	write_test_meta(meta);
 	bypass_count(meta);

@@ -461,7 +461,7 @@ static __always_inline int fair_admit_stage(struct xdp_md *ctx,
 		return fair_record_drop(meta, FAIR_ERR, DR_MAP_ERROR);
 	if (admitted) {
 		meta->fair_state = FAIR_COMMITTED;
-		return redirect_out(meta);
+		return redirect_out(ctx, meta);
 	}
 
 	admitted = fair_burst_admit(config, meta, pkt_len);
@@ -483,7 +483,7 @@ static __always_inline int fair_admit_stage(struct xdp_md *ctx,
 					DR_CONGESTION_DROP);
 
 	meta->fair_state = FAIR_BURST;
-	return redirect_out(meta);
+	return redirect_out(ctx, meta);
 }
 #endif
 

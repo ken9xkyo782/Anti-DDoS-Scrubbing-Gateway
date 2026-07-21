@@ -51,6 +51,12 @@
  *   rules[rule_count]:
  *     src_lo: le16, src_hi: le16, dst_lo: le16, dst_hi: le16,
  *     proto: u8, flags: u8
+ *     -- NOTE: per-rule pps/bps values are NOT carried on the wire (rule size is
+ *        10 bytes). struct rule_entry has pps/bps fields, but the reader leaves
+ *        them 0. Therefore the writer MUST NOT set RULE_F_PPS_SET/RULE_F_BPS_SET
+ *        in flags: doing so makes the hot path enforce a zero-token bucket and
+ *        drop 100% of the rule's traffic as rate_limit_drop. Wiring real per-rule
+ *        rate limits requires a schema_version bump that adds the values here.
  *   wl_count: le32
  *   wl[wl_count]:
  *     prefixlen: le32, src_addr: be32

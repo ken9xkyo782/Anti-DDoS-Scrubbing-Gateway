@@ -251,4 +251,5 @@ async def test_alert_acknowledges_own_firing_alert_without_resolving_and_admin_e
     assert exported_json.json()["alerts"][0]["id"] == str(instance.id)
     assert exported_csv.status_code == 200
     assert "attack_onset" in exported_csv.text
-    assert await db_session.scalar(select(AuditEvent.id).where(AuditEvent.action == "alert.acknowledge"))
+    stmt = select(AuditEvent.id).where(AuditEvent.action == "alert.acknowledge")
+    assert await db_session.scalar(stmt)

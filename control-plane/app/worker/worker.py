@@ -19,7 +19,8 @@ from app.worker.applier import Applier, PlaceholderApplier
 from app.worker.feed_coordinator import FeedCoordinator, FeedFetchCompletion
 from app.worker.feed_runner import FeedRunner
 from app.worker.feed_scheduler import enqueue_due_feed_syncs
-from app.worker.handlers import configure_feed_runner
+from app.worker.handlers import configure_feed_runner, configure_nexthop_resolver
+from app.worker.nexthop_resolver import DpstatNextHopWriter, NextHopResolver
 from app.worker.node_control_reconciler import (
     DpstatBypassWriter,
     NodeControlReconciler,
@@ -45,6 +46,12 @@ class AlertLane(Protocol):
     async def run_loop(self, stop: asyncio.Event) -> None: ...
 
 
+class NextHopLane(Protocol):
+    def request_resolve(self, dp_id: int, ip: str) -> None: ...
+    def request_evict(self, dp_id: int) -> None: ...
+    async def run_loop(self, stop: asyncio.Event) -> None: ...
+
+
 class Worker:
     def __init__(
         self,
@@ -58,6 +65,7 @@ class Worker:
         billing: BillingLane | None = None,
         node_control: NodeControlLane | None = None,
         alerts: AlertLane | None = None,
+        nexthop: NextHopLane | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
@@ -68,6 +76,7 @@ class Worker:
         self.billing = billing
         self.node_control = node_control
         self.alerts = alerts
+        self.nexthop = nexthop
         self._reconcile_requested = asyncio.Event()
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
@@ -92,6 +101,17 @@ class Worker:
                 interval_seconds=self.settings.worker_node_control_interval_seconds,
                 on_maintenance_cleared=self._reconcile_requested.set,
             )
+        nexthop = self.nexthop
+        if nexthop is None and self.settings.worker_nexthop_enabled:
+            nexthop = NextHopResolver(
+                session_factory=self.session_factory,
+                writer=DpstatNextHopWriter(
+                    binary=self.settings.worker_telemetry_binary_path,
+                    timeout_seconds=self.settings.worker_nexthop_probe_timeout_seconds,
+                ),
+                interval_seconds=self.settings.worker_nexthop_resolve_interval_seconds,
+            )
+        configure_nexthop_resolver(nexthop)
         telemetry_task = (
             asyncio.create_task(self.telemetry.run_loop(stop_event))
             if self.telemetry is not None
@@ -112,6 +132,9 @@ class Worker:
             if self.alerts is not None
             else None
         )
+        nexthop_task = (
+            asyncio.create_task(nexthop.run_loop(stop_event)) if nexthop is not None else None
+        )
         inflight: asyncio.Task[object] | None = None
         backoff: float | None = None
         redis_degraded = False
@@ -129,6 +152,7 @@ class Worker:
                 "billing_enabled": self.billing is not None,
                 "node_control_enabled": node_control is not None,
                 "alerts_enabled": self.alerts is not None,
+                "nexthop_enabled": nexthop is not None,
             },
         )
 
@@ -303,6 +327,7 @@ class Worker:
                 await self._finish_background_lane(billing_task)
                 await self._finish_background_lane(node_control_task)
                 await self._finish_background_lane(alert_task)
+                await self._finish_background_lane(nexthop_task)
                 await self._finish_inflight(
                     feed_coordinator.inflight_task if feed_coordinator is not None else None
                 )
@@ -312,6 +337,7 @@ class Worker:
             finally:
                 if self.feed_runner is not None:
                     configure_feed_runner(None)
+                configure_nexthop_resolver(None)
                 await dispose_engine()
 
     async def _schedule_due_feeds(

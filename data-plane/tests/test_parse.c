@@ -20,6 +20,7 @@
 #include "pkt_meta.h"
 #include "rules.h"
 #include "service.h"
+#include "nexthop.h"
 #include "svc_stat.h"
 #include "blacklist.h"
 #include "whitelist.h"
@@ -91,6 +92,7 @@ struct test_env {
 	int tx_devmap_fd;
 	int node_control_fd;
 	int bypass_counter_fd;
+	int nexthop_map_fd;
 	int trigger_fd;
 	int ringbuf_fd;
 	int sample_config_fd;
@@ -206,6 +208,7 @@ static int env_open(struct test_env *env)
 	env->tx_devmap_fd = bpf_map__fd(env->skel->maps.tx_devmap);
 	env->node_control_fd = bpf_map__fd(env->skel->maps.node_control);
 	env->bypass_counter_fd = bpf_map__fd(env->skel->maps.bypass_counter);
+	env->nexthop_map_fd = bpf_map__fd(env->skel->maps.nexthop_map);
 	env->trigger_fd = bpf_map__fd(env->skel->maps.test_trigger_map);
 	env->ringbuf_fd = bpf_map__fd(env->skel->maps.drop_ringbuf);
 	env->sample_config_fd = bpf_map__fd(env->skel->maps.sample_config);
@@ -246,7 +249,7 @@ static int env_open(struct test_env *env)
 	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
 	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
 	    env->node_control_fd < 0 || env->bypass_counter_fd < 0 ||
-	    env->trigger_fd < 0 ||
+	    env->nexthop_map_fd < 0 || env->trigger_fd < 0 ||
 	    env->ringbuf_fd < 0 || env->sample_config_fd < 0 ||
 	    env->sample_bucket_fd < 0 || env->sample_stats_fd < 0 ||
 	    env->gbl_meta_fd < 0 || env->bloom_stats_fd < 0) {
@@ -548,11 +551,24 @@ static int reset_config(struct test_env *env)
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap0_fd) != 0 ||
 	    reset_blocked_port_bitmap_map(env->blocked_port_bitmap1_fd) != 0 ||
 	    clear_vip_config_map(env->vip_config0_fd) != 0 ||
-	    clear_vip_config_map(env->vip_config1_fd) != 0)
+	    clear_vip_config_map(env->vip_config1_fd) != 0 ||
+	    clear_u32_hash_map(env->nexthop_map_fd) != 0)
 		return -1;
 
 	if (bpf_map_update_elem(env->active_config_fd, &key, &config, 0) != 0)
 		return -1;
+
+	// Pre-seed resolved next-hops for commonly used test service IDs
+	__u32 ids[] = {DEFAULT_SERVICE_ID, FAIR_TEST_B_SERVICE_ID, 11, 77, 99, 4242};
+	struct nexthop nh = {
+		.dst_mac = {0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
+		.src_mac = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		.resolved = 1,
+	};
+	for (size_t i = 0; i < sizeof(ids)/sizeof(ids[0]); i++) {
+		if (bpf_map_update_elem(env->nexthop_map_fd, &ids[i], &nh, BPF_ANY) != 0)
+			return -1;
+	}
 
 	if (bpf_map_delete_elem(env->tx_devmap_fd, &key) != 0 &&
 	    errno != ENOENT)
@@ -748,7 +764,15 @@ static int seed_service_raw(struct test_env *env, __u32 slot, __be32 addr,
 	if (fd < 0)
 		return -1;
 
-	return bpf_map_update_elem(fd, &key, &val, BPF_ANY);
+	if (bpf_map_update_elem(fd, &key, &val, BPF_ANY) != 0)
+		return -1;
+
+	struct nexthop nh = {
+		.dst_mac = {0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
+		.src_mac = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		.resolved = 1,
+	};
+	return bpf_map_update_elem(env->nexthop_map_fd, &service_id, &nh, BPF_ANY);
 }
 
 static int seed_service_flags(struct test_env *env, __u32 slot, __be32 addr,
@@ -7320,6 +7344,267 @@ static int test_global_apply_alternates_with_service_apply(void)
 	return err;
 }
 
+static int test_nexthop_redirect_success(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+
+	struct nexthop nh = {
+		.dst_mac = {0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
+		.src_mac = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		.resolved = 1,
+		.last_resolved_ns = 123456,
+	};
+	__u32 key = DEFAULT_SERVICE_ID;
+	if (!err)
+		err = bpf_map_update_elem(env.nexthop_map_fd, &key, &nh, BPF_ANY);
+
+	__u32 dev_key = 0;
+	__u32 dev_val = 1;
+	if (!err)
+		err = bpf_map_update_elem(env.tx_devmap_fd, &dev_key, &dev_val, BPF_ANY);
+
+	uint8_t data_out[512] = {};
+	struct bpf_test_run_opts opts = {
+		.sz = sizeof(opts),
+		.data_in = frame.data,
+		.data_size_in = frame.len,
+		.data_out = data_out,
+		.data_size_out = sizeof(data_out),
+		.repeat = 1,
+	};
+
+	if (!err) {
+		err = bpf_prog_test_run_opts(env.prog_fd, &opts);
+		if (err) {
+			fprintf(stderr, "BPF_PROG_TEST_RUN failed: %s\n", strerror(errno));
+			err = -1;
+		} else {
+			retval = opts.retval;
+		}
+	}
+
+	if (!err)
+		err = expect_u32("retval", retval, XDP_REDIRECT);
+
+	if (!err) {
+		struct ethhdr *eth = (struct ethhdr *)data_out;
+		if (memcmp(eth->h_dest, nh.dst_mac, ETH_ALEN) != 0 ||
+		    memcmp(eth->h_source, nh.src_mac, ETH_ALEN) != 0) {
+			fprintf(stderr, "error: L2 rewrite mismatch\n");
+			err = -1;
+		}
+	}
+
+	if (!err) {
+		struct iphdr *iph = (struct iphdr *)(data_out + sizeof(struct ethhdr));
+		if (iph->ttl != 64) {
+			fprintf(stderr, "error: IP TTL changed to %d\n", iph->ttl);
+			err = -1;
+		}
+	}
+
+	env_close(&env);
+	return err;
+}
+
+static int test_nexthop_unresolved_drop(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+
+	struct nexthop nh = {
+		.dst_mac = {0},
+		.src_mac = {0},
+		.resolved = 0,
+	};
+	__u32 key = DEFAULT_SERVICE_ID;
+	if (!err)
+		err = bpf_map_update_elem(env.nexthop_map_fd, &key, &nh, BPF_ANY);
+
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+
+	if (!err)
+		err = expect_u32("retval", retval, XDP_DROP);
+
+	if (!err)
+		err = expect_counter(&env, DR_NEXTHOP_UNRESOLVED, 1);
+
+	if (!err)
+		err = expect_svc_stat(&env, key, 0, 0, 1, frame.len, DR_NEXTHOP_UNRESOLVED, 1);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_nexthop_recovery(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+
+	__u32 key = DEFAULT_SERVICE_ID;
+	if (!err) {
+		err = bpf_map_delete_elem(env.nexthop_map_fd, &key);
+		if (err && errno == ENOENT)
+			err = 0;
+	}
+
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_u32("unseeded retval", retval, XDP_DROP);
+	if (!err)
+		err = expect_counter(&env, DR_NEXTHOP_UNRESOLVED, 1);
+
+	struct nexthop nh = {
+		.dst_mac = {0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0xee},
+		.src_mac = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
+		.resolved = 1,
+	};
+	if (!err)
+		err = bpf_map_update_elem(env.nexthop_map_fd, &key, &nh, BPF_ANY);
+
+	__u32 dev_key = 0;
+	__u32 dev_val = 1;
+	if (!err)
+		err = bpf_map_update_elem(env.tx_devmap_fd, &dev_key, &dev_val, BPF_ANY);
+
+	uint8_t data_out[512] = {};
+	struct bpf_test_run_opts opts = {
+		.sz = sizeof(opts),
+		.data_in = frame.data,
+		.data_size_in = frame.len,
+		.data_out = data_out,
+		.data_size_out = sizeof(data_out),
+		.repeat = 1,
+	};
+
+	if (!err) {
+		err = bpf_prog_test_run_opts(env.prog_fd, &opts);
+		if (err) {
+			fprintf(stderr, "BPF_PROG_TEST_RUN failed: %s\n", strerror(errno));
+			err = -1;
+		} else {
+			retval = opts.retval;
+		}
+	}
+
+	if (!err)
+		err = expect_u32("seeded retval", retval, XDP_REDIRECT);
+
+	if (!err) {
+		struct ethhdr *eth = (struct ethhdr *)data_out;
+		if (memcmp(eth->h_dest, nh.dst_mac, ETH_ALEN) != 0 ||
+		    memcmp(eth->h_source, nh.src_mac, ETH_ALEN) != 0) {
+			fprintf(stderr, "error: L2 rewrite recovery mismatch\n");
+			err = -1;
+		}
+	}
+
+	env_close(&env);
+	return err;
+}
+
+static int test_nexthop_bypass_verbatim(void)
+{
+	struct pkt_frame frame;
+	struct test_env env;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_node_bypass(&env, 1);
+
+	__u32 dev_key = 0;
+	__u32 dev_val = 1;
+	if (!err)
+		err = bpf_map_update_elem(env.tx_devmap_fd, &dev_key, &dev_val, BPF_ANY);
+
+	uint8_t data_out[512] = {};
+	struct bpf_test_run_opts opts = {
+		.sz = sizeof(opts),
+		.data_in = frame.data,
+		.data_size_in = frame.len,
+		.data_out = data_out,
+		.data_size_out = sizeof(data_out),
+		.repeat = 1,
+	};
+
+	if (!err) {
+		err = bpf_prog_test_run_opts(env.prog_fd, &opts);
+		if (err) {
+			fprintf(stderr, "BPF_PROG_TEST_RUN failed: %s\n", strerror(errno));
+			err = -1;
+		} else {
+			retval = opts.retval;
+		}
+	}
+
+	if (!err)
+		err = expect_u32("bypass retval", retval, XDP_REDIRECT);
+
+	if (!err) {
+		struct ethhdr *eth_in = (struct ethhdr *)frame.data;
+		struct ethhdr *eth_out = (struct ethhdr *)data_out;
+		if (memcmp(eth_in->h_dest, eth_out->h_dest, ETH_ALEN) != 0 ||
+		    memcmp(eth_in->h_source, eth_out->h_source, ETH_ALEN) != 0) {
+			fprintf(stderr, "error: L2 bypass rewrite changed headers\n");
+			err = -1;
+		}
+	}
+
+	env_close(&env);
+	return err;
+}
+
 int main(void)
 {
 		const struct test_case tests[] = {
@@ -7572,6 +7857,10 @@ int main(void)
 		  test_triple_vlan_drops_unsupported },
 		{ "VLAN IPv6 drops IPv6 counter",
 		  test_vlan_ipv6_drops_ipv6_counter },
+		{ "nexthop redirect success", test_nexthop_redirect_success },
+		{ "nexthop unresolved drop", test_nexthop_unresolved_drop },
+		{ "nexthop recovery", test_nexthop_recovery },
+		{ "nexthop bypass verbatim", test_nexthop_bypass_verbatim },
 	};
 	size_t passed = 0;
 	size_t count = sizeof(tests) / sizeof(tests[0]);
