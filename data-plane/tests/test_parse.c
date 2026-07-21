@@ -5344,6 +5344,8 @@ static int test_deterministic_pps_quota_drops_after_budget(void)
 
 	err = reset_maps(&env);
 	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
@@ -5397,6 +5399,8 @@ static int test_quota_overflow_does_not_fall_through(void)
 		return -1;
 
 	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
@@ -5491,6 +5495,8 @@ static int test_pps_zero_blocks(void)
 
 	err = reset_maps(&env);
 	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
@@ -5536,6 +5542,8 @@ static int test_bps_exhausts_by_bytes(void)
 		return -1;
 
 	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
@@ -5592,6 +5600,8 @@ static int test_pps_drop_leaves_bps_tokens_untouched(void)
 
 	err = reset_maps(&env);
 	if (!err)
+		err = set_rl_config(&env, 1);
+	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
@@ -5645,6 +5655,8 @@ static int test_reset_on_swap_admits_after_version_change(void)
 		return -1;
 
 	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
@@ -5703,6 +5715,8 @@ static int test_normal_mode_fresh_bucket_admits(void)
 		return -1;
 
 	err = reset_maps(&env);
+	if (!err)
+		err = set_rl_config(&env, 1);
 	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
