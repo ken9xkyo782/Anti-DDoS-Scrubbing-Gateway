@@ -1,0 +1,47 @@
+%% Diagram: UDP amplification config — component/data-flow (AD-036)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+graph TD
+    subgraph SPA["React SPA (admin only)"]
+        TAB["DDoS Protection tab<br/>/admin/ddos<br/>built-in chips + dynamic CRUD"]
+    end
+    subgraph API["FastAPI process"]
+        R["/ddos router<br/>require_admin"]
+        SVC["services/ddos_amplification.py<br/>HARDCODED_AMP_PORTS + CRUD"]
+        AUD["record_event (audit)"]
+    end
+    subgraph DBP["PostgreSQL"]
+        T["blocked_udp_port<br/>port PK 0..65535, note,<br/>created_by, created_at"]
+    end
+    subgraph WK["Worker process (separate)"]
+        LANE["BlockedPortReconciler<br/>poll ~1s, drift vs asserted set"]
+        WR["DpstatBlockedPortsWriter<br/>subprocess exec"]
+    end
+    subgraph DP["Data plane"]
+        DPSTAT["dpstat set-blocked-ports p1 p2 ...<br/>writes BOTH slots' inner maps"]
+        MAP["udp_blocked_port_bitmap<br/>ARRAY_OF_MAPS[2] x inner ARRAY[1024] u64"]
+        HOT["XDP hot path - BLK stage UNCHANGED<br/>UDP sport set -> udp_amplification_drop idx 7"]
+    end
+
+    TAB -->|GET/POST/DELETE| R
+    R --> SVC
+    SVC --> T
+    SVC --> AUD
+    R -->|GET returns hardcoded + dynamic| TAB
+    LANE -->|SELECT desired set| T
+    LANE --> WR
+    WR --> DPSTAT
+    DPSTAT -->|word idx = port>>6, bit = 1<<port&63| MAP
+    MAP -.pinned active-slot read.-> HOT
+
+    classDef unchanged fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef newwork fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    class HOT,MAP unchanged;
+    class TAB,R,SVC,T,LANE,WR,DPSTAT newwork;

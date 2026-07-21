@@ -1,0 +1,47 @@
+%% Diagram: Admin add → reconcile → data-plane enforce — sequence (AD-036)
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8',
+  'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b',
+  'background': '#ffffff', 'mainBkg': '#f8fafc',
+  'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9',
+  'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b',
+  'edgeLabelBackground': '#ffffff', 'textColor': '#334155'
+}}}%%
+sequenceDiagram
+    actor Admin
+    participant SPA as DDoS Protection tab
+    participant API as FastAPI /ddos (admin)
+    participant DB as PostgreSQL
+    participant WK as BlockedPortReconciler
+    participant DP as dpstat set-blocked-ports
+    participant MAP as udp_blocked_port_bitmap
+    participant HOT as XDP BLK stage
+
+    Admin->>SPA: Add UDP port 9999 (+ note)
+    SPA->>API: POST /ddos/amplification/ports
+    API->>DB: INSERT blocked_udp_port(9999)
+    API->>DB: record_event ddos.amp_port.added
+    API-->>SPA: 201 (toast: applying to data-plane)
+
+    Note over WK: background loop, tick ~1s
+    WK->>DB: SELECT desired port set
+    WK->>WK: desired != asserted_ports ?
+    WK->>DP: exec set-blocked-ports 9999 ...
+    DP->>MAP: slot 0 inner: word[9999>>6] |= 1<<(9999&63)
+    DP->>MAP: slot 1 inner: same (carry-forward-safe)
+    DP-->>WK: exit 0
+    WK->>WK: asserted_ports = desired
+
+    Note over MAP,HOT: hot path reads pinned active slot (no code change)
+    HOT->>MAP: UDP source port 9999 lookup
+    HOT-->>HOT: bit set -> udp_amplification_drop (idx 7)
+
+    Note over MAP: later, an unrelated service/feed apply runs
+    DP-->>MAP: xdpgw-apply carry_forward: pointer-install active inner<br/>into inactive slot (content preserved, never cleared)
+    Note over HOT: 9999 still blocked after the flip (AMP-11)
+
+    alt dpstat write fails (gateway not loaded / timeout)
+        WK->>WK: keep last-good asserted, log, retry next tick
+        Note over MAP: previously blocked ports stay blocked (fail-safe, AMP-10)
+    end
