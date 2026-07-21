@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import (
     AllowRule,
@@ -306,3 +306,111 @@ async def test_blacklist_scope_service_id_xor_constraint(db_session: AsyncSessio
 
     assert "ck_blacklist_scope_service_id" in str(exc_info.value)
     assert service.id is not None
+
+
+async def test_service_rate_limit_fields(db_session: AsyncSession) -> None:
+    from app.db.models import AllowRule, ProtectedService
+    # Verify ProtectedService has service_pps and service_bps
+    assert hasattr(ProtectedService, "service_pps")
+    assert hasattr(ProtectedService, "service_bps")
+
+    # Verify AllowRule does not have pps and bps
+    assert not hasattr(AllowRule, "pps")
+    assert not hasattr(AllowRule, "bps")
+
+    # Verify we can persist and roundtrip service_pps and service_bps
+    actor = await create_admin(db_session, "rl-fields-admin")
+    tenant = await create_tenant(db_session, "RL Fields Tenant")
+    service = ProtectedService(
+        tenant_id=tenant.id,
+        name="rl-service",
+        cidr_or_ip="192.0.2.0/24",
+        service_pps=5000,
+        service_bps=10000000,
+        created_by=actor.id,
+    )
+    db_session.add(service)
+    await db_session.flush()
+
+    assert service.service_pps == 5000
+    assert service.service_bps == 10000000
+
+    # Test nullability
+    service.service_pps = None
+    service.service_bps = None
+    await db_session.flush()
+    assert service.service_pps is None
+    assert service.service_bps is None
+
+
+async def test_service_rate_limit_migration_up_down_cleanly(
+    committed_db: async_sessionmaker[AsyncSession],
+) -> None:
+    import asyncio
+    del committed_db
+    from alembic.command import downgrade, upgrade
+    from alembic.config import Config
+
+    from app.db.session import dispose_engine, get_session_factory
+    
+    config = Config("alembic.ini")
+    await dispose_engine()
+    # Downgrade to pre-service-rate-limit head
+    await asyncio.to_thread(downgrade, config, "20260714_0011")
+    
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as db_session:
+            # Under version 20260714_0011, allow_rule should have pps and bps
+            res_rule = await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'allow_rule' "
+                    "AND column_name IN ('pps', 'bps')"
+                )
+            )
+            columns_rule = res_rule.scalars().all()
+            assert len(columns_rule) == 2
+            
+            # protected_service should NOT have service_pps or service_bps
+            res_svc = await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'protected_service' "
+                    "AND column_name IN ('service_pps', 'service_bps')"
+                )
+            )
+            columns_svc = res_svc.scalars().all()
+            assert len(columns_svc) == 0
+
+        # Upgrade to head
+        await dispose_engine()
+        await asyncio.to_thread(upgrade, config, "head")
+
+        session_factory = get_session_factory()
+        async with session_factory() as db_session:
+            # Under new version, allow_rule should NOT have pps or bps
+            res_rule = await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'allow_rule' "
+                    "AND column_name IN ('pps', 'bps')"
+                )
+            )
+            columns_rule = res_rule.scalars().all()
+            assert len(columns_rule) == 0
+            
+            # protected_service should have service_pps and service_bps
+            res_svc = await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'protected_service' "
+                    "AND column_name IN ('service_pps', 'service_bps')"
+                )
+            )
+            columns_svc = res_svc.scalars().all()
+            assert len(columns_svc) == 2
+    finally:
+        await dispose_engine()
+        await asyncio.to_thread(upgrade, config, "head")
+

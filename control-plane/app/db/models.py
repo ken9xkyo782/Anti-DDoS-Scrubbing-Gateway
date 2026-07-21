@@ -504,6 +504,8 @@ class ProtectedService(TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     vip_pps: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     vip_bps: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    service_pps: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    service_bps: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     apply_status: Mapped[ApplyStatus] = mapped_column(
         apply_status_enum,
         default=ApplyStatus.pending,
@@ -674,8 +676,6 @@ class AllowRule(TimestampMixin, Base):
     src_port_hi: Mapped[int | None] = mapped_column(Integer, nullable=True)
     dst_port_lo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     dst_port_hi: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pps: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    bps: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     service: Mapped[ProtectedService] = relationship(back_populates="rules")
