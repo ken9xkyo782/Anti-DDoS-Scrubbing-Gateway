@@ -56,3 +56,37 @@ async def test_static_serving_is_disabled_without_an_explicit_directory() -> Non
         response = await client.get("/tenant")
 
     assert response.status_code == 404
+
+
+async def test_static_serving_intercepts_html_accept_headers(tmp_path: Path) -> None:
+    write_bundle(tmp_path)
+    app = create_app(Settings(frontend_static_dir=str(tmp_path)))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://testserver",
+    ) as client:
+        # GET /services with Accept: text/html -> should return SPA index
+        resp_html = await client.get("/services", headers={"accept": "text/html"})
+        assert resp_html.status_code == 200
+        assert resp_html.text == "<html><body>SPA bundle</body></html>"
+
+        # GET /services/ea5d6736-df96-4b3a-9197-eebbe0d4f59a with Accept: text/html
+        # -> should return SPA index
+        resp_html_detail = await client.get(
+            "/services/ea5d6736-df96-4b3a-9197-eebbe0d4f59a",
+            headers={"accept": "text/html"},
+        )
+        assert resp_html_detail.status_code == 200
+        assert resp_html_detail.text == "<html><body>SPA bundle</body></html>"
+
+        # GET /services without Accept: text/html
+        # -> should not return SPA (should hit API/auth, return 401)
+        resp_api = await client.get("/services")
+        assert resp_api.status_code == 401
+        assert "SPA bundle" not in resp_api.text
+
+        # GET /docs with Accept: text/html -> should bypass and return Swagger HTML
+        resp_docs = await client.get("/docs", headers={"accept": "text/html"})
+        assert resp_docs.status_code == 200
+        assert "SPA bundle" not in resp_docs.text

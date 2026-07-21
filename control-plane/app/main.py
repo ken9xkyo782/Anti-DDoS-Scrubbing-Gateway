@@ -1,9 +1,9 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routers import (
@@ -86,6 +86,22 @@ def _configure_frontend_static(app: FastAPI, directory: Path | None) -> None:
     assets = directory / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="frontend-assets")
+
+    @app.middleware("http")
+    async def override_static_html_requests(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+            path = request.url.path
+            if not (
+                path.startswith("/docs")
+                or path.startswith("/redoc")
+                or path.startswith("/openapi.json")
+                or path.startswith("/health")
+                or Path(path).suffix
+            ):
+                return FileResponse(index)
+        return await call_next(request)
 
     @app.get("/", include_in_schema=False)
     @app.get("/index.html", include_in_schema=False)
