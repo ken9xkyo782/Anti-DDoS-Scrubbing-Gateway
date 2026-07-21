@@ -11,7 +11,7 @@
  */
 #define APPLY_SNAPSHOT_MAGIC "XDPGWAP1"
 #define APPLY_SNAPSHOT_MAGIC_SIZE 8U
-#define APPLY_SNAPSHOT_SCHEMA_VERSION 2U
+#define APPLY_SNAPSHOT_SCHEMA_VERSION 3U
 
 /* magic[8], schema_version: le32, snapshot_kind: le32 */
 #define APPLY_SNAPSHOT_HEADER_SIZE 16U
@@ -47,16 +47,15 @@
  *   vip_bps: le64        -- service-level VIP ceiling (0 when VIP_F_BPS_SET unset)
  *   vip_flags: u8        -- VIP_F_PPS_SET | VIP_F_BPS_SET; the helper stamps
  *                           vip_config.version itself (not carried on the wire).
+ *   service_pps: le64    -- service-level rate-limit ceiling (0 when SVC_RL_F_PPS_SET unset)
+ *   service_bps: le64    -- service-level rate-limit ceiling (0 when SVC_RL_F_BPS_SET unset)
+ *   svc_rl_flags: u8     -- SVC_RL_F_PPS_SET | SVC_RL_F_BPS_SET
  *   rule_count: le16
  *   rules[rule_count]:
  *     src_lo: le16, src_hi: le16, dst_lo: le16, dst_hi: le16,
  *     proto: u8, flags: u8
- *     -- NOTE: per-rule pps/bps values are NOT carried on the wire (rule size is
- *        10 bytes). struct rule_entry has pps/bps fields, but the reader leaves
- *        them 0. Therefore the writer MUST NOT set RULE_F_PPS_SET/RULE_F_BPS_SET
- *        in flags: doing so makes the hot path enforce a zero-token bucket and
- *        drop 100% of the rule's traffic as rate_limit_drop. Wiring real per-rule
- *        rate limits requires a schema_version bump that adds the values here.
+ *     -- NOTE: per-rule pps/bps values are removed entirely. Rate-limit limits
+ *        are now configured and checked in the service record.
  *   wl_count: le32
  *   wl[wl_count]:
  *     prefixlen: le32, src_addr: be32
@@ -71,7 +70,7 @@
  * schema_version must increase for every layout change. Readers reject an
  * unknown version before touching data-plane maps.
  */
-#define APPLY_SNAPSHOT_SERVICE_FIXED_SIZE 50U
+#define APPLY_SNAPSHOT_SERVICE_FIXED_SIZE 67U
 #define APPLY_SNAPSHOT_RULE_SIZE 10U
 #define APPLY_SNAPSHOT_WHITELIST_ENTRY_SIZE 8U
 #define APPLY_SNAPSHOT_SERVICE_BLACKLIST_ENTRY_SIZE 8U
