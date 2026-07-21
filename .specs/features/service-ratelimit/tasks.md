@@ -17,7 +17,7 @@ Tests / Gate*.
 
 ## Phase 0 — contract + CP schema (parallel)
 
-### DT1 — Wire format v3 (contract anchor) · reqs SVR-06
+### [x] DT1 — Wire format v3 (contract anchor) · reqs SVR-06
 - **What:** bump `APPLY_SNAPSHOT_SCHEMA_VERSION 2→3`; insert `service_pps le64, service_bps le64,
   svc_rl_flags u8` into the service record (after `vip_flags`, before `rule_count`);
   `APPLY_SNAPSHOT_SERVICE_FIXED_SIZE 50→67`; `RULE_SIZE` stays 10; rewrite the commit-`49b7c91` note
