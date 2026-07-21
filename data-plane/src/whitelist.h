@@ -294,19 +294,10 @@ static __always_inline int vip_bucket_consume(struct rl_bucket *bucket,
 					      const struct vip_config *config,
 					      __u64 pkt_len)
 {
-	int pps_set = config->flags & VIP_F_PPS_SET;
-	int bps_set = config->flags & VIP_F_BPS_SET;
-	int pps_ok = !pps_set || bucket->pps_tokens >= 1;
-	int bps_ok = !bps_set || bucket->bps_tokens >= pkt_len;
-
-	if (!pps_ok || !bps_ok)
-		return 0;
-
-	if (pps_set)
-		bucket->pps_tokens--;
-	if (bps_set)
-		bucket->bps_tokens -= pkt_len;
-	return 1;
+	return rl_bucket_consume_raw(bucket,
+				     !!(config->flags & VIP_F_PPS_SET),
+				     !!(config->flags & VIP_F_BPS_SET),
+				     pkt_len);
 }
 
 static __always_inline int vip_bucket_admit(const struct vip_config *config,

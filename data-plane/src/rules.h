@@ -14,8 +14,6 @@
 
 enum rule_flags {
 	RULE_F_ENABLED = 1 << 0,
-	RULE_F_PPS_SET = 1 << 1,
-	RULE_F_BPS_SET = 1 << 2,
 };
 
 struct rule_entry {
@@ -23,8 +21,6 @@ struct rule_entry {
 	__u16 src_hi;
 	__u16 dst_lo;
 	__u16 dst_hi;
-	__u64 pps;
-	__u64 bps; /* bytes/sec; M4 converts from the control-plane unit. */
 	__u8 proto;
 	__u8 flags;
 	__u8 _pad[6];
@@ -38,11 +34,6 @@ struct rule_block {
 	struct rule_entry rules[RULE_MAX];
 };
 
-struct rl_key {
-	__u32 service_id;
-	__u32 rule_idx;
-};
-
 struct rl_bucket {
 	__u32 cfg_version;
 	__u32 _pad;
@@ -51,14 +42,14 @@ struct rl_bucket {
 	__u64 bps_tokens;
 };
 
-struct rl_config {
+struct ratelimit_config {
 	__u32 test_no_refill;
 	__u32 _pad;
 };
 
-_Static_assert(sizeof(struct rule_entry) == 32,
+_Static_assert(sizeof(struct rule_entry) == 16,
 	       "rule_entry size is part of the M4 map contract");
-_Static_assert(sizeof(struct rule_block) == 520,
+_Static_assert(sizeof(struct rule_block) == 264,
 	       "rule_block size is part of the M4 map contract");
 _Static_assert(sizeof(struct rl_bucket) == 32,
 	       "rl_bucket size is part of the runtime map contract");
@@ -96,18 +87,11 @@ struct {
 };
 
 struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_HASH);
-	__uint(max_entries, RATE_LIMIT_STATE_MAX_ENTRIES);
-	__type(key, struct rl_key);
-	__type(value, struct rl_bucket);
-} rate_limit_state SEC(".maps");
-
-struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, struct rl_config);
-} rl_config SEC(".maps");
+	__type(value, struct ratelimit_config);
+} ratelimit_config SEC(".maps");
 
 static __always_inline int rule_proto_matches(const struct rule_entry *rule,
 					      const struct pkt_meta *meta)
@@ -158,7 +142,7 @@ static __always_inline __u32 rl_cpu_count(void)
 static __always_inline int rl_test_no_refill(void)
 {
 	__u32 key = 0;
-	struct rl_config *config = bpf_map_lookup_elem(&rl_config, &key);
+	struct ratelimit_config *config = bpf_map_lookup_elem(&ratelimit_config, &key);
 
 	return config && config->test_no_refill;
 }
@@ -175,19 +159,6 @@ static __always_inline __u64 rl_burst(__u64 rate, __u32 ncpus,
 
 	burst = rate / ncpus;
 	return burst ? burst : 1;
-}
-
-static __always_inline void rl_bucket_reset(struct rl_bucket *bucket,
-					    const struct rule_block *block,
-					    const struct rule_entry *rule,
-					    __u64 now, __u32 ncpus,
-					    int test_no_refill)
-{
-	bucket->cfg_version = block->version;
-	bucket->_pad = 0;
-	bucket->last_ns = now;
-	bucket->pps_tokens = rl_burst(rule->pps, ncpus, test_no_refill);
-	bucket->bps_tokens = rl_burst(rule->bps, ncpus, test_no_refill);
 }
 
 static __always_inline __u64 rl_refill_dim(__u64 *tokens, __u64 rate,
@@ -217,49 +188,10 @@ static __always_inline __u64 rl_refill_dim(__u64 *tokens, __u64 rate,
 	return advance > elapsed ? elapsed : advance;
 }
 
-static __always_inline void rl_bucket_refill(struct rl_bucket *bucket,
-					     const struct rule_entry *rule,
-					     __u64 now, __u32 ncpus)
+static __always_inline int rl_bucket_consume_raw(struct rl_bucket *bucket,
+						 int pps_set, int bps_set,
+						 __u64 pkt_len)
 {
-	__u64 pps_burst;
-	__u64 bps_burst;
-	__u64 elapsed;
-	__u64 advance = 0;
-	__u64 dim_advance;
-
-	if (now <= bucket->last_ns)
-		return;
-
-	elapsed = now - bucket->last_ns;
-	if (elapsed > NSEC_PER_SEC)
-		elapsed = NSEC_PER_SEC;
-
-	if (rule->flags & RULE_F_PPS_SET) {
-		pps_burst = rl_burst(rule->pps, ncpus, 0);
-		dim_advance = rl_refill_dim(&bucket->pps_tokens, rule->pps,
-					    pps_burst, elapsed, ncpus);
-		if (dim_advance > advance)
-			advance = dim_advance;
-	}
-
-	if (rule->flags & RULE_F_BPS_SET) {
-		bps_burst = rl_burst(rule->bps, ncpus, 0);
-		dim_advance = rl_refill_dim(&bucket->bps_tokens, rule->bps,
-					    bps_burst, elapsed, ncpus);
-		if (dim_advance > advance)
-			advance = dim_advance;
-	}
-
-	if (advance > 0)
-		bucket->last_ns += advance;
-}
-
-static __always_inline int rl_bucket_consume(struct rl_bucket *bucket,
-					     const struct rule_entry *rule,
-					     __u64 pkt_len)
-{
-	int pps_set = rule->flags & RULE_F_PPS_SET;
-	int bps_set = rule->flags & RULE_F_BPS_SET;
 	int pps_ok = !pps_set || bucket->pps_tokens >= 1;
 	int bps_ok = !bps_set || bucket->bps_tokens >= pkt_len;
 
@@ -273,45 +205,7 @@ static __always_inline int rl_bucket_consume(struct rl_bucket *bucket,
 	return 1;
 }
 
-static __always_inline int rl_bucket_admit(const struct rule_block *block,
-					   const struct rule_entry *rule,
-					   const struct pkt_meta *meta,
-					   __u32 rule_idx, __u64 pkt_len)
-{
-	struct rl_key key = {
-		.service_id = meta->service_id,
-		.rule_idx = rule_idx,
-	};
-	struct rl_bucket fresh = {};
-	struct rl_bucket *bucket;
-	__u32 ncpus;
-	__u64 now;
-	int test_no_refill;
-	int admitted;
-
-	if (!(rule->flags & (RULE_F_PPS_SET | RULE_F_BPS_SET)))
-		return 1;
-
-	ncpus = rl_cpu_count();
-	test_no_refill = rl_test_no_refill();
-	now = bpf_ktime_get_ns();
-	bucket = bpf_map_lookup_elem(&rate_limit_state, &key);
-	if (!bucket) {
-		rl_bucket_reset(&fresh, block, rule, now, ncpus, test_no_refill);
-		admitted = rl_bucket_consume(&fresh, rule, pkt_len);
-		if (bpf_map_update_elem(&rate_limit_state, &key, &fresh,
-					BPF_ANY) != 0)
-			return -1;
-		return admitted;
-	}
-
-	if (bucket->cfg_version != block->version)
-		rl_bucket_reset(bucket, block, rule, now, ncpus, test_no_refill);
-	else if (!test_no_refill)
-		rl_bucket_refill(bucket, rule, now, ncpus);
-
-	return rl_bucket_consume(bucket, rule, pkt_len);
-}
+#include "svc_ratelimit.h"
 
 static __always_inline int fair_admit_stage(struct xdp_md *ctx,
 					    struct pkt_meta *meta, __u32 slot);
@@ -355,8 +249,7 @@ static __always_inline int allow_rule_stage(struct xdp_md *ctx,
 			continue;
 
 		meta->rule_idx = (__u8)i;
-		admitted = rl_bucket_admit(block, &block->rules[i], meta, i,
-					   pkt_len);
+		admitted = svc_rl_admit(slot, service_id, pkt_len);
 		if (admitted < 0)
 			return record_drop(meta, DR_MAP_ERROR);
 		if (!admitted)

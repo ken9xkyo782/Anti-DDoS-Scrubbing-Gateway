@@ -202,13 +202,8 @@ static __always_inline int fair_cap_bucket_consume(struct rl_bucket *bucket,
 						     const struct fair_config *config,
 						     __u64 pkt_len)
 {
-	struct rule_entry cap = {
-		.pps = config->cap_pps,
-		.bps = config->cap_bps,
-		.flags = RULE_F_PPS_SET | RULE_F_BPS_SET,
-	};
-
-	return rl_bucket_consume(bucket, &cap, pkt_len);
+	(void)config;
+	return rl_bucket_consume_raw(bucket, 1, 1, pkt_len);
 }
 
 static __always_inline int fair_cap_admit(const struct fair_config *config,
@@ -305,12 +300,8 @@ static __always_inline void fair_bps_bucket_refill(struct rl_bucket *bucket,
 static __always_inline int fair_bps_bucket_consume(struct rl_bucket *bucket,
 						     __u64 rate, __u64 pkt_len)
 {
-	struct rule_entry limit = {
-		.bps = rate,
-		.flags = RULE_F_BPS_SET,
-	};
-
-	return rl_bucket_consume(bucket, &limit, pkt_len);
+	(void)rate;
+	return rl_bucket_consume_raw(bucket, 0, 1, pkt_len);
 }
 
 static __always_inline int fair_burst_admit(const struct fair_config *config,

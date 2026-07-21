@@ -20,6 +20,7 @@
 #include "pkt_meta.h"
 #include "rules.h"
 #include "service.h"
+#include "svc_ratelimit.h"
 #include "nexthop.h"
 #include "svc_stat.h"
 #include "blacklist.h"
@@ -86,8 +87,11 @@ struct test_env {
 	int svc_burst_state_fd;
 	int node_burst_state_fd;
 	int service_ingress_cap_state_fd;
-	int rate_limit_state_fd;
-	int rl_config_fd;
+	int svc_rl_state_fd;
+	int svc_rl_config0_fd;
+	int svc_rl_config1_fd;
+	int svc_rl_config_map_fd;
+	int ratelimit_config_fd;
 	int active_config_fd;
 	int tx_devmap_fd;
 	int node_control_fd;
@@ -202,8 +206,11 @@ static int env_open(struct test_env *env)
 	env->node_burst_state_fd = bpf_map__fd(env->skel->maps.node_burst_state);
 	env->service_ingress_cap_state_fd =
 		bpf_map__fd(env->skel->maps.service_ingress_cap_state);
-	env->rate_limit_state_fd = bpf_map__fd(env->skel->maps.rate_limit_state);
-	env->rl_config_fd = bpf_map__fd(env->skel->maps.rl_config);
+	env->svc_rl_state_fd = bpf_map__fd(env->skel->maps.svc_rl_state);
+	env->svc_rl_config0_fd = bpf_map__fd(env->skel->maps.svc_rl_config_0);
+	env->svc_rl_config1_fd = bpf_map__fd(env->skel->maps.svc_rl_config_1);
+	env->svc_rl_config_map_fd = bpf_map__fd(env->skel->maps.svc_rl_config_map);
+	env->ratelimit_config_fd = bpf_map__fd(env->skel->maps.ratelimit_config);
 	env->active_config_fd = bpf_map__fd(env->skel->maps.active_config);
 	env->tx_devmap_fd = bpf_map__fd(env->skel->maps.tx_devmap);
 	env->node_control_fd = bpf_map__fd(env->skel->maps.node_control);
@@ -246,7 +253,9 @@ static int env_open(struct test_env *env)
 	    env->svc_committed_state_fd < 0 || env->svc_burst_state_fd < 0 ||
 	    env->node_burst_state_fd < 0 ||
 	    env->service_ingress_cap_state_fd < 0 ||
-	    env->rate_limit_state_fd < 0 || env->rl_config_fd < 0 ||
+	    env->svc_rl_state_fd < 0 || env->svc_rl_config0_fd < 0 ||
+	    env->svc_rl_config1_fd < 0 || env->svc_rl_config_map_fd < 0 ||
+	    env->ratelimit_config_fd < 0 ||
 	    env->active_config_fd < 0 || env->tx_devmap_fd < 0 ||
 	    env->node_control_fd < 0 || env->bypass_counter_fd < 0 ||
 	    env->nexthop_map_fd < 0 || env->trigger_fd < 0 ||
@@ -458,18 +467,6 @@ static int clear_vip_config_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
-static int clear_rate_limit_state(int fd)
-{
-	struct rl_key key;
-
-	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
-		if (bpf_map_delete_elem(fd, &key) != 0)
-			return -1;
-	}
-
-	return errno == ENOENT ? 0 : -1;
-}
-
 static int clear_vip_ceiling_state(int fd)
 {
 	__u32 key;
@@ -511,10 +508,14 @@ static int reset_node_burst_state(struct test_env *env)
 
 static int reset_rate_limit(struct test_env *env)
 {
-	struct rl_config config = {};
+	struct ratelimit_config config = {};
 	__u32 key = 0;
 
-	if (clear_rate_limit_state(env->rate_limit_state_fd) != 0)
+	if (clear_u32_hash_map(env->svc_rl_state_fd) != 0)
+		return -1;
+	if (clear_u32_hash_map(env->svc_rl_config0_fd) != 0)
+		return -1;
+	if (clear_u32_hash_map(env->svc_rl_config1_fd) != 0)
 		return -1;
 	if (clear_vip_ceiling_state(env->vip_ceiling_state_fd) != 0)
 		return -1;
@@ -526,7 +527,7 @@ static int reset_rate_limit(struct test_env *env)
 		return -1;
 	if (reset_node_burst_state(env) != 0)
 		return -1;
-	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
+	return bpf_map_update_elem(env->ratelimit_config_fd, &key, &config, 0);
 }
 
 static int reset_config(struct test_env *env)
@@ -1001,6 +1002,17 @@ static int seed_vip_config(struct test_env *env, __u32 slot, __u32 service_id,
 	return bpf_map_update_elem(fd, &service_id, config, BPF_ANY);
 }
 
+static int seed_svc_rl_config(struct test_env *env, __u32 slot, __u32 service_id,
+			      const struct svc_rl_config *config)
+{
+	int fd = slot == 0 ? env->svc_rl_config0_fd : env->svc_rl_config1_fd;
+
+	if (fd < 0)
+		return -1;
+
+	return bpf_map_update_elem(fd, &service_id, config, BPF_ANY);
+}
+
 static struct vip_config vip_pps_config(__u64 pps)
 {
 	struct vip_config config = {
@@ -1123,12 +1135,12 @@ static int set_sample_config(struct test_env *env, __u64 rate_per_sec,
 
 static int set_rl_config(struct test_env *env, __u32 test_no_refill)
 {
-	struct rl_config config = {
+	struct ratelimit_config config = {
 		.test_no_refill = test_no_refill,
 	};
 	__u32 key = 0;
 
-	return bpf_map_update_elem(env->rl_config_fd, &key, &config, 0);
+	return bpf_map_update_elem(env->ratelimit_config_fd, &key, &config, 0);
 }
 
 static int set_test_trigger(struct test_env *env, __u32 value)
@@ -1264,21 +1276,18 @@ static int read_bloom_stat(struct test_env *env, enum bloom_fp_stage stage,
 	return err;
 }
 
-static int read_bucket_cpu0(struct test_env *env, __u32 service_id,
-			    __u32 rule_idx, struct rl_bucket *bucket)
+static int read_svc_rl_bucket_cpu0(struct test_env *env, __u32 service_id,
+				   struct rl_bucket *bucket)
 {
 	struct rl_bucket *values;
-	struct rl_key key = {
-		.service_id = service_id,
-		.rule_idx = rule_idx,
-	};
+	__u32 key = service_id;
 	int err;
 
 	values = calloc(env->possible_cpus, sizeof(*values));
 	if (!values)
 		return -1;
 
-	err = bpf_map_lookup_elem(env->rate_limit_state_fd, &key, values);
+	err = bpf_map_lookup_elem(env->svc_rl_state_fd, &key, values);
 	if (err == 0)
 		*bucket = values[0];
 
@@ -2871,11 +2880,11 @@ static int test_config_maps_load(void)
 		err = expect_fd("service_ingress_cap_state",
 				env.service_ingress_cap_state_fd);
 	if (!err)
-		err = expect_fd("rate_limit_state", env.rate_limit_state_fd);
+		err = expect_fd("svc_rl_state", env.svc_rl_state_fd);
 	if (!err)
 		err = expect_fd("svc_stat_map", env.svc_stat_fd);
 	if (!err)
-		err = expect_fd("rl_config", env.rl_config_fd);
+		err = expect_fd("ratelimit_config", env.ratelimit_config_fd);
 	if (!err)
 		err = expect_fd("active_config", env.active_config_fd);
 	if (!err)
@@ -3257,6 +3266,11 @@ static int test_svc_stat_drop_counts_exact(void)
 		.version = 1,
 		.rule_count = 1,
 	};
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET,
+		.pps = 0,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	__u32 retval = 0;
@@ -3266,7 +3280,6 @@ static int test_svc_stat_drop_counts_exact(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].flags |= RULE_F_PPS_SET;
 
 	err = env_open(&env);
 	if (err)
@@ -3277,6 +3290,8 @@ static int test_svc_stat_drop_counts_exact(void)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
@@ -5307,6 +5322,11 @@ static int test_deterministic_pps_quota_drops_after_budget(void)
 		.version = 1,
 		.rule_count = 1,
 	};
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET,
+		.pps = 3,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	struct pkt_meta meta;
@@ -5317,8 +5337,6 @@ static int test_deterministic_pps_quota_drops_after_budget(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].pps = 3;
-	block.rules[0].flags |= RULE_F_PPS_SET;
 
 	err = env_open(&env);
 	if (err)
@@ -5326,11 +5344,11 @@ static int test_deterministic_pps_quota_drops_after_budget(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 
@@ -5357,6 +5375,11 @@ static int test_quota_overflow_does_not_fall_through(void)
 		.version = 1,
 		.rule_count = 2,
 	};
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET,
+		.pps = 1,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	struct pkt_meta meta;
@@ -5367,8 +5390,6 @@ static int test_quota_overflow_does_not_fall_through(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].pps = 1;
-	block.rules[0].flags |= RULE_F_PPS_SET;
 	block.rules[1] = match_all_rule();
 
 	err = env_open(&env);
@@ -5377,11 +5398,11 @@ static int test_quota_overflow_does_not_fall_through(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
@@ -5424,8 +5445,6 @@ static int test_no_quota_rule_always_admits(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
@@ -5451,6 +5470,11 @@ static int test_pps_zero_blocks(void)
 		.version = 1,
 		.rule_count = 1,
 	};
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET,
+		.pps = 0,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	__u32 retval = 0;
@@ -5460,7 +5484,6 @@ static int test_pps_zero_blocks(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].flags |= RULE_F_PPS_SET;
 
 	err = env_open(&env);
 	if (err)
@@ -5468,11 +5491,11 @@ static int test_pps_zero_blocks(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
@@ -5502,8 +5525,11 @@ static int test_bps_exhausts_by_bytes(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].bps = frame.len * 2;
-	block.rules[0].flags |= RULE_F_BPS_SET;
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_BPS_SET,
+		.bps = frame.len * 2,
+	};
 
 	err = env_open(&env);
 	if (err)
@@ -5511,11 +5537,11 @@ static int test_bps_exhausts_by_bytes(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 
@@ -5553,9 +5579,12 @@ static int test_pps_drop_leaves_bps_tokens_untouched(void)
 
 	bps_budget = frame.len * 10;
 	block.rules[0] = default_udp_rule();
-	block.rules[0].pps = 1;
-	block.rules[0].bps = bps_budget;
-	block.rules[0].flags |= RULE_F_PPS_SET | RULE_F_BPS_SET;
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET | SVC_RL_F_BPS_SET,
+		.pps = 1,
+		.bps = bps_budget,
+	};
 
 	err = env_open(&env);
 	if (err)
@@ -5563,11 +5592,11 @@ static int test_pps_drop_leaves_bps_tokens_untouched(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
@@ -5579,7 +5608,7 @@ static int test_pps_drop_leaves_bps_tokens_untouched(void)
 	if (!err)
 		err = expect_u32("second retval", retval, XDP_DROP);
 	if (!err)
-		err = read_bucket_cpu0(&env, DEFAULT_SERVICE_ID, 0, &bucket);
+		err = read_svc_rl_bucket_cpu0(&env, DEFAULT_SERVICE_ID, &bucket);
 	if (!err)
 		err = expect_u32("bps_tokens preserved",
 				 (__u32)bucket.bps_tokens,
@@ -5595,6 +5624,11 @@ static int test_reset_on_swap_admits_after_version_change(void)
 		.version = 1,
 		.rule_count = 1,
 	};
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET,
+		.pps = 1,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	struct pkt_meta meta;
@@ -5605,8 +5639,6 @@ static int test_reset_on_swap_admits_after_version_change(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].pps = 1;
-	block.rules[0].flags |= RULE_F_PPS_SET;
 
 	err = env_open(&env);
 	if (err)
@@ -5614,11 +5646,11 @@ static int test_reset_on_swap_admits_after_version_change(void)
 
 	err = reset_maps(&env);
 	if (!err)
-		err = set_rl_config(&env, 1);
-	if (!err)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
@@ -5630,8 +5662,8 @@ static int test_reset_on_swap_admits_after_version_change(void)
 	if (!err)
 		err = expect_u32("exhausted retval", retval, XDP_DROP);
 	if (!err) {
-		block.version = 2;
-		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+		config.version = 2;
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	}
 	if (!err)
 		err = run_frame_current_maps(&env, &frame, &retval);
@@ -5650,6 +5682,11 @@ static int test_normal_mode_fresh_bucket_admits(void)
 		.version = 1,
 		.rule_count = 1,
 	};
+	struct svc_rl_config config = {
+		.version = 1,
+		.flags = SVC_RL_F_PPS_SET,
+		.pps = 1,
+	};
 	struct pkt_frame frame;
 	struct test_env env;
 	struct pkt_meta meta;
@@ -5660,8 +5697,6 @@ static int test_normal_mode_fresh_bucket_admits(void)
 		return -1;
 
 	block.rules[0] = default_udp_rule();
-	block.rules[0].pps = 1;
-	block.rules[0].flags |= RULE_F_PPS_SET;
 
 	err = env_open(&env);
 	if (err)
@@ -5672,6 +5707,8 @@ static int test_normal_mode_fresh_bucket_admits(void)
 		err = seed_service(&env, 0, DEFAULT_DST, 32, DEFAULT_SERVICE_ID, 1);
 	if (!err)
 		err = seed_rule_block(&env, 0, DEFAULT_SERVICE_ID, &block);
+	if (!err)
+		err = seed_svc_rl_config(&env, 0, DEFAULT_SERVICE_ID, &config);
 	if (!err)
 		err = set_active(&env, 0, 1);
 	if (!err)
