@@ -16,6 +16,7 @@ import { AllocationsPage } from './features/config/allocations/AllocationsPage'
 import { AdminServicesPage } from './features/config/services-admin/AdminServicesPage'
 import { FeedsPage } from './features/config/feeds/FeedsPage'
 import { GlobalBlacklistPage } from './features/config/global-blacklist/GlobalBlacklistPage'
+import { DdosProtectionPage } from './features/config/ddos/DdosProtectionPage'
 import { AlertingPage } from './features/config/alerting/AlertingPage'
 import { NodeControlPage } from './features/config/node/NodeControlPage'
 import { AccountPage } from './features/config/account/AccountPage'
@@ -62,6 +63,7 @@ export function App() {
             <Route path="/admin/allocations" element={<AllocationsPage />} />
             <Route path="/admin/feeds" element={<FeedsPage />} />
             <Route path="/admin/global-blacklist" element={<GlobalBlacklistPage />} />
+            <Route path="/admin/ddos" element={<DdosProtectionPage />} />
             <Route path="/admin/alerting" element={<AlertingPage />} />
             <Route path="/admin/node" element={<NodeControlPage />} />
             <Route path="/admin/jobs" element={<JobBacklogPage />} />
