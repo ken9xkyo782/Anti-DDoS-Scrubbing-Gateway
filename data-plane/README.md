@@ -254,7 +254,14 @@ sudo ./build/dpstat tail
 sudo ./build/dpstat rate 256 64
 sudo ./build/dpstat set-bypass 1
 sudo ./build/dpstat set-bypass 0
+sudo ./build/dpstat set-blocked-ports 53 123 1900 11211
+sudo ./build/dpstat set-blocked-ports
 ```
+
+`set-blocked-ports` sets dynamic UDP source-port drop filters in the node-global bitmap:
+- **Usage:** `dpstat set-blocked-ports <port...>` (0..65535). Running with no port arguments clears all dynamic blocked ports.
+- **Both slots:** Writes both active and inactive slots of `udp_blocked_port_bitmap`, preserving dynamic blocked ports across `xdpgw-apply` service applies (slot flips).
+- **Drift-only reconcile & loader-reload caveat:** `dpstat set-blocked-ports` mutates pinned BPF maps directly. If a gateway reload or machine reboot unpins/clears BPF maps, restart the control-plane worker to re-assert desired blocked ports.
 
 Counter maps reset when the XDP program is reloaded. Consumers must compute deltas between reads, not
 interpret values as lifetime totals. Sampling budget is per CPU; a rate of `256` permits up to

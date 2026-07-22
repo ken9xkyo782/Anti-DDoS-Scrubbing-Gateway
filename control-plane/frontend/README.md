@@ -104,6 +104,7 @@ tenants, because the API restricts `PATCH /services/{id}/plan` to admins.
 | Allocations | `/admin/allocations` | `GET /allocations`, allocation create, `POST /allocations/overlap-check`, `POST /allocations/{id}/revoke` |
 | Threat feeds | `/admin/feeds` | `GET/POST/PUT/DELETE /feeds`, `POST /feeds/{id}/sync`, `GET /feeds/{id}/syncs` |
 | Global blacklist | `/admin/global-blacklist` | `GET/POST/DELETE /blacklist` |
+| DDoS Protection | `/admin/ddos` | `GET /ddos/amplification`, `POST/DELETE /ddos/amplification/ports` |
 | Alerting | `/admin/alerting` | `GET/PATCH /alerts/rules`, `GET/POST/PATCH/DELETE /alerts/channels`, `POST /alerts/channels/{id}/test` |
 | Node control | `/admin/node` | `GET /node/health`, `POST /node/bypass`, `POST /node/maintenance` |
 | Job backlog | `/admin/jobs` | `GET /jobs` |

@@ -78,6 +78,8 @@ panel.
 - Inject `RecordingApplier`, `FailingApplier`, or `BarrierApplier` into worker
   processor and runtime tests. These appliers make acknowledgments, failures,
   and mid-apply coordination deterministic without touching the data plane.
+- Inject `FakeBlockedPortsWriter` into `BlockedPortReconciler` and worker tests
+  to verify desired-state convergence without invoking `dpstat set-blocked-ports`.
 - Secrets: tests never assert on plaintext passwords; a log-capture fixture asserts **no** credential material is emitted (Success Criteria).
 
 ### Billing conventions
