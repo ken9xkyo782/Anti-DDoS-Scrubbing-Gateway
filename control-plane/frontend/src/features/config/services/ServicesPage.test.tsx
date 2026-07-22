@@ -236,8 +236,8 @@ describe('ServicesPage & ServiceForm', () => {
         name: 'New Test Service',
         cidr_or_ip: '192.168.10.0/24',
         mode: 'allow-rule-only',
-        vip_pps: null,
-        vip_bps: null,
+        vip_pps: 5000,
+        vip_bps: 1000000000,
       })
     })
   })
