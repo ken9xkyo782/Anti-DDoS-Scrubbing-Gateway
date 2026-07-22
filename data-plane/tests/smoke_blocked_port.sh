@@ -190,7 +190,7 @@ import json
 import sys
 
 snapshot = json.loads(sys.argv[1])
-drop_count = snapshot["counters"]["udp_amplification_drop"]
+drop_count = snapshot["node"]["counters"]["udp_amplification_drop"]
 if drop_count < 1:
     raise SystemExit(f"udp_amplification_drop counter is {drop_count}, expected >= 1")
 print(f"udp_amplification_drop counter verified: {drop_count}")
