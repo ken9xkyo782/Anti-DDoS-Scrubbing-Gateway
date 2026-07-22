@@ -19,6 +19,7 @@ SRC_IF=blkportsrc0
 OUT_IF=blkportout0
 SINK_IF=blkportsink0
 LOG=${TMPDIR:-/tmp}/xdp-gateway-blkport-smoke.$$.log
+SNAPSHOT=${TMPDIR:-/tmp}/xdp-gateway-blkport-smoke.$$.bin
 PASS_SRC=${TMPDIR:-/tmp}/xdp-gateway-blkport-pass.$$.bpf.c
 PASS_OBJ=${TMPDIR:-/tmp}/xdp-gateway-blkport-pass.$$.bpf.o
 PASS_PIN=/sys/fs/bpf/xdp_gateway_blkport_pass_$$
@@ -36,7 +37,7 @@ cleanup()
 	ip link del "${SINK_IF}" 2>/dev/null || true
 	ip link del "${OUT_IF}" 2>/dev/null || true
 	bpftool net detach xdp dev "${SINK_IF}" 2>/dev/null || true
-	rm -f "${PASS_PIN}" "${PASS_SRC}" "${PASS_OBJ}" "${LOG}"
+	rm -f "${PASS_PIN}" "${PASS_SRC}" "${PASS_OBJ}" "${LOG}" "${SNAPSHOT}"
 }
 
 probe()
