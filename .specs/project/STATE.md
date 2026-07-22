@@ -593,6 +593,7 @@ verification and the remaining test work finish. T5 later completed in
 
 | # | Description | Date | Commit | Status |
 | --- | --- | --- | --- | --- |
+| 1 | Tenant Create-Service modal: hide Mode/VIP-PPS/VIP-BPS fields; fix `mode=allow-rule-only`, default new services `vip_pps=5000` / `vip_bps=1_000_000_000` (1 Gbps bps); existing values preserved on edit (`ServiceForm.tsx` + `ServicesPage.test.tsx`, 6 fe tests green, tsc clean). Admin create/edit forms untouched (separate surface). | 2026-07-22 | _uncommitted_ | Done |
 
 ---
 
