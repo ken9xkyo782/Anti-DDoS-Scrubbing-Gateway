@@ -12,6 +12,7 @@ from app.api.routers import (
     apply_status,
     auth,
     billing,
+    ddos,
     feeds,
     global_blacklist,
     lists,
@@ -40,6 +41,7 @@ _API_PATH_PREFIXES = {
     "alerts",
     "auth",
     "billing",
+    "ddos",
     "feeds",
     "health",
     "jobs",
@@ -59,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(apply_status.router)
     app.include_router(auth.router)
     app.include_router(billing.router)
+    app.include_router(ddos.router)
     app.include_router(feeds.router)
     app.include_router(global_blacklist.router)
     app.include_router(lists.router)
