@@ -17,6 +17,7 @@ import { AdminServicesPage } from './features/config/services-admin/AdminService
 import { FeedsPage } from './features/config/feeds/FeedsPage'
 import { GlobalBlacklistPage } from './features/config/global-blacklist/GlobalBlacklistPage'
 import { DdosProtectionPage } from './features/config/ddos/DdosProtectionPage'
+import { DdosCoveragePage } from './features/config/ddos/DdosCoveragePage'
 import { AlertingPage } from './features/config/alerting/AlertingPage'
 import { NodeControlPage } from './features/config/node/NodeControlPage'
 import { AccountPage } from './features/config/account/AccountPage'
@@ -52,6 +53,7 @@ export function App() {
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/services/:id" element={<ServiceDetailPage />} />
             <Route path="/allocations" element={<AllocationsPage />} />
+            <Route path="/ddos" element={<DdosCoveragePage />} />
           </Route>
 
           {/* Admin-only routes */}
