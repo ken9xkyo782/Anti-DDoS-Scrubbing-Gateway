@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     worker_telemetry_top_talkers_limit: int = Field(default=10, ge=1, le=100)
     worker_node_control_enabled: bool = True
     worker_node_control_interval_seconds: float = Field(default=1.0, gt=0)
+    worker_blocked_port_enabled: bool = True
+    worker_blocked_port_interval_seconds: float = Field(default=1.0, gt=0)
     worker_billing_enabled: bool = True
     worker_billing_interval_seconds: float = Field(default=300.0, gt=0)
     worker_billing_sample_retention_days: int = Field(default=400, gt=0)

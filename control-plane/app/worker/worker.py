@@ -16,6 +16,10 @@ from app.db.models import AgentJob, JobStatus, JobType, utc_now
 from app.db.session import dispose_engine, get_session_factory
 from app.services.apply import APPLY_QUEUE_KEY
 from app.worker.applier import Applier, PlaceholderApplier
+from app.worker.blocked_port_reconciler import (
+    BlockedPortReconciler,
+    DpstatBlockedPortsWriter,
+)
 from app.worker.feed_coordinator import FeedCoordinator, FeedFetchCompletion
 from app.worker.feed_runner import FeedRunner
 from app.worker.feed_scheduler import enqueue_due_feed_syncs
@@ -52,6 +56,10 @@ class NextHopLane(Protocol):
     async def run_loop(self, stop: asyncio.Event) -> None: ...
 
 
+class BlockedPortLane(Protocol):
+    async def run_loop(self, stop: asyncio.Event) -> None: ...
+
+
 class Worker:
     def __init__(
         self,
@@ -66,6 +74,7 @@ class Worker:
         node_control: NodeControlLane | None = None,
         alerts: AlertLane | None = None,
         nexthop: NextHopLane | None = None,
+        blocked_port: BlockedPortLane | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.redis = redis or get_redis_client()
@@ -77,6 +86,7 @@ class Worker:
         self.node_control = node_control
         self.alerts = alerts
         self.nexthop = nexthop
+        self.blocked_port = blocked_port
         self._reconcile_requested = asyncio.Event()
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
@@ -112,6 +122,16 @@ class Worker:
                 interval_seconds=self.settings.worker_nexthop_resolve_interval_seconds,
             )
         configure_nexthop_resolver(nexthop)
+        blocked_port = self.blocked_port
+        if blocked_port is None and self.settings.worker_blocked_port_enabled:
+            blocked_port = BlockedPortReconciler(
+                session_factory=self.session_factory,
+                writer=DpstatBlockedPortsWriter(
+                    binary=self.settings.worker_telemetry_binary_path,
+                    timeout_seconds=self.settings.worker_telemetry_timeout_seconds,
+                ),
+                interval_seconds=self.settings.worker_blocked_port_interval_seconds,
+            )
         telemetry_task = (
             asyncio.create_task(self.telemetry.run_loop(stop_event))
             if self.telemetry is not None
@@ -135,6 +155,11 @@ class Worker:
         nexthop_task = (
             asyncio.create_task(nexthop.run_loop(stop_event)) if nexthop is not None else None
         )
+        blocked_port_task = (
+            asyncio.create_task(blocked_port.run_loop(stop_event))
+            if blocked_port is not None
+            else None
+        )
         inflight: asyncio.Task[object] | None = None
         backoff: float | None = None
         redis_degraded = False
@@ -153,6 +178,7 @@ class Worker:
                 "node_control_enabled": node_control is not None,
                 "alerts_enabled": self.alerts is not None,
                 "nexthop_enabled": nexthop is not None,
+                "blocked_port_enabled": blocked_port is not None,
             },
         )
 
@@ -328,6 +354,7 @@ class Worker:
                 await self._finish_background_lane(node_control_task)
                 await self._finish_background_lane(alert_task)
                 await self._finish_background_lane(nexthop_task)
+                await self._finish_background_lane(blocked_port_task)
                 await self._finish_inflight(
                     feed_coordinator.inflight_task if feed_coordinator is not None else None
                 )

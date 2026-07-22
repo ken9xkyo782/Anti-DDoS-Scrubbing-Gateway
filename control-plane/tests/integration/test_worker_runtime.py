@@ -773,7 +773,59 @@ async def test_worker_runtime_spawns_and_stops_nexthop_lane(
     stop.set()
     await asyncio.wait_for(task, timeout=2)
 
+
+async def test_worker_runtime_spawns_and_stops_blocked_port_lane(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class RecordingBlockedPortLane:
+        async def run_loop(self, stop: asyncio.Event) -> None:
+            started.set()
+            await stop.wait()
+            stopped.set()
+
+    stop = asyncio.Event()
+    worker = Worker(
+        settings=runtime_settings(),
+        redis=redis_client,
+        session_factory=committed_db,
+        blocked_port=RecordingBlockedPortLane(),
+    )
+    task = asyncio.create_task(worker.run(stop))
+
+    await asyncio.wait_for(started.wait(), timeout=2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
+
     assert stopped.is_set()
+
+
+async def test_worker_runtime_blocked_port_disabled_skips_lane(
+    committed_db: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.worker.worker.close_redis_client", _noop)
+    monkeypatch.setattr("app.worker.worker.dispose_engine", _noop)
+
+    stop = asyncio.Event()
+    settings = runtime_settings(worker_blocked_port_enabled=False)
+    worker = Worker(
+        settings=settings,
+        redis=redis_client,
+        session_factory=committed_db,
+    )
+    task = asyncio.create_task(worker.run(stop))
+
+    await asyncio.sleep(0.1)
+    stop.set()
+    await asyncio.wait_for(task, timeout=2)
 
 
 async def _noop() -> None:
