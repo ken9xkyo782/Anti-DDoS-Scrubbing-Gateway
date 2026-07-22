@@ -332,31 +332,33 @@ expiry, no ranges.
 
 | Requirement ID | Story | Refs | Phase | Status |
 | --- | --- | --- | --- | --- |
-| AMP-01 | P1: Admin CRUD | D-BLK-2, A-BLK-7, D-AMP-3 | Design | Pending |
-| AMP-02 | P1: Admin CRUD | validation/409/audit | Design | Pending |
-| AMP-03 | P1: Admin CRUD | delete/404 | Design | Pending |
-| AMP-04 | P1: Admin CRUD | list contract | Design | Pending |
-| AMP-05 | P1: Admin CRUD | hardcoded set, A-AMP-4 | Design | Pending |
-| AMP-06 | P1: Admin CRUD | §5.2 admin-only, D-AMP-1 | Design | Pending |
-| AMP-07 | P1: Admin CRUD | AuditEvent/record_event | Design | Pending |
-| AMP-08 | P1: Propagation | reconcile lane, D-AMP-2 | Design | Pending |
-| AMP-09 | P1: Propagation | dpstat set-blocked-ports, A-AMP-3 | Design | Pending |
-| AMP-10 | P1: Propagation | fail-safe/retry | Design | Pending |
-| AMP-11 | P1: Propagation | carry-forward-safe, M4 #2 | Design | Pending |
-| AMP-12 | P1: Propagation | BLK stage, ABI idx 7, BLK-14 | Design | Pending |
-| AMP-13 | P1: Propagation | no wire/JobType/reason change | Design | Pending |
-| AMP-14 | P1: SPA tab | role-filtered nav | Design | Pending |
-| AMP-15 | P1: SPA tab | built-in + dynamic sections | Design | Pending |
-| AMP-16 | P1: SPA tab | form/422/409 | Design | Pending |
-| AMP-17 | P1: SPA tab | remove/confirm/invalidate | Design | Pending |
-| AMP-18 | P1: SPA tab | applying-hint UX | Design | Pending |
-| AMP-19 | P1: SPA tab | Vitest + fe gate | Design | Pending |
-| AMP-20 | P2: Effective-state | dpstat snapshot read-back | - | Pending |
-| AMP-21 | P2: Effective-state | udp_amplification_drop counter | - | Pending |
+| AMP-01 | P1: Admin CRUD | D-BLK-2, A-BLK-7, D-AMP-3 | CT1 | ✅ Verified |
+| AMP-02 | P1: Admin CRUD | validation/409/audit | CT2/CT3 | ✅ Verified |
+| AMP-03 | P1: Admin CRUD | delete/404 | CT2/CT3 | ✅ Verified |
+| AMP-04 | P1: Admin CRUD | list contract | CT3 | ✅ Verified |
+| AMP-05 | P1: Admin CRUD | hardcoded set, A-AMP-4 | CT2 | ✅ Verified |
+| AMP-06 | P1: Admin CRUD | §5.2 admin-only, D-AMP-1 | CT3 | ✅ Verified |
+| AMP-07 | P1: Admin CRUD | AuditEvent/record_event | CT2 | ✅ Verified |
+| AMP-08 | P1: Propagation | reconcile lane, D-AMP-2 | CT4/CT5 | ✅ Verified |
+| AMP-09 | P1: Propagation | dpstat set-blocked-ports, A-AMP-3 | CT4/DT1 | ✅ Verified |
+| AMP-10 | P1: Propagation | fail-safe/retry | CT4 | ✅ Verified |
+| AMP-11 | P1: Propagation | carry-forward-safe, M4 #2 | DT2 | ✅ Verified (smoke: survives slot-swap) |
+| AMP-12 | P1: Propagation | BLK stage, ABI idx 7, BLK-14 | DT2 | ✅ Verified (smoke: idx 7 drop) |
+| AMP-13 | P1: Propagation | no wire/JobType/reason change | (design) | ✅ Verified |
+| AMP-14 | P1: SPA tab | role-filtered nav | FT2 | ✅ Verified |
+| AMP-15 | P1: SPA tab | built-in + dynamic sections | FT2 | ✅ Verified |
+| AMP-16 | P1: SPA tab | form/422/409 | FT2 | ✅ Verified |
+| AMP-17 | P1: SPA tab | remove/confirm/invalidate | FT2 | ✅ Verified |
+| AMP-18 | P1: SPA tab | applying-hint UX | FT2 | ✅ Verified |
+| AMP-19 | P1: SPA tab | Vitest + fe gate | FT1/FT2 | ✅ Verified |
+| AMP-20 | P2: Effective-state | dpstat snapshot read-back | PT1 | Deferred (P2) |
+| AMP-21 | P2: Effective-state | udp_amplification_drop counter | PT2 | Deferred (P2) |
 
 **ID format:** `AMP-[NUMBER]`. **Status:** Pending → In Design → In Tasks → Implementing → Verified.
 
-**Coverage:** 21 total (P1 = AMP-01..19, P2 = AMP-20..21), 0 mapped to tasks yet (Tasks phase).
+**Coverage:** 21 total. P1 = AMP-01..19 **✅ all Verified** (executed 2026-07-22, commits
+`181223a..80a67ff`; CP/FE/DP gates green + DT2 privileged smoke passed). P2 = AMP-20..21 **deferred**
+(PT1/PT2 optional, not executed).
 
 ---
 

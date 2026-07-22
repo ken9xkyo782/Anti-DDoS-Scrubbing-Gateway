@@ -2,7 +2,9 @@
 
 **Design**: `.specs/features/udp-amplification-config/design.md` (AD-036)
 **Spec**: `.specs/features/udp-amplification-config/spec.md` (AMP-01..21)
-**Status**: Draft — awaiting approval → Execute
+**Status**: VERIFIED — P1 (CT1–CT5 ∥ DT1–DT2 ∥ FT1–FT2 + DOC1) executed 2026-07-22, 16 atomic
+commits `181223a..80a67ff`; all gates green (CP 33 feature tests, FE 220, DP 137 + DT2 smoke passed).
+P2 (PT1/PT2, AMP-20..21) intentionally deferred. Migration pinned live to `20260722_0013`.
 
 **Baselines (pinned live at Execute):**
 - `B_cp` = `pytest -q` head (control-plane; current head ≥ 507).
