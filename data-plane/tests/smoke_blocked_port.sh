@@ -200,10 +200,18 @@ then
 	exit 1
 fi
 
-# 2. Perform a service apply (slot flip) using xdpgw-apply and golden fixture
-python3 tests/fixtures/gen_apply_snapshot_golden.py
-"${APPLY}" tests/fixtures/apply_snapshot_golden.bin
-"${DPSTAT}" set-nexthop 42 aa:aa:aa:aa:aa:aa bb:bb:bb:bb:bb:bb
+# 2. Perform a service apply (slot flip) using xdpgw-apply and 10.0.0.99 snapshot
+python3 - "${SNAPSHOT}" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, "tests")
+from apply_smoke import snapshot_service, write_snapshot
+
+path = Path(sys.argv[1])
+write_snapshot(path, [snapshot_service("10.0.0.99", 1)])
+PY
+"${APPLY}" "${SNAPSHOT}"
+"${DPSTAT}" set-nexthop 1 aa:aa:aa:aa:aa:aa bb:bb:bb:bb:bb:bb
 
 # Verify src-port 9999 still drops after slot flip (carry-forward safe across both slots)
 probe 9999 drop
