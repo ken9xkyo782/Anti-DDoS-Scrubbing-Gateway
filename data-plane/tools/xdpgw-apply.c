@@ -102,6 +102,9 @@ struct cfg_service {
 	uint64_t ceiling_bps;
 	uint64_t vip_pps;
 	uint64_t vip_bps;
+	uint64_t service_pps;
+	uint64_t service_bps;
+	uint8_t svc_rl_flags;
 	uint16_t rule_count;
 	struct cfg_rule rules[RULE_MAX];
 	uint32_t wl_count;
@@ -309,6 +312,9 @@ static inline int parse_service(struct rdcur *c, struct cfg_service *svc)
 	    rd_u64le(c, &svc->vip_pps) != 0 ||
 	    rd_u64le(c, &svc->vip_bps) != 0 ||
 	    rd_u8(c, &svc->vip_flags) != 0 ||
+	    rd_u64le(c, &svc->service_pps) != 0 ||
+	    rd_u64le(c, &svc->service_bps) != 0 ||
+	    rd_u8(c, &svc->svc_rl_flags) != 0 ||
 	    rd_u16le(c, &rule_count) != 0)
 		return -1;
 

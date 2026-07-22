@@ -40,6 +40,7 @@
 #define SVC_STAT_PIN_PATH PIN_DIR "/svc_stat_map"
 #define NEXTHOP_MAP_PIN_PATH PIN_DIR "/nexthop_map"
 #define TX_DEVMAP_PIN_PATH PIN_DIR "/tx_devmap"
+#define UDP_BLOCKED_PORT_BITMAP_PIN_PATH PIN_DIR "/udp_blocked_port_bitmap"
 
 static volatile sig_atomic_t exiting;
 
@@ -56,6 +57,7 @@ static void usage(const char *prog)
 	fprintf(stderr, "       %s rate <per_cpu_rate> <burst>\n", prog);
 	fprintf(stderr, "       %s active_config\n", prog);
 	fprintf(stderr, "       %s set-bypass 0|1\n", prog);
+	fprintf(stderr, "       %s set-blocked-ports [<port1> <port2> ...]\n", prog);
 	fprintf(stderr, "       %s snapshot --json [--ifindex N]\n", prog);
 	fprintf(stderr, "       %s resolve-nexthop <dp_id> <ipv4>\n", prog);
 	fprintf(stderr, "       %s evict-nexthop <dp_id>\n", prog);
@@ -1282,6 +1284,51 @@ static int cmd_nexthop(int argc, char **argv)
 	return 0;
 }
 
+static int cmd_set_blocked_ports(int argc, char **argv)
+{
+	__u64 words[BLOCKED_PORT_WORDS] = {0};
+
+	for (int i = 0; i < argc; i++) {
+		__u64 port;
+		if (parse_u64(argv[i], &port) != 0 || port > 65535) {
+			fprintf(stderr, "invalid port: %s (must be 0..65535)\n", argv[i]);
+			return 2;
+		}
+		words[(size_t)(port >> 6)] |= (1ULL << (port & 63));
+	}
+
+	int outer_fd = open_pinned_map(UDP_BLOCKED_PORT_BITMAP_PIN_PATH);
+	if (outer_fd < 0)
+		return 1;
+
+	for (__u32 slot = 0; slot < 2; slot++) {
+		__u32 inner_id = 0;
+		if (bpf_map_lookup_elem(outer_fd, &slot, &inner_id) != 0) {
+			fprintf(stderr, "failed to lookup inner map for slot %u: %s\n", slot, strerror(errno));
+			close(outer_fd);
+			return 1;
+		}
+		int inner_fd = bpf_map_get_fd_by_id(inner_id);
+		if (inner_fd < 0) {
+			fprintf(stderr, "failed to get inner map fd for slot %u (id %u): %s\n", slot, inner_id, strerror(errno));
+			close(outer_fd);
+			return 1;
+		}
+		for (__u32 word_idx = 0; word_idx < BLOCKED_PORT_WORDS; word_idx++) {
+			if (bpf_map_update_elem(inner_fd, &word_idx, &words[word_idx], BPF_ANY) != 0) {
+				fprintf(stderr, "failed to update inner map slot %u word %u: %s\n", slot, word_idx, strerror(errno));
+				close(inner_fd);
+				close(outer_fd);
+				return 1;
+			}
+		}
+		close(inner_fd);
+	}
+
+	close(outer_fd);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *prog = argv[0];
@@ -1300,6 +1347,8 @@ int main(int argc, char **argv)
 		err = cmd_rate(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "set-bypass") == 0)
 		err = cmd_set_bypass(argc - 2, argv + 2);
+	else if (strcmp(argv[1], "set-blocked-ports") == 0)
+		err = cmd_set_blocked_ports(argc - 2, argv + 2);
 	else if (strcmp(argv[1], "active_config") == 0)
 		err = argc == 2 ? cmd_active_config() : 2;
 	else if (strcmp(argv[1], "snapshot") == 0)
