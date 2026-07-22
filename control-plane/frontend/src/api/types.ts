@@ -293,5 +293,17 @@ export interface AlertChannelTestResponse {
   error: string | null
 }
 
+export interface BlockedPortResponse {
+  port: number
+  note: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface AmplificationConfigResponse {
+  hardcoded_ports: number[]
+  dynamic_ports: BlockedPortResponse[]
+}
+
 
 
