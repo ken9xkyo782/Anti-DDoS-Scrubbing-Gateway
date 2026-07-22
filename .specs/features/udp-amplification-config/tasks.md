@@ -62,18 +62,18 @@ NULL + CheckConstraint template).
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `BlockedUdpPort(Base)`: `port` PK `Integer` + `CheckConstraint("port >= 0 AND port <= 65535",
+- [x] `BlockedUdpPort(Base)`: `port` PK `Integer` + `CheckConstraint("port >= 0 AND port <= 65535",
       name="ck_blocked_udp_port_range")`; `note` `String(256)` nullable; `created_by` FK `users.id`
       `ondelete="SET NULL"` nullable; `created_at` `DateTime(timezone=True)` default `utc_now`;
       `__tablename__ = "blocked_udp_port"`.
-- [ ] Migration `create_table` (mirrors `_0010`), `down_revision` pinned to the **live head** at Execute
+- [x] Migration `create_table` (mirrors `_0010`), `down_revision` pinned to the **live head** at Execute
       (F6); `downgrade` drops the table.
-- [ ] Integration test (`tests/integration/test_blocked_udp_port_model.py`): insert a row; duplicate
+- [x] Integration test (`tests/integration/test_blocked_udp_port_model.py`): insert a row; duplicate
       `port` → IntegrityError; `port = 70000` and `port = -1` → CheckConstraint violation; user delete
       → `created_by` set NULL.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (+ `alembic
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q` (+ `alembic
       upgrade head` on test DB).
-- [ ] Test count: `B_cp + ≥3` pass.
+- [x] Test count: `B_cp + ≥3` pass.
 
 **Tests**: integration · **Gate**: full (+ build: `alembic upgrade head`)
 **Verify**: `alembic upgrade head` then `\d blocked_udp_port` shows the CheckConstraint + FK.
@@ -92,18 +92,18 @@ NULL + CheckConstraint template).
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `HARDCODED_AMP_PORTS = (17, 19, 53, 111, 123, 137, 161, 389, 520, 1900, 5353, 11211)` with a
+- [x] `HARDCODED_AMP_PORTS = (17, 19, 53, 111, 123, 137, 161, 389, 520, 1900, 5353, 11211)` with a
       docstring: "mirror of data-plane `amp_port_hardcoded` (blacklist.h) — DP header authoritative;
       change both together" (A-AMP-4).
-- [ ] `list_blocked_ports(db)` (ordered by `port`); `add_blocked_port(db, actor, port, note)`
+- [x] `list_blocked_ports(db)` (ordered by `port`); `add_blocked_port(db, actor, port, note)`
       (pre-check → `HTTPException(409, "port already blocked")`; `record_event(action=
       "ddos.amp_port.added", target_type="blocked_udp_port", target_id=str(port),
       metadata={"note": note})`); `remove_blocked_port(db, actor, port)` (404 if absent;
       `record_event(action="ddos.amp_port.removed", ...)`).
-- [ ] Integration test (`tests/integration/test_ddos_amplification_service.py`): add → row + audit
+- [x] Integration test (`tests/integration/test_ddos_amplification_service.py`): add → row + audit
       event present; duplicate → 409; remove present → gone + audit; remove absent → 404; list ordered.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`.
-- [ ] Test count: `+≥4` pass.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`.
+- [x] Test count: `+≥4` pass.
 
 **Tests**: integration · **Gate**: full
 **Verify**: run the new service integration test module → all pass; audit rows visible in `audit_events`.
@@ -123,19 +123,19 @@ NULL + CheckConstraint template).
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Schemas: `BlockedPortCreateRequest{ port: int = Field(ge=0, le=65535), note: str | None =
+- [x] Schemas: `BlockedPortCreateRequest{ port: int = Field(ge=0, le=65535), note: str | None =
       Field(default=None, max_length=256) }`; `BlockedPortResponse{ port, note, created_by, created_at
       }`; `AmplificationConfigResponse{ hardcoded_ports: list[int], dynamic_ports:
       list[BlockedPortResponse] }`.
-- [ ] Router (`prefix="/ddos"`, admin-only every route): `GET /ddos/amplification` → both sets; `POST
+- [x] Router (`prefix="/ddos"`, admin-only every route): `GET /ddos/amplification` → both sets; `POST
       /ddos/amplification/ports` → 201 / 409 / 422; `DELETE /ddos/amplification/ports/{port}` → 204 /
       404; registered in `main.py`.
-- [ ] Integration test (`tests/integration/test_ddos_router.py`, via `AsyncClient`): admin GET returns
+- [x] Integration test (`tests/integration/test_ddos_router.py`, via `AsyncClient`): admin GET returns
       12 hardcoded + dynamic; POST 201 then duplicate 409; POST `70000` → 422; DELETE 204 then 404;
       **tenant principal → 403** on every route.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`; `python -c
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`; `python -c
       "import app.main"` import smoke.
-- [ ] Test count: `+≥5` pass.
+- [x] Test count: `+≥5` pass.
 
 **Tests**: integration · **Gate**: full
 **Verify**: `pytest -q tests/integration/test_ddos_router.py` all pass; `/openapi.json` lists `/ddos`.
@@ -155,18 +155,18 @@ NULL + CheckConstraint template).
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `BlockedPortsWriter(Protocol).set(ports: frozenset[int]) -> bool`; `DpstatBlockedPortsWriter`
+- [x] `BlockedPortsWriter(Protocol).set(ports: frozenset[int]) -> bool`; `DpstatBlockedPortsWriter`
       (`create_subprocess_exec(binary, "set-blocked-ports", *sorted str ports)`; empty set → no port
       args; False on OSError/timeout/nonzero); `FakeBlockedPortsWriter` (records calls, scripted
       results).
-- [ ] `BlockedPortReconciler(session_factory, writer, interval_seconds)` with `reconcile_once` (drift
+- [x] `BlockedPortReconciler(session_factory, writer, interval_seconds)` with `reconcile_once` (drift
       on `asserted_ports`; on write failure **leave asserted unchanged**, never clear — AMP-10) and
       `run_loop(stop)` (clone `NodeControlReconciler`).
-- [ ] Integration test (`tests/integration/test_blocked_port_reconciler.py`, `committed_db` +
+- [x] Integration test (`tests/integration/test_blocked_port_reconciler.py`, `committed_db` +
       `FakeBlockedPortsWriter`): desired set converges (writer receives it); no-drift = no re-write;
       restart (`asserted=None`) re-asserts once; writer failure keeps last-good + retries next tick.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`.
-- [ ] Test count: `+≥4` pass.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`.
+- [x] Test count: `+≥4` pass.
 
 **Tests**: integration · **Gate**: full
 **Verify**: `pytest -q tests/integration/test_blocked_port_reconciler.py` all pass.
@@ -186,16 +186,16 @@ construct + `create_task(lane.run_loop)`); reuse `worker_telemetry_binary_path` 
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `config.py`: `worker_blocked_port_enabled: bool = True`, `worker_blocked_port_interval_seconds:
+- [x] `config.py`: `worker_blocked_port_enabled: bool = True`, `worker_blocked_port_interval_seconds:
       float = Field(default=1.0, gt=0)` (writer binary/timeout reuse telemetry knobs — T6).
-- [ ] `worker.py`: `BlockedPortLane` Protocol; construct `BlockedPortReconciler` when
+- [x] `worker.py`: `BlockedPortLane` Protocol; construct `BlockedPortReconciler` when
       `settings.worker_blocked_port_enabled`; `create_task(lane.run_loop(stop_event))`; no change to the
       job loop / `process_job` / Redis.
-- [ ] Integration test (extend `tests/integration/test_worker_runtime.py`): with the lane enabled + a
+- [x] Integration test (extend `tests/integration/test_worker_runtime.py`): with the lane enabled + a
       `FakeBlockedPortsWriter` and a seeded `blocked_udp_port` row, the running worker converges the
       writer to the desired set; disabling the flag spawns no lane.
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`.
-- [ ] Test count: `+≥2` pass.
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`.
+- [x] Test count: `+≥2` pass.
 
 **Tests**: integration · **Gate**: full
 **Verify**: worker runtime test converges; `python -c "import app.worker.__main__"` import smoke.
@@ -215,14 +215,14 @@ construct + `create_task(lane.run_loop)`); reuse `worker_telemetry_binary_path` 
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `#define UDP_BLOCKED_PORT_BITMAP_PIN_PATH PIN_DIR "/udp_blocked_port_bitmap"`; `cmd_set_blocked_
+- [x] `#define UDP_BLOCKED_PORT_BITMAP_PIN_PATH PIN_DIR "/udp_blocked_port_bitmap"`; `cmd_set_blocked_
       ports`: parse each argv `0..65535` (else exit 2); build `__u64 words[BLOCKED_PORT_WORDS]` (`words
       [p>>6] |= 1ULL<<(p&63)`); `open_pinned_map(outer)`; for `slot in {0,1}`: inner fd via
       `bpf_map_lookup_elem(outer,&slot,&id)`→`bpf_map_get_fd_by_id(id)`, write all 1024 words, close;
       empty argv → all-zero bitmap; friendly exit 1 when the gateway isn't loaded.
-- [ ] `usage()` line + `main` dispatch (`strcmp(argv[1], "set-blocked-ports")`).
-- [ ] Gate check passes: `make bpf skel loader apply dpstat` (builds clean).
-- [ ] Test count: `B_dp` unchanged (build-only; enforcement is existing dp-unit; writer covered by DT2).
+- [x] `usage()` line + `main` dispatch (`strcmp(argv[1], "set-blocked-ports")`).
+- [x] Gate check passes: `make bpf skel loader apply dpstat` (builds clean).
+- [x] Test count: `B_dp` unchanged (build-only; enforcement is existing dp-unit; writer covered by DT2).
 
 **Tests**: none (build-gated userspace tooling — DP-established `set-bypass`/`set-nexthop` pattern;
 verified end-to-end by DT2's privileged smoke, not deferral) · **Gate**: build
@@ -244,13 +244,13 @@ existing `make smoke` privileged harness.
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Load the gateway (native/DRV), `dpstat set-blocked-ports 9999`, send a UDP frame src-port 9999 →
+- [x] Load the gateway (native/DRV), `dpstat set-blocked-ports 9999`, send a UDP frame src-port 9999 →
       `udp_amplification_drop` (idx 7) increments; src-port 9998 → not amp-dropped.
-- [ ] Assert **both slots** written: after a `xdpgw-apply` service apply (slot flip), src-port 9999
+- [x] Assert **both slots** written: after a `xdpgw-apply` service apply (slot flip), src-port 9999
       still drops (carry-forward-safe, AMP-11).
-- [ ] `dpstat set-blocked-ports` (empty) then src-port 9999 no longer amp-drops (clears cleanly).
-- [ ] Gate check passes: `make test && sudo make smoke` (green; `smoke_blocked_port.sh` included).
-- [ ] Test count: `B_dp` (`make test`) unchanged; smoke adds 1 privileged scenario (not in `make test`).
+- [x] `dpstat set-blocked-ports` (empty) then src-port 9999 no longer amp-drops (clears cleanly).
+- [x] Gate check passes: `make test && sudo make smoke` (green; `smoke_blocked_port.sh` included).
+- [x] Test count: `B_dp` (`make test`) unchanged; smoke adds 1 privileged scenario (not in `make test`).
 
 **Tests**: dp-integration · **Gate**: full (`make test && sudo make smoke`)
 **Verify**: `sudo make smoke` runs `smoke_blocked_port.sh` and it passes; snapshot shows bit 9999 set.
@@ -271,15 +271,15 @@ useAmplificationConfig.ts` (+ `.test.ts`).
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] `types.ts`: `BlockedPortResponse`, `AmplificationConfigResponse`.
-- [ ] `useAmplificationConfig()` (`GET /ddos/amplification`), `useAddBlockedPort()` (`POST
+- [x] `types.ts`: `BlockedPortResponse`, `AmplificationConfigResponse`.
+- [x] `useAmplificationConfig()` (`GET /ddos/amplification`), `useAddBlockedPort()` (`POST
       /ddos/amplification/ports`), `useRemoveBlockedPort()` (`DELETE /ddos/amplification/ports/{port}`);
       all invalidate `['amplification-config']`.
-- [ ] Vitest (`useAmplificationConfig.test.ts`, mocked `apiClient` + `QueryClient`): query maps
+- [x] Vitest (`useAmplificationConfig.test.ts`, mocked `apiClient` + `QueryClient`): query maps
       response; add posts body + invalidates; remove hits the port URL + invalidates.
-- [ ] Gate check passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test
+- [x] Gate check passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test
       -- --run && npm run build`.
-- [ ] Test count: `B_fe + ≥3` pass.
+- [x] Test count: `B_fe + ≥3` pass.
 
 **Tests**: fe-unit · **Gate**: fe
 **Verify**: fe gate green; hook test module passes.
@@ -300,18 +300,18 @@ Input, ConfirmDialog, Toast, Field); `apiClient` `fieldErrorsFrom422` / `{detail
 **Tools**: MCP: NONE · Skill: `coding-guidelines`
 
 **Done when**:
-- [ ] Page: read-only "Built-in blocked source ports (always on)" chips (`hardcoded_ports`) + a
+- [x] Page: read-only "Built-in blocked source ports (always on)" chips (`hardcoded_ports`) + a
       "Dynamic blocked source ports" `DataTable` (port, note, remove-with-`ConfirmDialog`) + Add form
       (`NumberInput` 0..65535 + `Input` note) surfacing `422`/`409` via `fieldErrorsFrom422` / `{detail}`
       + success `Toast` "Blocked-port list updated; applying to data-plane" (no apply-status indicator).
-- [ ] `Sidebar.tsx`: admin-group `NavLink to="/admin/ddos"` "DDoS Protection"; `App.tsx`: `<Route
+- [x] `Sidebar.tsx`: admin-group `NavLink to="/admin/ddos"` "DDoS Protection"; `App.tsx`: `<Route
       path="/admin/ddos" element={<DdosProtectionPage />}>` inside `allowedRoles={['admin']}`.
-- [ ] Vitest (`DdosProtectionPage.test.tsx`, mocked `apiClient`/`QueryClient`): renders built-in +
+- [x] Vitest (`DdosProtectionPage.test.tsx`, mocked `apiClient`/`QueryClient`): renders built-in +
       dynamic; add success; add 409 inline "already blocked"; remove-with-confirm invalidates; nav item
       hidden for tenant role.
-- [ ] Gate check passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test
+- [x] Gate check passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test
       -- --run && npm run build`.
-- [ ] Test count: `+≥4` pass.
+- [x] Test count: `+≥4` pass.
 
 **Tests**: fe-unit · **Gate**: fe
 **Verify**: fe gate green; log in as admin → tab appears + CRUD works against a mocked client; tenant →
@@ -331,15 +331,15 @@ no nav item.
 **Tools**: MCP: NONE · Skill: `docs-writer`
 
 **Done when**:
-- [ ] `data-plane/README.md`: `dpstat set-blocked-ports <p...>` usage + the both-slots/carry-forward
+- [x] `data-plane/README.md`: `dpstat set-blocked-ports <p...>` usage + the both-slots/carry-forward
       note + the **drift-only reconcile + loader-reload caveat** (a full loader reload clears the map;
       restart the worker to re-assert — F2/T4).
-- [ ] `control-plane/frontend/README.md`: the DDoS Protection tab (route, admin-only, built-in vs
+- [x] `control-plane/frontend/README.md`: the DDoS Protection tab (route, admin-only, built-in vs
       dynamic).
-- [ ] `.specs/codebase/TESTING.md` deny-stage section: `smoke_blocked_port.sh` + the worker
+- [x] `.specs/codebase/TESTING.md` deny-stage section: `smoke_blocked_port.sh` + the worker
       `FakeBlockedPortsWriter` convention.
-- [ ] Gate check passes: `python -c "import app.main"` (docs-only; no code/tests).
-- [ ] Test count: unchanged (docs only).
+- [x] Gate check passes: `python -c "import app.main"` (docs-only; no code/tests).
+- [x] Test count: unchanged (docs only).
 
 **Tests**: none (matrix: docs) · **Gate**: none
 **Commit**: `docs: document dpstat set-blocked-ports + DDoS Protection tab`

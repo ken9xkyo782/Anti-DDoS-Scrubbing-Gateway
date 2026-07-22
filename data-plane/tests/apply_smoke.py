@@ -14,7 +14,7 @@ sys.path.insert(0, str(FIXTURES))
 
 from gen_apply_snapshot_golden import MAGIC, RULE_F_ENABLED, service
 
-APPLY_SNAPSHOT_SCHEMA_VERSION = 2
+APPLY_SNAPSHOT_SCHEMA_VERSION = 3
 APPLY_SNAPSHOT_KIND_SERVICE_FULL = 1
 APPLY_SNAPSHOT_KIND_GLOBAL_DENY = 2
 GLOBAL_DENY_MAX_ENTRIES = 1_048_576
@@ -36,6 +36,9 @@ def snapshot_service(dst_ip: str, dp_id: int) -> bytes:
         vip_pps=0,
         vip_bps=0,
         vip_flags=0,
+        service_pps=0,
+        service_bps=0,
+        svc_rl_flags=0,
         rules=MATCH_ALL_RULE,
         whitelist=[],
         sbl=[],
@@ -56,7 +59,7 @@ def write_snapshot(path: Path, services: list[bytes]) -> None:
 
 
 def generate_small(path: Path) -> None:
-    write_snapshot(path, [snapshot_service("10.0.0.3", 43)])
+    write_snapshot(path, [snapshot_service("10.0.0.3", 2)])
 
 
 def generate_bulk(path: Path, count: int) -> None:
