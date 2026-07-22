@@ -16,6 +16,7 @@ import {
   useRemoveBlockedPort,
 } from '../../../hooks/resources/useAmplificationConfig'
 import { BlockedPortForm } from './BlockedPortForm'
+import { ProtectionCoverage } from './ProtectionCoverage'
 import type { BlockedPortResponse } from '../../../api/types'
 
 export function DdosProtectionPage() {
@@ -52,13 +53,15 @@ export function DdosProtectionPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', padding: 'var(--space-6)' }}>
       <PageHeader
         title="DDoS Protection"
-        description="Manage UDP amplification attack vectors and source port drop rules. Hardcoded protocol ports are enforced automatically, and dynamic ports converge to the data plane in background worker ticks."
+        description="The scrubbing node classifies every packet at line rate and enforces a layered, default-deny policy across L3/L4. Below is the full coverage the data plane filters today; the UDP amplification source ports are the one vector you tune from here."
         actions={
           <Button variant="primary" onClick={() => setIsAddOpen(true)}>
             Add Blocked Port
           </Button>
         }
       />
+
+      <ProtectionCoverage />
 
       {/* Hardcoded Built-in Ports Section */}
       <Card style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
