@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Button, Field, Input, NumberInput, Select } from '../../../ui'
+import { Button, Field, Input, NumberInput } from '../../../ui'
 import { ApiError, fieldErrorsFrom422 } from '../../../api/client'
 import type { ServiceResponse } from '../../../api/types'
 
@@ -32,9 +32,16 @@ export function isValidCidrOrIp(val: string): boolean {
 export function ServiceForm({ service, onSubmit, onCancel, isSubmitting = false }: ServiceFormProps) {
   const [name, setName] = useState(service?.name ?? '')
   const [cidr, setCidr] = useState(service?.cidr_or_ip ?? '')
-  const [mode, setMode] = useState<string>(service?.mode ?? 'allow-rule-only')
-  const [vipPps, setVipPps] = useState<string>(service?.vip_pps != null ? String(service.vip_pps) : '')
-  const [vipBps, setVipBps] = useState<string>(service?.vip_bps != null ? String(service.vip_bps) : '')
+  // Mode is fixed to allow-rule-only and hidden from the form.
+  const mode = service?.mode ?? 'allow-rule-only'
+  // VIP limits are hidden; new services default to 5000 pps / 1 Gbps (1e9 bps),
+  // while existing services keep whatever value they already have.
+  const [vipPps] = useState<string>(
+    service?.vip_pps != null ? String(service.vip_pps) : (service ? '' : '5000'),
+  )
+  const [vipBps] = useState<string>(
+    service?.vip_bps != null ? String(service.vip_bps) : (service ? '' : '1000000000'),
+  )
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -107,33 +114,6 @@ export function ServiceForm({ service, onSubmit, onCancel, isSubmitting = false 
           value={cidr}
           onChange={(e) => setCidr(e.target.value)}
           placeholder="e.g. 192.0.2.0/24 or 2001:db8::/32"
-          disabled={isSubmitting}
-        />
-      </Field>
-
-      <Field label="Mode">
-        <Select
-          options={[{ value: 'allow-rule-only', label: 'Allow Rule Only' }]}
-          value={mode}
-          onValueChange={setMode}
-          disabled={isSubmitting}
-        />
-      </Field>
-
-      <Field label="VIP PPS Limit (Optional)" error={errors.vip_pps}>
-        <NumberInput
-          value={vipPps}
-          onChange={(e) => setVipPps(e.target.value)}
-          placeholder="e.g. 10000"
-          disabled={isSubmitting}
-        />
-      </Field>
-
-      <Field label="VIP BPS Limit (Optional)" error={errors.vip_bps}>
-        <NumberInput
-          value={vipBps}
-          onChange={(e) => setVipBps(e.target.value)}
-          placeholder="e.g. 10000000"
           disabled={isSubmitting}
         />
       </Field>
