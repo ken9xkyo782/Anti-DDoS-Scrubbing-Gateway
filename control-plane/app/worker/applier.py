@@ -387,9 +387,8 @@ def _vip_flags(service: ServiceConfig) -> int:
 
 
 def _svc_rl_flags(service: ServiceConfig) -> int:
-    return (
-        (_SVC_RL_F_PPS_SET if service.service_pps is not None else 0) |
-        (_SVC_RL_F_BPS_SET if service.service_bps is not None else 0)
+    return (_SVC_RL_F_PPS_SET if service.service_pps is not None else 0) | (
+        _SVC_RL_F_BPS_SET if service.service_bps is not None else 0
     )
 
 

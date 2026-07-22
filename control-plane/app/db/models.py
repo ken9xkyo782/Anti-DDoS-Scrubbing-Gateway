@@ -753,6 +753,31 @@ class BlacklistEntry(Base):
     creator: Mapped[User | None] = relationship()
 
 
+class BlockedUdpPort(Base):
+    __tablename__ = "blocked_udp_port"
+    __table_args__ = (
+        CheckConstraint(
+            "port >= 0 AND port <= 65535",
+            name="ck_blocked_udp_port_range",
+        ),
+    )
+
+    port: Mapped[int] = mapped_column(Integer, primary_key=True)
+    note: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )
+
+    creator: Mapped[User | None] = relationship()
+
+
 class ThreatFeedSource(TimestampMixin, Base):
     __tablename__ = "threat_feed_source"
     __table_args__ = (

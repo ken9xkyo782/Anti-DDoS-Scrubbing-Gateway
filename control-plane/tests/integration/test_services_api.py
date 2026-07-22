@@ -581,7 +581,7 @@ async def test_service_rate_limit_fields_api_round_trip(
 
     async for client in make_client(db_session, store):
         await authenticate(client, store, admin)
-        
+
         # Test creation with valid service rate limits
         create_res = await client.post(
             "/services",
@@ -594,14 +594,14 @@ async def test_service_rate_limit_fields_api_round_trip(
             },
         )
         assert create_res.status_code == 202
-        
+
         # Query service and check rates
         services_res = await client.get("/services")
         assert services_res.status_code == 200
         service_data = [s for s in services_res.json() if s["name"] == "rl-svc"][0]
         assert service_data["service_pps"] == 5000
         assert service_data["service_bps"] == 100000
-        
+
         # Test PATCH updates
         patch_res = await client.patch(
             f"/services/{service_data['id']}",
@@ -611,7 +611,7 @@ async def test_service_rate_limit_fields_api_round_trip(
             },
         )
         assert patch_res.status_code == 202
-        
+
         # Verify PATCH updates
         get_res = await client.get(f"/services/{service_data['id']}")
         assert get_res.status_code == 200

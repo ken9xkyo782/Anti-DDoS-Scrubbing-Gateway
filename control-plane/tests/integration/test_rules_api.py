@@ -308,7 +308,7 @@ async def test_rule_creation_ignores_pps_and_bps(
             },
         )
         assert response.status_code == 202
-        
+
         listed = await client.get(f"/services/{service.service.id}/rules")
         assert listed.status_code == 200
         rule_data = listed.json()[0]

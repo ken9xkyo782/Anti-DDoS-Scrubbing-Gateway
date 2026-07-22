@@ -310,6 +310,7 @@ async def test_blacklist_scope_service_id_xor_constraint(db_session: AsyncSessio
 
 async def test_service_rate_limit_fields(db_session: AsyncSession) -> None:
     from app.db.models import AllowRule, ProtectedService
+
     # Verify ProtectedService has service_pps and service_bps
     assert hasattr(ProtectedService, "service_pps")
     assert hasattr(ProtectedService, "service_bps")
@@ -347,17 +348,18 @@ async def test_service_rate_limit_migration_up_down_cleanly(
     committed_db: async_sessionmaker[AsyncSession],
 ) -> None:
     import asyncio
+
     del committed_db
     from alembic.command import downgrade, upgrade
     from alembic.config import Config
 
     from app.db.session import dispose_engine, get_session_factory
-    
+
     config = Config("alembic.ini")
     await dispose_engine()
     # Downgrade to pre-service-rate-limit head
     await asyncio.to_thread(downgrade, config, "20260714_0011")
-    
+
     try:
         session_factory = get_session_factory()
         async with session_factory() as db_session:
@@ -371,7 +373,7 @@ async def test_service_rate_limit_migration_up_down_cleanly(
             )
             columns_rule = res_rule.scalars().all()
             assert len(columns_rule) == 2
-            
+
             # protected_service should NOT have service_pps or service_bps
             res_svc = await db_session.execute(
                 text(
@@ -399,7 +401,7 @@ async def test_service_rate_limit_migration_up_down_cleanly(
             )
             columns_rule = res_rule.scalars().all()
             assert len(columns_rule) == 0
-            
+
             # protected_service should have service_pps and service_bps
             res_svc = await db_session.execute(
                 text(
@@ -413,4 +415,3 @@ async def test_service_rate_limit_migration_up_down_cleanly(
     finally:
         await dispose_engine()
         await asyncio.to_thread(upgrade, config, "head")
-
