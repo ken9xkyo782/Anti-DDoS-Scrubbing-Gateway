@@ -104,3 +104,90 @@ data-plane/build/bench_dp 2000000 11     # repeat, rounds tùy chọn
 
 Yêu cầu: chạy bằng **root**, kernel bật BPF JIT. Không đụng tới NIC/veth thật (chạy hoàn toàn
 qua `BPF_PROG_TEST_RUN`), an toàn để chạy trên máy dev.
+
+---
+
+## 8. Phương án tối ưu hiệu năng
+
+### 8.1 Chẩn đoán: 620 ns của nhánh sạch đi đâu?
+
+Truy vết hot-path cho thấy mỗi gói được chấp nhận phải trả:
+
+| Chi phí | Số lần/gói | Vị trí |
+|---|---:|---|
+| `bpf_ktime_get_ns()` | **2** (tới **4** nếu bật VIP/svc_rl) | [fairness.h:223](../data-plane/src/fairness.h#L223) (ingress-cap), [fairness.h:381](../data-plane/src/fairness.h#L381) (committed) |
+| `bpf_spin_lock` global | **1** | [fairness.h:400](../data-plane/src/fairness.h#L400) |
+| `fair_config_lookup` (double-indirection ARRAY_OF_MAPS) | **2** (trùng lặp) | [fairness.h:256](../data-plane/src/fairness.h#L256) và [fairness.h:450](../data-plane/src/fairness.h#L450) |
+| Thao tác map tổng cộng | **~15–20** | service, fair_config×2, cap-state, whitelist bloom, bitmap×2, gbl_meta, blacklist bloom+LPM, rule_block, committed-state, nexthop, svc_stat |
+| Tầng rate-limit chồng nhau | **4** | ingress_cap [fairness.h:242](../data-plane/src/fairness.h#L242), VIP ceiling [whitelist.h:391](../data-plane/src/whitelist.h#L391), per-rule svc_rl [rules.h:252](../data-plane/src/rules.h#L252), fairness committed/burst/node [fairness.h:450](../data-plane/src/fairness.h#L450) |
+
+**Nguyên nhân nhánh drop đắt:** bộ lọc bogon/amp nằm trong `deny_filter_stage`
+([blacklist.h:394](../data-plane/src/blacklist.h#L394)) — được gọi **sau** service-lookup →
+ingress-cap → whitelist. Vì vậy gói tấn công spoof/khuếch đại vẫn phải trả toàn bộ tra cứu
+map phía trước rồi mới bị loại: `bogon_drop` 335 ns so với từ chối parse 51 ns — **~284 ns bị
+đốt vô ích** trước khi lệnh drop bắn ra.
+
+### 8.2 Nhóm 1 — Tối ưu thuần, **không mất tính năng** (rủi ro thấp)
+
+- **A1. ⭐ Đẩy bộ lọc không-trạng-thái (bogon + amp hardcoded) lên ngay sau `parse_l4`.**
+  Hai check này **không đọc map**. Chạy trước service-lookup/ingress-cap/whitelist ⇒ gói spoof
+  và khuếch đại bị loại trong **~80 ns thay vì ~335 ns (≈4×)**. Đây là thắng lợi lớn nhất cho
+  lưu lượng volumetric — đúng thứ data-plane cần làm rẻ nhất.
+  _Đánh đổi:_ hiện whitelist được ưu tiên hơn blacklist; đẩy bogon/amp lên trước whitelist
+  nghĩa là nguồn đã whitelist mà lại là RFC1918 hoặc dùng cổng nguồn 53 sẽ bị loại. Trên
+  gateway public gần như không xảy ra, **nhưng đây là thay đổi chính sách cần xác nhận trước.**
+- **A2. Gộp `fair_config_lookup` còn 1 lần**, truyền con trỏ config xuống ingress-cap và
+  fair_admit ⇒ bớt 1 double-indirection mỗi gói.
+- **A3. Gọi `bpf_ktime_get_ns()` một lần** ở đầu khối rate-limit rồi thread `now` xuống mọi
+  bucket ⇒ bỏ 1–3 lời gọi mỗi gói.
+- **A4. Gate subsystem bằng bitmask "feature active" per-slot** (thêm 1 field vào
+  `active_config`): deployment không cấu hình whitelist / service-blacklist / ingress-cap /
+  svc_rl thì **bỏ qua hẳn** các tra cứu đó. Lợi cho cả nhánh accept lẫn drop.
+
+> Ước tính Nhóm 1: giảm **~20–35%** ns/gói nhánh accept và **~3–4×** nhánh drop bogon/amp,
+> mà **không bỏ tính năng nào**.
+
+### 8.3 Nhóm 2 — Cắt/hợp nhất tính năng
+
+- **B1. ⭐ Hợp nhất 4 tầng rate-limit xuống 1–2 tầng.** Đây là chỗ phình lớn nhất: ingress-cap,
+  VIP-ceiling, per-rule svc_rl và fairness committed/burst/node **đều là token-bucket**, mỗi
+  tầng tốn ktime + lookup (+spin-lock). Hướng đề xuất: **giữ một tầng cap sớm và rẻ** làm lá
+  chắn volumetric (xem mục 6), **cắt các tầng chồng lấn phía sau** (per-rule svc_rl, VIP
+  ceiling) nếu deployment không thực sự dùng ⇒ tiết kiệm ~1–2 ktime + ~3–4 lookup mỗi gói.
+- **B2. Bỏ blacklist theo-service** nếu chỉ dùng global blacklist ⇒ deny-filter bớt một cặp
+  bloom+LPM.
+- **B3. Lấy mẫu `svc_stat` thay vì cập nhật mỗi gói** ([svc_stat.h](../data-plane/src/svc_stat.h)):
+  hiện mỗi gói được nhận ghi 1 hash update; chuyển sang đếm per-CPU + sample 1/N.
+- **B4. Bỏ hẳn whitelist/VIP** nếu tính năng không dùng (gate như A4, hoặc biên dịch tuỳ chọn).
+
+### 8.4 Nhóm 3 — Cấu trúc / mở rộng đa lõi (rủi ro vừa)
+
+- **C1. ⭐ Chuyển committed bucket sang per-CPU (bỏ spin-lock global).** Các bucket khác
+  (cap/burst/VIP/svc_rl) **đã** là PERCPU; chỉ committed còn dùng spin-lock để chính xác tuyệt
+  đối. Đổi sang per-CPU (mỗi lõi nhận `committed_bps/ncpus`) sẽ **xoá nút cổ chai đa lõi** nêu
+  ở mục 6 — đánh đổi là sai số token nhỏ ở tốc độ thấp. Đây là điều kiện để nhánh accept mở
+  rộng tuyến tính theo 96 lõi.
+- **C2. Giảm double-indirection ARRAY_OF_MAPS.** Cơ chế blue-green 2 slot khiến mỗi subsystem
+  tốn 2 lần lookup. Tác động lớn nhưng đụng vào cơ chế apply nguyên tử ⇒ **rủi ro cao, để sau cùng.**
+
+### 8.5 Nhóm 4 — Đo lại cho đúng mốc
+
+- **D1. Bench trên object production** (không `PKT_TEST_HOOKS`). Bản test còn thêm ~3 map-lookup
+  mỗi gói ngay đầu chương trình ([xdp_gateway.bpf.c:210-217](../data-plane/src/xdp_gateway.bpf.c#L210)),
+  nên số production **đã thấp hơn** số trong mục 3. Cần mốc này trước khi đo đối chứng tối ưu.
+
+### 8.6 Thứ tự triển khai đề xuất
+
+| Ưu tiên | Hạng mục | Tác động | Rủi ro | Mất tính năng |
+|---|---|---|---|---|
+| 1 | A1 (hoist bogon/amp) | ~4× nhánh drop | Thấp\* | Không |
+| 2 | A2 + A3 (dedupe lookup/ktime) | ~10–15% accept | Rất thấp | Không |
+| 3 | D1 (mốc production) | — (đo lường) | Không | Không |
+| 4 | C1 (committed per-CPU) | Mở rộng đa lõi | Vừa | Không (giảm độ chính xác token) |
+| 5 | A4 + B1/B2 (gate & hợp nhất) | ~15–25% | Vừa | Có, tuỳ deployment |
+| 6 | C2 (bỏ double-indirection) | Lớn | Cao | Không |
+
+\* Rủi ro kỹ thuật thấp, nhưng cần chốt thay đổi **chính sách** whitelist-vs-bogon/amp (xem A1).
+
+Mọi thay đổi nên đo đối chứng bằng `make -C data-plane bench` (số liệu rất ổn định, lệch <1%)
+và chạy lại gate `make -C data-plane test` (hiện 137 passed).
