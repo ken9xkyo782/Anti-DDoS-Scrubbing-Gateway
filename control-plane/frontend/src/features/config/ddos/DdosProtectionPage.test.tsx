@@ -56,7 +56,7 @@ describe('DdosProtectionPage & BlockedPortForm', () => {
     cleanup()
   })
 
-  it('renders built-in hardcoded ports and dynamic ports table correctly', () => {
+  it('renders built-in and dynamic ports in one unified amplification table', () => {
     render(
       <MemoryRouter>
         <DdosProtectionPage />
@@ -64,12 +64,47 @@ describe('DdosProtectionPage & BlockedPortForm', () => {
     )
 
     expect(screen.getByText('DDoS Protection')).toBeInTheDocument()
-    expect(screen.getByText('Built-in blocked source ports (always on)')).toBeInTheDocument()
+
+    // Single merged section (h2) — the old standalone built-in card is gone.
+    // The h3 of the same name belongs to the shared ProtectionCoverage summary.
+    expect(
+      screen.getByRole('heading', { level: 2, name: /UDP reflection & amplification/i })
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Built-in blocked source ports (always on)')).not.toBeInTheDocument()
+
+    // Built-ins are rows now, badged read-only and labelled with their reflector.
     expect(screen.getByText('UDP/53')).toBeInTheDocument()
     expect(screen.getByText('UDP/1900')).toBeInTheDocument()
+    expect(screen.getAllByText('Built-in')).toHaveLength(12)
+    expect(screen.getByText('DNS')).toBeInTheDocument()
+    expect(screen.getByText('memcached')).toBeInTheDocument()
 
+    // Dynamic entries follow, in the same table.
     expect(screen.getByText('UDP/9999')).toBeInTheDocument()
     expect(screen.getByText('Game server amplification')).toBeInTheDocument()
+
+    // Only the dynamic row is removable.
+    expect(screen.getAllByRole('button', { name: /^Remove$/i })).toHaveLength(1)
+  })
+
+  it('keeps built-in rows and hints when no dynamic ports are blocked', () => {
+    vi.mocked(useAmplificationConfig).mockReturnValue({
+      data: { ...defaultAmplificationConfig, dynamic_ports: [] },
+      isLoading: false,
+      isError: false,
+      error: null,
+    } as unknown as ReturnType<typeof useAmplificationConfig>)
+
+    render(
+      <MemoryRouter>
+        <DdosProtectionPage />
+      </MemoryRouter>
+    )
+
+    expect(screen.getAllByText('Built-in')).toHaveLength(12)
+    expect(screen.getByText(/No custom source ports blocked yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Remove$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add Blocked Port/i })).toBeInTheDocument()
   })
 
   it('handles add blocked port success flow', async () => {

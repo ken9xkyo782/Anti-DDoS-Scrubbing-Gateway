@@ -328,6 +328,57 @@ expiry, no ranges.
 
 ---
 
+## Amendment A1 — Unified "UDP reflection & amplification" section (2026-07-23)
+
+**Trigger:** post-delivery UX review of the shipped tab. AMP-15 delivered the built-in set and the
+dynamic set as **two visually separate blocks** (a chip Card "Built-in blocked source ports (always
+on)" + a `DataTable` "Dynamic blocked source ports"), on a page that *also* carries a
+`ProtectionCoverage` card titled "UDP reflection & amplification". An admin therefore reads the same
+vector described in three places and has to mentally union two lists to answer the only question that
+matters: **"which UDP source ports are blocked on this node right now?"**
+
+**Change:** merge the two blocks into **one section headed "UDP reflection & amplification"** whose
+subtitle is "Dynamic blocked source ports", backed by a **single table**. Built-in ports render first
+as **locked rows** (badged `Built-in`, no Remove action); admin-managed entries follow with Remove.
+This is a **presentation-only** change: no API contract, no `AmplificationConfigResponse` shape
+change, no worker/data-plane change — the page keeps consuming `hardcoded_ports` + `dynamic_ports`
+from the same `useAmplificationConfig` query.
+
+**Decisions (this amendment, resolved via AskUserQuestion 2026-07-23):**
+
+- **D-AMP-4 → merge shape = one table, built-ins as locked rows** (chosen over "chips above the
+  table" and "source column + filter toggle"). One list is one mental model; the filter variant was
+  rejected as extra state and test surface for a 12-row constant.
+- **D-AMP-5 → `ProtectionCoverage` stays unchanged.** It is **shared with the tenant-facing
+  `DdosCoveragePage`**, so hiding or retitling its amplification card to de-duplicate the admin page
+  would change what tenants see. The residual duplication (a one-line summary card above a detailed
+  section) is accepted as summary-then-detail, not redundancy.
+
+**Requirements:**
+
+1. WHEN an admin loads the DDoS Protection page THEN the built-in and dynamic blocked source ports
+   SHALL appear in **one section** headed "UDP reflection & amplification" / "Dynamic blocked source
+   ports", rendered by a **single table**; the standalone "Built-in blocked source ports (always on)"
+   Card SHALL be gone. This **supersedes AMP-15's** two-section layout. `(AMP-22)`
+2. WHEN the merged table renders THEN each built-in port SHALL appear as a row marked with a
+   read-only `Built-in` badge and a human-readable reflector label (DNS, NTP, SSDP, memcached, …),
+   SHALL expose **no** Remove action, and SHALL sort before the admin-managed rows; each dynamic
+   entry SHALL keep its note, blocked-at timestamp and Remove action. `(AMP-23)`
+3. WHEN the dynamic list is empty THEN the section SHALL still list the built-in rows (so the
+   `DataTable` empty state never fires) and SHALL surface an inline hint that no custom ports are
+   blocked, with the add affordance still reachable. `(AMP-24)`
+4. WHEN this amendment ships THEN `ProtectionCoverage` and `DdosCoveragePage` SHALL be
+   **byte-unchanged** (D-AMP-5), and no control-plane, worker, or data-plane file SHALL change —
+   the diff is the admin page component plus its Vitest spec. `(AMP-25)`
+
+**Independent Test**: As admin, load the page → exactly one "UDP reflection & amplification" heading
+over one table containing 12 `Built-in`-badged rows (UDP/17…UDP/11211, no Remove) followed by the
+dynamic entries (with Remove); the "Built-in blocked source ports (always on)" heading is absent;
+add/409/remove-with-confirm flows behave exactly as before; the tenant `DdosCoveragePage` renders
+unchanged; fe gate (`lint && typecheck && test --run && build`) green.
+
+---
+
 ## Requirement Traceability
 
 | Requirement ID | Story | Refs | Phase | Status |
@@ -346,19 +397,26 @@ expiry, no ranges.
 | AMP-12 | P1: Propagation | BLK stage, ABI idx 7, BLK-14 | DT2 | ✅ Verified (smoke: idx 7 drop) |
 | AMP-13 | P1: Propagation | no wire/JobType/reason change | (design) | ✅ Verified |
 | AMP-14 | P1: SPA tab | role-filtered nav | FT2 | ✅ Verified |
-| AMP-15 | P1: SPA tab | built-in + dynamic sections | FT2 | ✅ Verified |
+| AMP-15 | P1: SPA tab | built-in + dynamic sections | FT2 | ✅ Verified — layout superseded by AMP-22 (A1) |
 | AMP-16 | P1: SPA tab | form/422/409 | FT2 | ✅ Verified |
 | AMP-17 | P1: SPA tab | remove/confirm/invalidate | FT2 | ✅ Verified |
 | AMP-18 | P1: SPA tab | applying-hint UX | FT2 | ✅ Verified |
 | AMP-19 | P1: SPA tab | Vitest + fe gate | FT1/FT2 | ✅ Verified |
 | AMP-20 | P2: Effective-state | dpstat snapshot read-back | PT1 | Deferred (P2) |
 | AMP-21 | P2: Effective-state | udp_amplification_drop counter | PT2 | Deferred (P2) |
+| AMP-22 | A1: Unified section | D-AMP-4, supersedes AMP-15 layout | A1 | ✅ Verified |
+| AMP-23 | A1: Unified section | locked built-in rows + labels | A1 | ✅ Verified |
+| AMP-24 | A1: Unified section | empty dynamic-list hint | A1 | ✅ Verified |
+| AMP-25 | A1: Unified section | D-AMP-5, FE-only diff | A1 | ✅ Verified |
 
 **ID format:** `AMP-[NUMBER]`. **Status:** Pending → In Design → In Tasks → Implementing → Verified.
 
-**Coverage:** 21 total. P1 = AMP-01..19 **✅ all Verified** (executed 2026-07-22, commits
+**Coverage:** 25 total. P1 = AMP-01..19 **✅ all Verified** (executed 2026-07-22, commits
 `181223a..80a67ff`; CP/FE/DP gates green + DT2 privileged smoke passed). P2 = AMP-20..21 **deferred**
-(PT1/PT2 optional, not executed).
+(PT1/PT2 optional, not executed). A1 = AMP-22..25 **✅ all Verified** (executed 2026-07-23,
+presentation-only; fe gate green — lint/typecheck clean, **223 tests / 51 files** (220→223), build ok;
+diff = `DdosProtectionPage.tsx` + its spec only, `ProtectionCoverage.tsx` / `DdosCoveragePage.tsx`
+byte-unchanged).
 
 ---
 

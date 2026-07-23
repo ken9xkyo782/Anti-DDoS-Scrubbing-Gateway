@@ -6,8 +6,6 @@ import {
   Dialog,
   ConfirmDialog,
   Badge,
-  EmptyState,
-  Card,
 } from '../../../ui'
 import { toast } from '../../../ui/Toast/Toast'
 import {
@@ -19,6 +17,36 @@ import { BlockedPortForm } from './BlockedPortForm'
 import { ProtectionCoverage } from './ProtectionCoverage'
 import type { BlockedPortResponse } from '../../../api/types'
 
+/**
+ * Human-readable reflector behind each compile-time amplification source port.
+ * Labels only — the authoritative set is the data-plane `amp_port_hardcoded`
+ * switch (blacklist.h), mirrored server-side by HARDCODED_AMP_PORTS and
+ * delivered as `hardcoded_ports`. A port we have no label for still renders.
+ */
+const REFLECTOR_LABELS: Record<number, string> = {
+  17: 'QOTD',
+  19: 'CHARGEN',
+  53: 'DNS',
+  111: 'Portmap / RPC',
+  123: 'NTP',
+  137: 'NetBIOS-NS',
+  161: 'SNMP',
+  389: 'CLDAP',
+  520: 'RIP',
+  1900: 'SSDP',
+  5353: 'mDNS',
+  11211: 'memcached',
+}
+
+/**
+ * One row of the unified blocked-source-port table. Built-in rows come from the
+ * compiled data-plane set and are read-only; dynamic rows are the admin-managed
+ * entries the reconcile lane pushes into `udp_blocked_port_bitmap`.
+ */
+type BlockedPortRow =
+  | { kind: 'builtin'; port: number }
+  | { kind: 'dynamic'; port: number; entry: BlockedPortResponse }
+
 export function DdosProtectionPage() {
   const { data: config, isLoading, error } = useAmplificationConfig()
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -29,6 +57,12 @@ export function DdosProtectionPage() {
 
   const hardcodedPorts = config?.hardcoded_ports ?? []
   const dynamicPorts = config?.dynamic_ports ?? []
+
+  // Built-ins first (they are always on), then the tunable admin entries.
+  const rows: BlockedPortRow[] = [
+    ...[...hardcodedPorts].sort((a, b) => a - b).map((port) => ({ kind: 'builtin' as const, port })),
+    ...dynamicPorts.map((entry) => ({ kind: 'dynamic' as const, port: entry.port, entry })),
+  ]
 
   const handleAddSubmit = async (payload: { port: number; note?: string | null }) => {
     await addMutation.mutateAsync(payload)
@@ -63,92 +97,78 @@ export function DdosProtectionPage() {
 
       <ProtectionCoverage />
 
-      {/* Hardcoded Built-in Ports Section */}
-      <Card style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 'var(--font-size-md, 1rem)', fontWeight: 600 }}>
-              Built-in blocked source ports (always on)
-            </h3>
-            <p style={{ margin: 'var(--space-1) 0 0 0', fontSize: 'var(--font-size-sm, 0.875rem)', color: 'var(--color-text-muted, #666)' }}>
-              Static data-plane protocol filters compiled directly into eBPF.
-            </p>
-          </div>
-          <Badge variant="default">Authoritative DP Header</Badge>
+      {/* Unified blocked-source-port section: built-ins (locked) + dynamic entries */}
+      <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 'var(--font-size-lg)', fontWeight: 600 }}>
+            UDP reflection &amp; amplification
+          </h2>
+          <p style={{ margin: 'var(--space-1) 0 0 0', fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
+            Dynamic blocked source ports — every UDP source port the node drops today. Built-in
+            reflectors are compiled into the data plane and always on; the entries below them are
+            yours to tune.
+          </p>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
-          {hardcodedPorts.map((port) => (
-            <span
-              key={port}
-              style={{
-                fontFamily: 'monospace',
-                fontSize: 'var(--font-size-sm, 0.875rem)',
-                padding: 'var(--space-1) var(--space-2)',
-                backgroundColor: 'var(--color-bg-subtle, #f3f4f6)',
-                border: '1px solid var(--color-border-subtle, #e5e7eb)',
-                borderRadius: 'var(--radius-sm, 4px)',
-                fontWeight: 600,
-              }}
-            >
-              UDP/{port}
-            </span>
-          ))}
-        </div>
-      </Card>
-
-      {/* Dynamic Blocked Ports Section */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-        <h3 style={{ margin: 0, fontSize: 'var(--font-size-md, 1rem)', fontWeight: 600 }}>
-          Dynamic blocked source ports
-        </h3>
-
-        <DataTable<BlockedPortResponse>
+        <DataTable<BlockedPortRow>
           columns={[
             {
               key: 'port',
-              header: 'Port Number',
-              render: (entry) => (
-                <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>UDP/{entry.port}</span>
+              header: 'Source Port',
+              render: (row) => (
+                <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>UDP/{row.port}</span>
               ),
             },
             {
               key: 'note',
               header: 'Note / Reason',
-              render: (entry) => <span>{entry.note || '—'}</span>,
+              render: (row) =>
+                row.kind === 'builtin' ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <Badge variant="success">Built-in</Badge>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {REFLECTOR_LABELS[row.port] ?? 'Well-known reflector'}
+                    </span>
+                  </span>
+                ) : (
+                  <span>{row.entry.note || '—'}</span>
+                ),
             },
             {
               key: 'created_at',
               header: 'Blocked At',
-              render: (entry) => <span>{new Date(entry.created_at).toLocaleString()}</span>,
+              render: (row) =>
+                row.kind === 'builtin' ? (
+                  <span style={{ color: 'var(--text-muted)' }}>Always on</span>
+                ) : (
+                  <span>{new Date(row.entry.created_at).toLocaleString()}</span>
+                ),
             },
           ]}
-          data={dynamicPorts}
+          data={rows}
           isLoading={isLoading}
           error={error?.message}
-          emptyState={
-            <EmptyState
-              title="No dynamic blocked UDP ports"
-              description="Add custom UDP source ports to block amplification vectors across the node."
-              action={
-                <Button variant="primary" onClick={() => setIsAddOpen(true)}>
-                  Add Blocked Port
-                </Button>
-              }
-            />
+          rowActions={(row) =>
+            row.kind === 'dynamic' ? (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => setRemovingEntry(row.entry)}
+                title="Remove blocked port"
+              >
+                Remove
+              </Button>
+            ) : null
           }
-          rowActions={(entry) => (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setRemovingEntry(entry)}
-              title="Remove blocked port"
-            >
-              Remove
-            </Button>
-          )}
         />
-      </div>
+
+        {!isLoading && !error && dynamicPorts.length === 0 && (
+          <p style={{ margin: 0, fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>
+            No custom source ports blocked yet — only the built-in reflectors above are enforced. Use{' '}
+            <strong>Add Blocked Port</strong> to block a new amplification vector node-wide.
+          </p>
+        )}
+      </section>
 
       {/* Add Dialog */}
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen} title="Add Blocked UDP Port">
