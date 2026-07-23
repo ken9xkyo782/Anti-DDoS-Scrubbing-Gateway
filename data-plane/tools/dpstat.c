@@ -186,7 +186,6 @@ static const char *const snapshot_sample_stat_name[SAMPLE_STAT_MAX] = {
 static const char *const snapshot_bloom_stat_name[BLOOM_STAT_MAX] = {
 	[BLOOM_FP_WHITELIST] = "whitelist",
 	[BLOOM_FP_GLOBAL] = "global_blacklist",
-	[BLOOM_FP_SERVICE] = "service_blacklist",
 };
 
 static int read_node_snapshot(int counter_fd, int stats_fd, int bloom_fd,
@@ -651,7 +650,6 @@ static int print_counters_once(int counter_fd, int stats_fd, int bloom_fd,
 		static const char *const bloom_name[BLOOM_STAT_MAX] = {
 			[BLOOM_FP_WHITELIST] = "whitelist",
 			[BLOOM_FP_GLOBAL] = "global_blacklist",
-			[BLOOM_FP_SERVICE] = "service_blacklist",
 		};
 
 		if (read_percpu_u64(bloom_fd, key, possible_cpus, &total) != 0) {

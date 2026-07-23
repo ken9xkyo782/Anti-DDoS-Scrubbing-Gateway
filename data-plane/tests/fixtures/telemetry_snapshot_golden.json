@@ -35,8 +35,7 @@
     },
     "bloom_stats": {
       "whitelist": 0,
-      "global_blacklist": 0,
-      "service_blacklist": 0
+      "global_blacklist": 0
     }
   },
   "services": [

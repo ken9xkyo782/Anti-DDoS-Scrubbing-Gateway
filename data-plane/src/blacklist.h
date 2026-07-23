@@ -32,8 +32,7 @@ enum gbl_flags {
 enum bloom_fp_stage {
 	BLOOM_FP_WHITELIST = 0,
 	BLOOM_FP_GLOBAL = 1,
-	BLOOM_FP_SERVICE = 2,
-	BLOOM_STAT_MAX = 3,
+	BLOOM_STAT_MAX = 2,
 };
 
 struct bl_lpm_key {
