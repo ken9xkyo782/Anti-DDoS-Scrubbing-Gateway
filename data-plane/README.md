@@ -341,9 +341,9 @@ the feed-owned global-deny maps (`global_blacklist_bloom`/`_lpm` with the AD-023
 `/24` bloom expansion and `GBL_F_HAS_BROAD` escape, plus a coherent inactive
 `gbl_meta`) into the inactive slot from the snapshot, and **pointer-carries every
 service-scoped outer** (`service_map`, `rule_block_map`, `whitelist_*`,
-`vip_config_map`, `service_blacklist_*`, `fair_config_map`), `fair_node_config`,
+`vip_config_map`, `fair_config_map`), `fair_node_config`,
 and `udp_blocked_port_bitmap` unchanged — so a global-deny apply never disturbs
-service, rule, whitelist, service-blacklist, fairness, or bitmap behavior.
+service, rule, whitelist, fairness, or bitmap behavior.
 
 **Shared lock.** Both modes acquire one exclusive `flock` on the pin directory
 before fresh-reading `active_config`, and hold it through verify and commit, so a
