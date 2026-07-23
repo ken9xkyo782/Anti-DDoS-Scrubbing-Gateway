@@ -189,68 +189,7 @@ async def test_add_whitelist_does_not_require_source_inside_allocation(
     assert str(entry.source_cidr) == "45.0.0.0/8"
 
 
-async def test_add_service_blacklist_bumps_and_audits(db_session: AsyncSession) -> None:
-    admin = await create_admin(db_session, "service-blacklist-admin")
-    tenant = await create_tenant(db_session, "Service Blacklist Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
 
-    entry = await list_service.add_blacklist(
-        db_session,
-        scope=BlacklistScope.service,
-        service_id=service.service.id,
-        source_cidr="45.0.0.0/8",
-        actor=admin,
-    )
-
-    assert entry.scope == BlacklistScope.service
-    assert service.service.version == 2
-    audit = (
-        await db_session.execute(
-            select(AuditEvent).where(AuditEvent.action == "list.blacklist.add")
-        )
-    ).scalar_one()
-    assert audit.target_id == str(entry.id)
-
-
-async def test_add_service_blacklist_rejects_ipv6(db_session: AsyncSession) -> None:
-    admin = await create_admin(db_session, "service-blacklist-invalid-admin")
-    tenant = await create_tenant(db_session, "Service Blacklist Invalid Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await list_service.add_blacklist(
-            db_session,
-            scope=BlacklistScope.service,
-            service_id=service.service.id,
-            source_cidr="2001:db8::/48",
-            actor=admin,
-        )
-
-    assert exc_info.value.status_code == 422
-
-
-async def test_same_source_can_exist_in_whitelist_and_blacklist(
-    db_session: AsyncSession,
-) -> None:
-    admin = await create_admin(db_session, "list-coexist-admin")
-    tenant = await create_tenant(db_session, "List Coexist Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
-
-    whitelist = await list_service.add_whitelist(
-        db_session,
-        service_id=service.service.id,
-        source_cidr="198.51.100.7/32",
-        actor=admin,
-    )
-    blacklist = await list_service.add_blacklist(
-        db_session,
-        scope=BlacklistScope.service,
-        service_id=service.service.id,
-        source_cidr="198.51.100.7/32",
-        actor=admin,
-    )
-
-    assert whitelist.source_cidr == blacklist.source_cidr
 
 
 async def test_add_global_blacklist_has_manual_source_and_no_version_bump(
@@ -262,9 +201,7 @@ async def test_add_global_blacklist_has_manual_source_and_no_version_bump(
 
     entry = await list_service.add_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
-        source_cidr="185.0.0.0/8",
+        source_cidr="45.0.0.0/8",
         actor=admin,
     )
 
@@ -287,8 +224,6 @@ async def test_add_global_manual_promotes_feed_entry_and_preserves_assertions(
 
     entry = await list_service.add_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr="185.1.0.0/16",
         actor=admin,
     )
@@ -334,8 +269,6 @@ async def test_remove_global_manual_demotes_to_feed_when_assertions_remain(
 
     await list_service.remove_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr="185.2.0.0/16",
         actor=admin,
     )
@@ -382,8 +315,6 @@ async def test_remove_global_manual_without_assertions_deletes_and_queues_conver
 
     await list_service.remove_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr="185.3.0.0/16",
         actor=admin,
     )
@@ -412,8 +343,6 @@ async def test_remove_global_feed_only_entry_conflicts_without_mutating_state(
     with pytest.raises(HTTPException) as exc_info:
         await list_service.remove_blacklist(
             db_session,
-            scope=BlacklistScope.global_,
-            service_id=None,
             source_cidr="185.4.0.0/16",
             actor=admin,
         )
@@ -450,9 +379,7 @@ async def test_add_global_manual_dispatches_one_convergence_job_after_commit(
         admin = await create_admin(db, "global-convergence-admin")
         entry = await list_service.add_blacklist(
             db,
-            scope=BlacklistScope.global_,
-            service_id=None,
-            source_cidr="185.5.0.0/16",
+            source_cidr="45.0.0.0/8",
             actor=admin,
         )
         state = await db.get(GlobalDenyState, 1)
@@ -471,53 +398,7 @@ async def test_add_global_manual_dispatches_one_convergence_job_after_commit(
     assert await redis_client.lrange(APPLY_QUEUE_KEY, 0, -1) == [str(job.id)]
 
 
-async def test_list_and_remove_service_lists_are_scoped(db_session: AsyncSession) -> None:
-    admin = await create_admin(db_session, "list-remove-admin")
-    tenant = await create_tenant(db_session, "List Remove Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
-    await list_service.add_whitelist(
-        db_session,
-        service_id=service.service.id,
-        source_cidr="198.51.100.7/32",
-        actor=admin,
-    )
-    await list_service.add_blacklist(
-        db_session,
-        scope=BlacklistScope.service,
-        service_id=service.service.id,
-        source_cidr="45.0.0.0/8",
-        actor=admin,
-    )
 
-    whitelist = await list_service.list_whitelist(
-        db_session,
-        service_id=service.service.id,
-        actor=admin,
-    )
-    blacklist = await list_service.list_blacklist(
-        db_session,
-        scope=BlacklistScope.service,
-        service_id=service.service.id,
-        actor=admin,
-    )
-    await list_service.remove_whitelist(
-        db_session,
-        service_id=service.service.id,
-        source_cidr="198.51.100.7/32",
-        actor=admin,
-    )
-    await list_service.remove_blacklist(
-        db_session,
-        scope=BlacklistScope.service,
-        service_id=service.service.id,
-        source_cidr="45.0.0.0/8",
-        actor=admin,
-    )
-
-    assert [str(entry.source_cidr) for entry in whitelist] == ["198.51.100.7/32"]
-    assert [str(entry.source_cidr) for entry in blacklist] == ["45.0.0.0/8"]
-    assert (await db_session.execute(select(func.count(WhitelistEntry.id)))).scalar_one() == 0
-    assert (await db_session.execute(select(func.count(BlacklistEntry.id)))).scalar_one() == 0
 
 
 async def test_global_blacklist_list_remove_requires_admin(db_session: AsyncSession) -> None:
@@ -526,30 +407,22 @@ async def test_global_blacklist_list_remove_requires_admin(db_session: AsyncSess
     tenant_user = await create_tenant_user(db_session, username="global-list-user", tenant=tenant)
     entry = await list_service.add_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr="185.0.0.0/8",
         actor=admin,
     )
 
     listed = await list_service.list_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
         actor=admin,
     )
     await list_service.remove_blacklist(
         db_session,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr="185.0.0.0/8",
         actor=admin,
     )
     with pytest.raises(HTTPException) as exc_info:
         await list_service.list_blacklist(
             db_session,
-            scope=BlacklistScope.global_,
-            service_id=None,
             actor=tenant_user,
         )
 

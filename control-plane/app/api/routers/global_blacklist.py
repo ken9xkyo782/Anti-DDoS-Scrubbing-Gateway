@@ -27,8 +27,6 @@ async def add_global_blacklist(
     actor = await _load_actor(db, principal)
     entry = await list_service.add_blacklist(
         db,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr=payload.source_cidr,
         actor=actor,
     )
@@ -45,8 +43,6 @@ async def list_global_blacklist(
         _blacklist_response(entry)
         for entry in await list_service.list_blacklist(
             db,
-            scope=BlacklistScope.global_,
-            service_id=None,
             actor=actor,
         )
     ]
@@ -61,8 +57,6 @@ async def remove_global_blacklist(
     actor = await _load_actor(db, principal)
     await list_service.remove_blacklist(
         db,
-        scope=BlacklistScope.global_,
-        service_id=None,
         source_cidr=source_cidr,
         actor=actor,
     )
@@ -75,7 +69,6 @@ async def _load_actor(db: AsyncSession, principal: Principal) -> User | None:
 def _blacklist_response(entry: BlacklistEntry) -> BlacklistEntryResponse:
     return BlacklistEntryResponse(
         id=entry.id,
-        service_id=entry.service_id,
         scope=entry.scope,
         source=entry.source,
         source_cidr=str(entry.source_cidr),

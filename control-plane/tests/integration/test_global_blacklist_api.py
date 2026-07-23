@@ -115,7 +115,6 @@ async def test_admin_add_global_blacklist_returns_manual_source(
         response = await client.post("/blacklist", json={"source_cidr": "185.0.0.0/8"})
 
     assert response.status_code == 201
-    assert response.json()["service_id"] is None
     assert response.json()["scope"] == "global"
     assert response.json()["source"] == "manual"
 

@@ -140,100 +140,30 @@ async def test_add_whitelist_ipv6_returns_422(
     assert response.status_code == 422
 
 
-async def test_add_service_blacklist_returns_202_queued(
+async def test_service_blacklist_endpoints_return_404(
     db_session: AsyncSession,
     redis_client: Redis,
 ) -> None:
     store = make_store(redis_client)
-    admin = await create_admin(db_session, "lists-api-blacklist-admin")
-    tenant = await create_tenant(db_session, "Lists API Blacklist Tenant")
+    admin = await create_admin(db_session, "lists-api-404-admin")
+    tenant = await create_tenant(db_session, "Lists API 404 Tenant")
     service = await create_service(db_session, tenant=tenant, actor=admin)
 
     async for client in make_client(db_session, store):
         await authenticate(client, store, admin)
-        response = await client.post(
+        post_resp = await client.post(
             f"/services/{service.service.id}/blacklist",
             json={"source_cidr": "45.0.0.0/8"},
         )
-
-    assert response.status_code == 202
-    assert response.json()["apply_status"] == "queued"
-
-
-async def test_add_service_blacklist_ipv6_returns_422(
-    db_session: AsyncSession,
-    redis_client: Redis,
-) -> None:
-    store = make_store(redis_client)
-    admin = await create_admin(db_session, "lists-api-blacklist-invalid-admin")
-    tenant = await create_tenant(db_session, "Lists API Blacklist Invalid Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
-
-    async for client in make_client(db_session, store):
-        await authenticate(client, store, admin)
-        response = await client.post(
-            f"/services/{service.service.id}/blacklist",
-            json={"source_cidr": "2001:db8::/48"},
-        )
-
-    assert response.status_code == 422
-
-
-async def test_same_source_can_be_whitelisted_and_blacklisted(
-    db_session: AsyncSession,
-    redis_client: Redis,
-) -> None:
-    store = make_store(redis_client)
-    admin = await create_admin(db_session, "lists-api-coexist-admin")
-    tenant = await create_tenant(db_session, "Lists API Coexist Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
-
-    async for client in make_client(db_session, store):
-        await authenticate(client, store, admin)
-        whitelist = await client.post(
-            f"/services/{service.service.id}/whitelist",
-            json={"source_cidr": "198.51.100.7/32"},
-        )
-        blacklist = await client.post(
-            f"/services/{service.service.id}/blacklist",
-            json={"source_cidr": "198.51.100.7/32"},
-        )
-
-    assert whitelist.status_code == 202
-    assert blacklist.status_code == 202
-
-
-async def test_list_and_delete_service_lists(db_session: AsyncSession, redis_client: Redis) -> None:
-    store = make_store(redis_client)
-    admin = await create_admin(db_session, "lists-api-list-delete-admin")
-    tenant = await create_tenant(db_session, "Lists API List Delete Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=admin)
-
-    async for client in make_client(db_session, store):
-        await authenticate(client, store, admin)
-        await client.post(
-            f"/services/{service.service.id}/whitelist",
-            json={"source_cidr": "198.51.100.7/32"},
-        )
-        await client.post(
-            f"/services/{service.service.id}/blacklist",
-            json={"source_cidr": "45.0.0.0/8"},
-        )
-        whitelist = await client.get(f"/services/{service.service.id}/whitelist")
-        blacklist = await client.get(f"/services/{service.service.id}/blacklist")
-        whitelist_delete = await client.delete(
-            f"/services/{service.service.id}/whitelist",
-            params={"source_cidr": "198.51.100.7/32"},
-        )
-        blacklist_delete = await client.delete(
+        get_resp = await client.get(f"/services/{service.service.id}/blacklist")
+        del_resp = await client.delete(
             f"/services/{service.service.id}/blacklist",
             params={"source_cidr": "45.0.0.0/8"},
         )
 
-    assert [row["source_cidr"] for row in whitelist.json()] == ["198.51.100.7/32"]
-    assert [row["source_cidr"] for row in blacklist.json()] == ["45.0.0.0/8"]
-    assert whitelist_delete.status_code == 202
-    assert blacklist_delete.status_code == 202
+    assert post_resp.status_code == 404
+    assert get_resp.status_code == 404
+    assert del_resp.status_code == 404
 
 
 async def test_cross_tenant_list_access_returns_zero_leak_404(
