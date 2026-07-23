@@ -30,7 +30,7 @@ export type ServiceMode = 'allow-rule-only'
 
 export type Protocol = 'tcp' | 'udp' | 'icmp' | 'any'
 
-export type BlacklistScope = 'service' | 'global'
+export type BlacklistScope = 'global'
 
 export type BlacklistSource = 'manual' | 'feed'
 
@@ -129,7 +129,6 @@ export interface WhitelistEntryResponse {
 
 export interface BlacklistEntryResponse {
   id: string
-  service_id: string | null
   scope: BlacklistScope
   source: BlacklistSource
   source_cidr: string

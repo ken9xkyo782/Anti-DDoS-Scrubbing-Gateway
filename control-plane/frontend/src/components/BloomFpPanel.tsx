@@ -8,6 +8,7 @@ interface BloomFpPanelProps {
 const BLOOM_LABELS: Record<string, string> = {
   whitelist: 'Whitelist bloom',
   global_blacklist: 'Global blacklist bloom',
+  // Retained for historical telemetry snapshots loaded from older data-plane nodes
   service_blacklist: 'Service blacklist bloom',
 }
 

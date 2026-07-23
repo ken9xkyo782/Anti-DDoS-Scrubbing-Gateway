@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.lists import BlacklistEntryResponse, ListEntryCreateRequest
 from app.core.deps import Principal, get_current_user, require_admin
-from app.db.models import BlacklistEntry, BlacklistScope, User
+from app.db.models import BlacklistEntry, User
 from app.db.session import get_db
 from app.services import lists as list_service
 

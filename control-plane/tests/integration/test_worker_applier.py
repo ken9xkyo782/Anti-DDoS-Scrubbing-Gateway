@@ -8,9 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     AllowRule,
-    BlacklistEntry,
-    BlacklistScope,
-    BlacklistSource,
     ProtectedService,
     Protocol,
     ServiceMode,

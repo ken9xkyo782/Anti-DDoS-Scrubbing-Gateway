@@ -24,9 +24,6 @@ import {
   useWhitelist,
   useAddWhitelist,
   useRemoveWhitelist,
-  useBlacklist,
-  useAddBlacklist,
-  useRemoveBlacklist,
 } from './useLists'
 
 describe('useLists hook family', () => {
@@ -104,76 +101,6 @@ describe('useLists hook family', () => {
 
       mutationOpts.onSuccess()
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['whitelist', 'srv-1'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['services'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['apply-status', 'srv-1'] })
-    })
-  })
-
-  describe('useBlacklist', () => {
-    it('queries blacklist correctly when serviceId is provided', () => {
-      useQuery.mockReturnValue({})
-      useBlacklist('srv-1')
-      expect(useQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          queryKey: ['blacklist', 'srv-1'],
-          enabled: true,
-        })
-      )
-
-      const queryFn = vi.mocked(useQuery).mock.calls[0][0].queryFn
-      queryFn()
-      expect(apiClient).toHaveBeenCalledWith('/services/srv-1/blacklist')
-    })
-
-    it('disables query when serviceId is null', () => {
-      useQuery.mockReturnValue({})
-      useBlacklist(null)
-      expect(useQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          queryKey: ['blacklist', null],
-          enabled: false,
-        })
-      )
-    })
-  })
-
-  describe('useAddBlacklist', () => {
-    it('submits post request and invalidates correct caches', async () => {
-      useMutation.mockReturnValue({})
-      useAddBlacklist('srv-1')
-      expect(useMutation).toHaveBeenCalled()
-
-      const mutationOpts = vi.mocked(useMutation).mock.calls[0][0]
-      const payload = { source_cidr: '192.168.2.0/24' }
-      await mutationOpts.mutationFn(payload)
-      expect(apiClient).toHaveBeenCalledWith('/services/srv-1/blacklist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      mutationOpts.onSuccess()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['blacklist', 'srv-1'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['services'] })
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['apply-status', 'srv-1'] })
-    })
-  })
-
-  describe('useRemoveBlacklist', () => {
-    it('submits delete request with query param and invalidates correct caches', async () => {
-      useMutation.mockReturnValue({})
-      useRemoveBlacklist('srv-1')
-      expect(useMutation).toHaveBeenCalled()
-
-      const mutationOpts = vi.mocked(useMutation).mock.calls[0][0]
-      const cidr = '192.168.2.0/24'
-      await mutationOpts.mutationFn(cidr)
-      expect(apiClient).toHaveBeenCalledWith(`/services/srv-1/blacklist?source_cidr=${encodeURIComponent(cidr)}`, {
-        method: 'DELETE',
-      })
-
-      mutationOpts.onSuccess()
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['blacklist', 'srv-1'] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['services'] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['apply-status', 'srv-1'] })
     })

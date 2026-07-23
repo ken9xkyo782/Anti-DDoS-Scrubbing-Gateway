@@ -44,5 +44,6 @@ def downgrade() -> None:
     op.create_check_constraint(
         "ck_blacklist_scope_service_id",
         "blacklist_entry",
-        "(scope = 'service' AND service_id IS NOT NULL) OR (scope = 'global' AND service_id IS NULL)",
+        "(scope = 'service' AND service_id IS NOT NULL) OR "
+        "(scope = 'global' AND service_id IS NULL)",
     )

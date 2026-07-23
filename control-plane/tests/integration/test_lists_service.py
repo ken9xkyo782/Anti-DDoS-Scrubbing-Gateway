@@ -19,7 +19,6 @@ from app.db.models import (
     Tenant,
     ThreatFeedSource,
     User,
-    WhitelistEntry,
     utc_now,
 )
 from app.db.session import run_post_commit_callbacks
@@ -187,9 +186,6 @@ async def test_add_whitelist_does_not_require_source_inside_allocation(
     )
 
     assert str(entry.source_cidr) == "45.0.0.0/8"
-
-
-
 
 
 async def test_add_global_blacklist_has_manual_source_and_no_version_bump(
@@ -396,9 +392,6 @@ async def test_add_global_manual_dispatches_one_convergence_job_after_commit(
 
     assert entry.source == BlacklistSource.manual
     assert await redis_client.lrange(APPLY_QUEUE_KEY, 0, -1) == [str(job.id)]
-
-
-
 
 
 async def test_global_blacklist_list_remove_requires_admin(db_session: AsyncSession) -> None:

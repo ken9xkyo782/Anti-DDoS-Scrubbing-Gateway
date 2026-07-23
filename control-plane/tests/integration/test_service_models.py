@@ -7,9 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import (
     AllowRule,
-    BlacklistEntry,
-    BlacklistScope,
-    BlacklistSource,
     ProtectedService,
     Protocol,
     Role,

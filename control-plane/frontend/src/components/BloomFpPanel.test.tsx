@@ -6,7 +6,7 @@ import { BloomFpPanel } from './BloomFpPanel'
 describe('BloomFpPanel', () => {
   afterEach(cleanup)
 
-  it('renders labeled bloom false-positive counters', () => {
+  it('renders labeled bloom false-positive counters (historical multi-key regression test)', () => {
     render(
       <BloomFpPanel bloomStats={{ whitelist: 3, global_blacklist: 5_000, service_blacklist: 0 }} />,
     )

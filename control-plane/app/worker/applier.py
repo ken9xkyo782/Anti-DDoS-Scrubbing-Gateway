@@ -16,7 +16,6 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     AllowRule,
-    BlacklistEntry,
     ProtectedService,
     ServiceMode,
     ServicePlan,

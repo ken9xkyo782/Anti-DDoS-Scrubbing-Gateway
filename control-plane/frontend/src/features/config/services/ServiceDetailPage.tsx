@@ -13,7 +13,6 @@ import { useService } from '../../../hooks/resources/useServices'
 import { useApplyStatus } from '../../../hooks/useApplyStatus'
 import { RulesTab } from './RulesTab'
 import { WhitelistTab } from './WhitelistTab'
-import { BlacklistTab } from './BlacklistTab'
 
 export function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -68,7 +67,7 @@ export function ServiceDetailPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', padding: 'var(--space-6)' }}>
       <PageHeader
         title={service.name}
-        description={`Manage policy rules, whitelists, and blacklists for CIDR block ${service.cidr_or_ip}`}
+        description={`Manage policy rules and whitelists for CIDR block ${service.cidr_or_ip}`}
         breadcrumb={breadcrumb}
         actions={headerActions}
       />
@@ -108,7 +107,6 @@ export function ServiceDetailPage() {
           <Tabs.Trigger value="overview">Overview</Tabs.Trigger>
           <Tabs.Trigger value="rules">Rules</Tabs.Trigger>
           <Tabs.Trigger value="whitelist">Whitelist</Tabs.Trigger>
-          <Tabs.Trigger value="blacklist">Blacklist</Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="overview">
@@ -175,10 +173,6 @@ export function ServiceDetailPage() {
 
         <Tabs.Content value="whitelist">
           <WhitelistTab serviceId={service.id} service={service} />
-        </Tabs.Content>
-
-        <Tabs.Content value="blacklist">
-          <BlacklistTab serviceId={service.id} />
         </Tabs.Content>
       </Tabs.Root>
     </div>
