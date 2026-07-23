@@ -76,21 +76,21 @@ T9, T10 → T11 → T12
 
 **Done when**:
 
-- [ ] Baseline `B` recorded from `make -C data-plane test` before any edit
-- [ ] `deny_filter_stage(ctx, meta, slot)` — `bl_flags` parameter gone; `goto service_blacklist`
+- [x] Baseline `B` recorded from `make -C data-plane test` before any edit
+- [x] `deny_filter_stage(ctx, meta, slot)` — `bl_flags` parameter gone; `goto service_blacklist`
       (line 442) becomes `goto clean`; the `BL_F_ACTIVE` block (457-481) deleted
-- [ ] `sbl_bloom_key()`, `sbl_bloom_maybe()`, `sbl_lpm_hit()`, `BL_STATE_SERVICE_HIT` deleted
-- [ ] `whitelist.h`: `whitelist_miss()` loses the parameter; the local at line 359 and all five
+- [x] `sbl_bloom_key()`, `sbl_bloom_maybe()`, `sbl_lpm_hit()`, `BL_STATE_SERVICE_HIT` deleted
+- [x] `whitelist.h`: `whitelist_miss()` loses the parameter; the local at line 359 and all five
       call sites (347, 366, 373, 382, 389) updated
-- [ ] dp-unit: `test_blacklist_service_scoped_hit_does_not_cross_service`,
+- [x] dp-unit: `test_blacklist_service_scoped_hit_does_not_cross_service`,
       `test_blacklist_service_bloom_false_positive_counts`,
       `test_blacklist_missing_service_lpm_inner_fails_closed` deleted and unregistered
-- [ ] dp-unit: `test_blacklist_global_precedes_service_attribution` **rewritten** (not deleted) as a
+- [x] dp-unit: `test_blacklist_global_precedes_service_attribution` **rewritten** (not deleted) as a
       global-attribution case, so global `blacklist_drop` attribution stays covered
-- [ ] Helpers `set_service_bl_flags()`, `seed_service_blacklist_bloom_key()` deleted
-- [ ] sbl maps, key structs, `SBL_*`, `BL_F_*`, `BLOOM_FP_SERVICE` **retained** (writers still exist)
-- [ ] Gate passes: `make -C data-plane test`
-- [ ] Test count: `B - 3` pass (3 deleted, 1 rewritten in place, 0 added)
+- [x] Helpers `set_service_bl_flags()`, `seed_service_blacklist_bloom_key()` deleted
+- [x] sbl maps, key structs, `SBL_*`, `BL_F_*`, `BLOOM_FP_SERVICE` **retained** (writers still exist)
+- [x] Gate passes: `make -C data-plane test`
+- [x] Test count: `B - 3` pass (3 deleted, 1 rewritten in place, 0 added)
 
 **Verify**: `make -C data-plane test`; then `grep -c "sbl_bloom_maybe\|sbl_lpm_hit\|BL_STATE_SERVICE_HIT" data-plane/src/*.h` → `0`
 
@@ -113,23 +113,23 @@ loader's env-seed path — while still parsing and discarding `sbl[]` at wire v3
 
 **Done when**:
 
-- [ ] `xdpgw-apply.c`: sbl programming loop (760-785) deleted; `apply_write_service` loses its
+- [x] `xdpgw-apply.c`: sbl programming loop (760-785) deleted; `apply_write_service` loses its
       `sbl_bloom_fd`/`sbl_lpm_fd` parameters; both `outers[APPLY_SERVICE_BLACKLIST_*]` assignments
       (834-835, 912-913) deleted; enum members and `APPLY_SERVICE_OUTER_COUNT` 8→6; two pin macros
       (69-70) and two `apply_fds` members (137-138) deleted
-- [ ] `parse_service` still reads `sbl_count`/`sbl[]` and discards them — **explicitly commented** as
+- [x] `parse_service` still reads `sbl_count`/`sbl[]` and discards them — **explicitly commented** as
       "consumed and dropped; removed in schema v4" so the intermediate state is not mistaken for a bug
-- [ ] `loader.c`: pin macros (38-39), `set_pin_path` (196-198), `unpin_map` (255-256), `pin_map`
+- [x] `loader.c`: pin macros (38-39), `set_pin_path` (196-198), `unpin_map` (255-256), `pin_map`
       (308-312), usage fragment (134), env parse (540, 558-569), `seed_service_blacklist_from_env`
       (843-884) + its call (1046), the `sbl_enabled` disjunct (994), `val.bl_flags = sbl_flags`
       (1023), and the three seed-struct fields (70-76) all deleted
-- [ ] `XDPGW_SEED_GBL_CIDR` and `XDPGW_SEED_BLOCKED_PORT` still work
-- [ ] No `XDPGW_SEED_SBL_CIDR` remains in `tests/*.sh` or `apply_smoke.py`; affected assertions
+- [x] `XDPGW_SEED_GBL_CIDR` and `XDPGW_SEED_BLOCKED_PORT` still work
+- [x] No `XDPGW_SEED_SBL_CIDR` remains in `tests/*.sh` or `apply_smoke.py`; affected assertions
       retargeted at the global scope
-- [ ] Gates pass: `make -C data-plane bpf skel loader apply dpstat` and `make -C data-plane test`
-- [ ] Slotted config-map set changed ⇒ `sudo make -C data-plane applybulk` passes (1000-service
+- [x] Gates pass: `make -C data-plane bpf skel loader apply dpstat` and `make -C data-plane test`
+- [x] Slotted config-map set changed ⇒ `sudo make -C data-plane applybulk` passes (1000-service
       build/verify/flip < 5 s, one `active_config` flip, feed maps carried forward)
-- [ ] Test count: `B - 3` pass (unchanged from T1)
+- [x] Test count: `B - 3` pass (unchanged from T1)
 
 **Verify**: after `sudo ./build/xdp_gateway_loader`, `ls /sys/fs/bpf/xdp_gateway/` shows no
 `service_blacklist_*` pin
@@ -151,15 +151,15 @@ loader's env-seed path — while still parsing and discarding `sbl[]` at wire v3
 
 **Done when**:
 
-- [ ] `service_blacklist_bloom{,_0,_1}` and `service_blacklist_lpm{,_0,_1}` definitions (149-192) deleted
-- [ ] `struct sbl_lpm_key`, `struct sbl_bloom_key` (51-59) and both `_Static_assert`s (69-72) deleted
-- [ ] `SBL_BLOOM_PREFIX`, `SBL_BLOOM_MAX_ENTRIES`, `SBL_BLOOM_HASHES`, `SBL_LPM_MAX_ENTRIES` (14-17)
+- [x] `service_blacklist_bloom{,_0,_1}` and `service_blacklist_lpm{,_0,_1}` definitions (149-192) deleted
+- [x] `struct sbl_lpm_key`, `struct sbl_bloom_key` (51-59) and both `_Static_assert`s (69-72) deleted
+- [x] `SBL_BLOOM_PREFIX`, `SBL_BLOOM_MAX_ENTRIES`, `SBL_BLOOM_HASHES`, `SBL_LPM_MAX_ENTRIES` (14-17)
       and `enum bl_service_flags` (34-37) deleted
-- [ ] The M4 build-contract comment (76-92) loses its service-scope bullet and the `BL_F_ACTIVE`
+- [x] The M4 build-contract comment (76-92) loses its service-scope bullet and the `BL_F_ACTIVE`
       half of the flags bullet
-- [ ] Object still loads: no `service_blacklist_*` map in the built skeleton
-- [ ] Gates pass: `make -C data-plane bpf skel loader apply dpstat` and `make -C data-plane test`
-- [ ] Test count: `B - 3` pass
+- [x] Object still loads: no `service_blacklist_*` map in the built skeleton
+- [x] Gates pass: `make -C data-plane bpf skel loader apply dpstat` and `make -C data-plane test`
+- [x] Test count: `B - 3` pass
 
 **Verify**: `bpftool map show | grep -c service_blacklist` → `0` with the loader attached
 
@@ -181,18 +181,18 @@ loader's env-seed path — while still parsing and discarding `sbl[]` at wire v3
 
 **Done when**:
 
-- [ ] `struct service_val`: `__u8 bl_flags` → `__u8 reserved0`; the `sizeof == 8` static assert is
+- [x] `struct service_val`: `__u8 bl_flags` → `__u8 reserved0`; the `sizeof == 8` static assert is
       **unchanged and still passes**
-- [ ] `cfg_service.bl_flags` → `reserved0`; `parse_service` rejects a record with `reserved0 != 0`
+- [x] `cfg_service.bl_flags` → `reserved0`; `parse_service` rejects a record with `reserved0 != 0`
       (returns `-1` before any map write)
-- [ ] `apply_write_service` initializes `.reserved0 = 0`
-- [ ] Verify pass compares `value.reserved0 != 0` in place of the old `bl_flags` comparison (1127)
-- [ ] `loader.c` no longer assigns the field from seed state
-- [ ] `test_snapshot.c:50` asserts `reserved0 == 0`
-- [ ] Wire layout **byte-identical** to before this task — `APPLY_SNAPSHOT_SERVICE_FIXED_SIZE` still
+- [x] `apply_write_service` initializes `.reserved0 = 0`
+- [x] Verify pass compares `value.reserved0 != 0` in place of the old `bl_flags` comparison (1127)
+- [x] `loader.c` no longer assigns the field from seed state
+- [x] `test_snapshot.c:50` asserts `reserved0 == 0`
+- [x] Wire layout **byte-identical** to before this task — `APPLY_SNAPSHOT_SERVICE_FIXED_SIZE` still
       67, golden fixture **not** regenerated here
-- [ ] Gates pass: `make -C data-plane bpf skel loader apply dpstat` and `make -C data-plane test`
-- [ ] Test count: `B - 3` pass
+- [x] Gates pass: `make -C data-plane bpf skel loader apply dpstat` and `make -C data-plane test`
+- [x] Test count: `B - 3` pass
 
 **Verify**: `make -C data-plane apply` (runs `test_snapshot` against the **unmodified** golden blob)
 
@@ -221,27 +221,27 @@ loader's env-seed path — while still parsing and discarding `sbl[]` at wire v3
 
 **Done when**:
 
-- [ ] `APPLY_SNAPSHOT_SCHEMA_VERSION` 3 → 4 in `apply_snapshot.h` **and**
+- [x] `APPLY_SNAPSHOT_SCHEMA_VERSION` 3 → 4 in `apply_snapshot.h` **and**
       `APPLY_SNAPSHOT_SCHEMA_VERSION = 4` in `applier.py:30` — both in this commit
-- [ ] Record doc updated: `bl_flags: u8` → `reserved0: u8 — must be written 0; readers reject
+- [x] Record doc updated: `bl_flags: u8` → `reserved0: u8 — must be written 0; readers reject
       non-zero`; the `sbl_count`/`sbl[]` lines (62-63) and
       `APPLY_SNAPSHOT_SERVICE_BLACKLIST_ENTRY_SIZE` (77) deleted;
       `APPLY_SNAPSHOT_SERVICE_FIXED_SIZE` still 67
-- [ ] `parse_service` drops the second `parse_source_list` call and the `sbl`/`sbl_count` fields;
+- [x] `parse_service` drops the second `parse_source_list` call and the `sbl`/`sbl_count` fields;
       the per-service free path no longer frees `svc->sbl`
-- [ ] `applier.py`: the trailing `_append_source_list(payload, blacklist)` (315) and the now-unused
+- [x] `applier.py`: the trailing `_append_source_list(payload, blacklist)` (315) and the now-unused
       `blacklist` local (275) removed; docstring says v4. `ServiceConfig.blacklist` **stays** for now
       (removed in T7) so this task touches only bytes
-- [ ] `gen_apply_snapshot_golden.py` updated (`bl_flags` kwarg → `reserved0`, trailing source list
+- [x] `gen_apply_snapshot_golden.py` updated (`bl_flags` kwarg → `reserved0`, trailing source list
       dropped from both fixtures) and `apply_snapshot_golden.bin` regenerated
-- [ ] `global_deny_snapshot_golden.bin` regenerated **only if** the shared header version made it
+- [x] `global_deny_snapshot_golden.bin` regenerated **only if** the shared header version made it
       stale; `GLOBAL_DENY` layout otherwise untouched
-- [ ] **New** dp-unit case: a v3 snapshot is rejected and `active_config` plus every config map is
+- [x] **New** dp-unit case: a v3 snapshot is rejected and `active_config` plus every config map is
       provably untouched
-- [ ] **New** dp-unit case: a record with `reserved0 != 0` is rejected before any map write
-- [ ] Gates pass: `make -C data-plane bpf skel loader apply dpstat`, `make -C data-plane test`,
+- [x] **New** dp-unit case: a record with `reserved0 != 0` is rejected before any map write
+- [x] Gates pass: `make -C data-plane bpf skel loader apply dpstat`, `make -C data-plane test`,
       and CP `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
-- [ ] Test count: DP `B - 1` pass (`B - 3` from T1, `+2` new); CP unit suite unchanged in count
+- [x] Test count: DP `B - 1` pass (`B - 3` from T1, `+2` new); CP unit suite unchanged in count
 
 **Verify**: `make -C data-plane apply` (C parser vs new golden) **and**
 `pytest -q -m unit -k snapshot_serialize` (Python serializer vs the same golden) both green
@@ -267,21 +267,21 @@ global-only, so the removed capability returns 404 instead of silently storing u
 
 **Done when**:
 
-- [ ] `routers/lists.py`: `add_service_blacklist`, `list_service_blacklist`,
+- [x] `routers/lists.py`: `add_service_blacklist`, `list_service_blacklist`,
       `remove_service_blacklist` (79-140), the now-unused `_blacklist_response` (160), and the
       `BlacklistEntry`/`BlacklistScope` imports deleted; whitelist routes untouched
-- [ ] `services/lists.py`: `add_blacklist`, `list_blacklist`, `remove_blacklist`,
+- [x] `services/lists.py`: `add_blacklist`, `list_blacklist`, `remove_blacklist`,
       `_require_blacklist_entry` lose their `scope`/`service_id` parameters; each
       `if scope == BlacklistScope.service:` branch (125, 199, 251, 310) deleted;
       `_require_admin_actor` called unconditionally
-- [ ] Feed protections preserved: deleting a `source=feed` entry still 409s; assertion re-marking
+- [x] Feed protections preserved: deleting a `source=feed` entry still 409s; assertion re-marking
       still runs; `record_event` audit still fires for global mutations
-- [ ] `BlacklistEntryResponse` drops `service_id`; `scope` is the literal `'global'`
-- [ ] Integration tests assert `404` on all three removed paths and unchanged behaviour on `/blacklist`
-- [ ] OpenAPI contains no service-blacklist path
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] `BlacklistEntryResponse` drops `service_id`; `scope` is the literal `'global'`
+- [x] Integration tests assert `404` on all three removed paths and unchanged behaviour on `/blacklist`
+- [x] OpenAPI contains no service-blacklist path
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
       (`compose.test.yml` up)
-- [ ] Test count: recorded; only the intentionally removed service-blacklist cases disappear, and
+- [x] Test count: recorded; only the intentionally removed service-blacklist cases disappear, and
       the 6 pre-existing reds are unchanged
 
 **Verify**: `curl -X POST .../services/<id>/blacklist` → `404`; `GET /blacklist` as admin → unchanged
@@ -305,14 +305,14 @@ snapshot builder.
 
 **Done when**:
 
-- [ ] `ServiceConfig.blacklist` (68), both `selectinload(ProtectedService.blacklist_entries)`
+- [x] `ServiceConfig.blacklist` (68), both `selectinload(ProtectedService.blacklist_entries)`
       (224, 248), the `blacklist=` line in `_service_config` (356), and the `"blacklist_count"`
       build-log field (85) removed
-- [ ] `BlacklistEntry` import dropped if unused
-- [ ] Serialized bytes **identical** to T5's output (this task changes no wire byte) — the golden
+- [x] `BlacklistEntry` import dropped if unused
+- [x] Serialized bytes **identical** to T5's output (this task changes no wire byte) — the golden
       fixture is not regenerated
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: recorded; applier suites green
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: recorded; applier suites green
 
 **Verify**: `pytest -q -m unit -k snapshot_serialize` still matches the T5 golden byte-for-byte
 
@@ -337,24 +337,24 @@ file/revision-chain shape
 
 **Done when**:
 
-- [ ] `down_revision = "20260722_0013"`
-- [ ] `upgrade()` in this exact order: log the `(service_id, source_cidr)` pairs at INFO with a count
+- [x] `down_revision = "20260722_0013"`
+- [x] `upgrade()` in this exact order: log the `(service_id, source_cidr)` pairs at INFO with a count
       → `DELETE FROM blacklist_entry WHERE scope='service'` → drop
       `uq_blacklist_service_source_cidr` → drop `ck_blacklist_scope_service_id` → drop `service_id`
       → add `ck_blacklist_scope_global_only CHECK (scope = 'global')`
       *(delete must precede the CHECK or it fails on existing data)*
-- [ ] `downgrade()` reverses 6→3 and re-adds `service_id` nullable with `ondelete=CASCADE`; docstring
+- [x] `downgrade()` reverses 6→3 and re-adds `service_id` nullable with `ondelete=CASCADE`; docstring
       states plainly that deleted rows are **not** restored
-- [ ] PG enum type `blacklist_scope` keeps both labels (D-SBR-1); the Python `BlacklistScope` keeps
+- [x] PG enum type `blacklist_scope` keeps both labels (D-SBR-1); the Python `BlacklistScope` keeps
       only `global_`
-- [ ] `models.py`: `service_id`, `ck_blacklist_scope_service_id`, `uq_blacklist_service_source_cidr`,
+- [x] `models.py`: `service_id`, `ck_blacklist_scope_service_id`, `uq_blacklist_service_source_cidr`,
       and `ProtectedService.blacklist_entries` (539) removed; `ck_blacklist_scope_global_only` added
-- [ ] Integration test seeds **both** scopes, upgrades, then asserts: service rows gone, global rows
+- [x] Integration test seeds **both** scopes, upgrades, then asserts: service rows gone, global rows
       intact, `feed_blacklist_assertion` rows intact, service delete succeeds with no cascade
-- [ ] Idempotency: migration on a zero-service-row DB succeeds and logs a count of 0
-- [ ] `alembic upgrade head` then `alembic downgrade -1` both clean
-- [ ] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: recorded; feed suites unchanged (they never touch the service scope)
+- [x] Idempotency: migration on a zero-service-row DB succeeds and logs a count of 0
+- [x] `alembic upgrade head` then `alembic downgrade -1` both clean
+- [x] Gate passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: recorded; feed suites unchanged (they never touch the service scope)
 
 **Verify**: `alembic upgrade head && alembic downgrade -1 && alembic upgrade head` on the test DB
 
