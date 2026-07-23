@@ -1,0 +1,45 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#1e293b', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    subgraph fe ["SPA"]
+        feTab["BlacklistTab.tsx — deleted<br/>ServiceDetailPage tab + 3 useLists hooks<br/>types.ts: BlacklistScope → 'global'"]
+    end
+
+    subgraph api ["Control plane — API"]
+        routes["routers/lists.py<br/>3 service routes deleted → 404"]
+        svc["services/lists.py<br/>scope/service_id params dropped"]
+    end
+
+    subgraph db ["Control plane — data"]
+        model["models.py<br/>service_id · check constraint · uq index<br/>ProtectedService.blacklist_entries"]
+        mig["migration 0014<br/>DELETE scope='service'<br/>+ ck_blacklist_scope_global_only"]
+    end
+
+    subgraph worker ["Control plane — applier"]
+        applier["worker/applier.py<br/>ServiceConfig.blacklist · selectinload ×2<br/>trailing _append_source_list"]
+    end
+
+    contract["apply_snapshot.h<br/>SCHEMA_VERSION 3 → 4<br/>sbl_count + sbl[] removed<br/>bl_flags → reserved0 (must be 0)"]
+
+    subgraph tools ["Data-plane tooling"]
+        apply["xdpgw-apply.c<br/>2 pins · 2 fds · enum 8→6<br/>sbl parse + program loop"]
+        loader["loader.c<br/>pins · XDPGW_SEED_SBL_CIDR · seed fn"]
+        dpstat["dpstat.c<br/>BLOOM_STAT_MAX 3 → 2"]
+    end
+
+    subgraph dp ["Data plane — XDP"]
+        blh["blacklist.h<br/>4 inner maps + 2 outers · 2 key structs<br/>3 helpers · SERVICE_HIT · BL_F_* · SBL_*"]
+        svch["service.h — bl_flags → reserved0<br/>whitelist.h — param threading"]
+    end
+
+    feTab --> routes --> svc --> model --> mig
+    svc --> applier --> contract --> apply --> blh
+    contract --> loader
+    blh --> svch
+    dpstat -.-> blh
+
+    feed["feed_reconcile.py + carry_forward_feed<br/>UNTOUCHED — global scope only"]
+    feed -.-> mig
+
+    style contract fill:#eef2ff,stroke:#4f46e5,color:#312e81
+    style mig fill:#fff7ed,stroke:#f59e0b,color:#7c2d12
+    style feed fill:#ecfdf5,stroke:#10b981,color:#064e3b

@@ -1,0 +1,41 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#1e293b', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart TD
+    entry(["whitelist_miss() → deny_filter_stage(ctx, meta, slot)<br/>bl_flags parameter removed"]) --> pre{"stateless pre-filters<br/>amp ports · bogon · blocked-port bitmap<br/>(unchanged)"}
+    pre -- "match" --> preDrop["record_drop(7 udp_amplification_drop)<br/>record_drop(4 bogon_drop)"]
+    pre -- "pass" --> gblGate
+
+    subgraph kept ["global blacklist — KEPT, unchanged"]
+        gblGate{"gbl_meta[slot]<br/>GBL_F_ACTIVE?"}
+        gblBloom{"bloom peek src/24<br/>(skip if GBL_F_HAS_BROAD)"}
+        gblLpm{"LPM confirm {32, src}?"}
+        gblFp["bloom_stats[GLOBAL]++"]
+        gblGate -- "yes" --> gblBloom
+        gblBloom -- "hit / skipped" --> gblLpm
+        gblLpm -- "miss + bloom consulted" --> gblFp
+    end
+
+    gblGate -- "no" --> clean
+    gblBloom -- "miss" --> clean
+    gblFp --> clean
+    gblLpm -- "hit" --> blDrop["bl_state = GLOBAL_HIT<br/>record_drop(8 blacklist_drop)"]
+
+    clean["bl_state = CLEAN"] --> rules["allow_rule_stage()<br/>(unchanged)"]
+
+    subgraph gone ["service blacklist — REMOVED (never executed: applier.py hardcoded bl_flags = 0)"]
+        sblGate{"service_val.bl_flags<br/>BL_F_ACTIVE?"}
+        sblPair["bloom peek {svc, src/24}<br/>→ LPM {64, svc, src}<br/>bloom_stats[SERVICE]++"]
+        sblDrop["bl_state = SERVICE_HIT<br/>record_drop(8 blacklist_drop)"]
+        sblGate -- "always no" --> sblPair
+        sblPair --> sblDrop
+    end
+
+    clean -. "branch deleted here" .-> sblGate
+
+    style preDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style blDrop fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    style clean fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    style rules fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    style gone fill:#f8fafc,stroke:#cbd5e1,color:#94a3b8
+    style sblGate fill:#f1f5f9,stroke:#cbd5e1,color:#94a3b8
+    style sblPair fill:#f1f5f9,stroke:#cbd5e1,color:#94a3b8
+    style sblDrop fill:#f1f5f9,stroke:#cbd5e1,color:#94a3b8
