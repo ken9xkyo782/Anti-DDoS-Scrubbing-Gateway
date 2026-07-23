@@ -379,6 +379,56 @@ unchanged; fe gate (`lint && typecheck && test --run && build`) green.
 
 ---
 
+## Amendment A2 — Split amplification out into its own tab (2026-07-23)
+
+**Trigger:** A1 merged the built-in and dynamic port lists into one section, which made the section
+the clear centre of gravity of the DDoS Protection page — a **read-only coverage overview** now
+carried the node's only tunable deny-list. The two have different audiences and different change
+rates: coverage is documentation an admin reads once, the port list is config an admin edits under
+attack. Burying a live control under a documentation grid costs a scroll at exactly the wrong moment.
+
+**Change:** promote the A1 section to its **own admin-only tab**. New route `/admin/amplification` →
+new `AmplificationPage`, new sidebar entry under *Manage*. `/admin/ddos` keeps the
+`ProtectionCoverage` grid and gains a cross-link card down to the new tab. Still
+**presentation-only**: the page moves, the API contract, the reconcile lane and the data plane do not.
+
+**Decisions (this amendment, resolved via AskUserQuestion 2026-07-23):**
+
+- **D-AMP-6 → `/admin/ddos` stays as the coverage overview** (chosen over collapsing it onto the
+  shared `DdosCoveragePage`, and over dropping the admin nav entry). Admins keep the at-a-glance view
+  of every attack class the node filters; the amplification card in that grid is exactly where an
+  admin would look for the deeper control, so the page carries a "Manage blocked source ports →" link.
+  Rejected "collapse": deleting `DdosProtectionPage` to reuse the tenant page saves a small component
+  but couples the two audiences' pages together for no gain.
+- **D-AMP-7 → sidebar label = "UDP Reflection & Amplification" verbatim.** ~30 chars against an 8–16
+  char cohort, so it wraps to two lines. Verified safe: `.navLink` is a flex row with no
+  `white-space: nowrap` and `.navIcon` already sets `flex-shrink: 0`, so a wrapping label cannot
+  squash the icon — **no CSS change needed**.
+
+**Requirements:**
+
+1. WHEN an **admin** loads the dashboard THEN a sidebar entry **"UDP Reflection & Amplification"**
+   SHALL appear under *Manage* routing to a new admin-only `/admin/amplification`; a **tenant user**
+   SHALL NOT see it and SHALL NOT reach the route (`ProtectedRoute allowedRoles={['admin']}`).
+   `(AMP-26)`
+2. WHEN the new tab renders THEN it SHALL own the full blocked-source-port surface moved from the
+   DDoS Protection page — the A1 unified table (AMP-22..24 behaviour intact: locked built-in rows,
+   removable dynamic rows, empty-dynamic hint), the Add dialog and the remove ConfirmDialog.
+   `(AMP-27)`
+3. WHEN `/admin/ddos` renders THEN it SHALL show the `ProtectionCoverage` grid **only** — no port
+   table, no Add/Remove affordance — plus a card linking to `/admin/amplification`. `(AMP-28)`
+4. WHEN this amendment ships THEN `ProtectionCoverage` and `DdosCoveragePage` SHALL remain
+   **byte-unchanged** (D-AMP-5 still binds), and no control-plane, worker, or data-plane file SHALL
+   change — the diff is FE routing, nav, and the two page components plus their specs. `(AMP-29)`
+
+**Independent Test**: As admin, the sidebar shows both "DDoS Protection" and "UDP Reflection &
+Amplification"; the latter opens a page whose H1 is "UDP Reflection & Amplification" and which lists
+the 12 `Built-in` rows + the dynamic entries with add/409/remove working exactly as before;
+`/admin/ddos` shows the coverage grid with no table and links across; as a tenant user neither the new
+nav item nor `/admin/amplification` is reachable and `/ddos` is unchanged; fe gate green.
+
+---
+
 ## Requirement Traceability
 
 | Requirement ID | Story | Refs | Phase | Status |
@@ -408,15 +458,21 @@ unchanged; fe gate (`lint && typecheck && test --run && build`) green.
 | AMP-23 | A1: Unified section | locked built-in rows + labels | A1 | ✅ Verified |
 | AMP-24 | A1: Unified section | empty dynamic-list hint | A1 | ✅ Verified |
 | AMP-25 | A1: Unified section | D-AMP-5, FE-only diff | A1 | ✅ Verified |
+| AMP-26 | A2: Own tab | D-AMP-7, admin-only route + nav | A2 | ✅ Verified |
+| AMP-27 | A2: Own tab | AmplificationPage owns AMP-22..24 | A2 | ✅ Verified |
+| AMP-28 | A2: Own tab | D-AMP-6, /admin/ddos coverage + link | A2 | ✅ Verified |
+| AMP-29 | A2: Own tab | D-AMP-5 holds, FE-only diff | A2 | ✅ Verified |
 
 **ID format:** `AMP-[NUMBER]`. **Status:** Pending → In Design → In Tasks → Implementing → Verified.
 
-**Coverage:** 25 total. P1 = AMP-01..19 **✅ all Verified** (executed 2026-07-22, commits
+**Coverage:** 29 total. P1 = AMP-01..19 **✅ all Verified** (executed 2026-07-22, commits
 `181223a..80a67ff`; CP/FE/DP gates green + DT2 privileged smoke passed). P2 = AMP-20..21 **deferred**
 (PT1/PT2 optional, not executed). A1 = AMP-22..25 **✅ all Verified** (executed 2026-07-23,
 presentation-only; fe gate green — lint/typecheck clean, **223 tests / 51 files** (220→223), build ok;
 diff = `DdosProtectionPage.tsx` + its spec only, `ProtectionCoverage.tsx` / `DdosCoveragePage.tsx`
-byte-unchanged).
+byte-unchanged). A2 = AMP-26..29 **✅ all Verified** (executed 2026-07-23, presentation-only; fe gate
+green — lint/typecheck clean, **225 tests / 52 files** (223→225), build ok; the A1 surface moved
+verbatim into `AmplificationPage.tsx` at `/admin/amplification`).
 
 ---
 

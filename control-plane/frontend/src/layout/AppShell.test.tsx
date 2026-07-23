@@ -82,6 +82,7 @@ describe('AppShell - Sidebar + Topbar + role-aware routing', () => {
     expect(screen.queryByText('Tenants')).not.toBeInTheDocument()
     expect(screen.queryByText('Users')).not.toBeInTheDocument()
     expect(screen.queryByText('Threat Feeds')).not.toBeInTheDocument()
+    expect(screen.queryByText('UDP Reflection & Amplification')).not.toBeInTheDocument()
   })
 
   it('renders role-filtered nav for admin users', () => {
@@ -93,6 +94,8 @@ describe('AppShell - Sidebar + Topbar + role-aware routing', () => {
     expect(screen.getByText('Tenants')).toBeInTheDocument()
     expect(screen.getByText('Users')).toBeInTheDocument()
     expect(screen.getByText('Node Control')).toBeInTheDocument()
+    expect(screen.getByText('DDoS Protection')).toBeInTheDocument()
+    expect(screen.getByText('UDP Reflection & Amplification')).toBeInTheDocument()
 
     // Admin DOES NOT see tenant-only "My Services" (tenant menu item uses "My Services")
     expect(screen.queryByText('My Services')).not.toBeInTheDocument()

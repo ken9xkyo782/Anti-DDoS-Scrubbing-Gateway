@@ -18,6 +18,7 @@ import { FeedsPage } from './features/config/feeds/FeedsPage'
 import { GlobalBlacklistPage } from './features/config/global-blacklist/GlobalBlacklistPage'
 import { DdosProtectionPage } from './features/config/ddos/DdosProtectionPage'
 import { DdosCoveragePage } from './features/config/ddos/DdosCoveragePage'
+import { AmplificationPage } from './features/config/ddos/AmplificationPage'
 import { AlertingPage } from './features/config/alerting/AlertingPage'
 import { NodeControlPage } from './features/config/node/NodeControlPage'
 import { AccountPage } from './features/config/account/AccountPage'
@@ -66,6 +67,7 @@ export function App() {
             <Route path="/admin/feeds" element={<FeedsPage />} />
             <Route path="/admin/global-blacklist" element={<GlobalBlacklistPage />} />
             <Route path="/admin/ddos" element={<DdosProtectionPage />} />
+            <Route path="/admin/amplification" element={<AmplificationPage />} />
             <Route path="/admin/alerting" element={<AlertingPage />} />
             <Route path="/admin/node" element={<NodeControlPage />} />
             <Route path="/admin/jobs" element={<JobBacklogPage />} />
