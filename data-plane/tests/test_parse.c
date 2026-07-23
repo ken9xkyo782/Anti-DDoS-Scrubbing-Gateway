@@ -60,12 +60,7 @@ struct test_env {
 	int global_blacklist_lpm0_fd;
 	int global_blacklist_lpm1_fd;
 	int global_blacklist_lpm_fd;
-	int service_blacklist_bloom0_fd;
-	int service_blacklist_bloom1_fd;
-	int service_blacklist_bloom_fd;
-	int service_blacklist_lpm0_fd;
-	int service_blacklist_lpm1_fd;
-	int service_blacklist_lpm_fd;
+
 	int whitelist_bloom0_fd;
 	int whitelist_bloom1_fd;
 	int whitelist_bloom_fd;
@@ -168,18 +163,7 @@ static int env_open(struct test_env *env)
 		bpf_map__fd(env->skel->maps.global_blacklist_lpm_1);
 	env->global_blacklist_lpm_fd =
 		bpf_map__fd(env->skel->maps.global_blacklist_lpm);
-	env->service_blacklist_bloom0_fd =
-		bpf_map__fd(env->skel->maps.service_blacklist_bloom_0);
-	env->service_blacklist_bloom1_fd =
-		bpf_map__fd(env->skel->maps.service_blacklist_bloom_1);
-	env->service_blacklist_bloom_fd =
-		bpf_map__fd(env->skel->maps.service_blacklist_bloom);
-	env->service_blacklist_lpm0_fd =
-		bpf_map__fd(env->skel->maps.service_blacklist_lpm_0);
-	env->service_blacklist_lpm1_fd =
-		bpf_map__fd(env->skel->maps.service_blacklist_lpm_1);
-	env->service_blacklist_lpm_fd =
-		bpf_map__fd(env->skel->maps.service_blacklist_lpm);
+
 	env->whitelist_bloom0_fd = bpf_map__fd(env->skel->maps.whitelist_bloom_0);
 	env->whitelist_bloom1_fd = bpf_map__fd(env->skel->maps.whitelist_bloom_1);
 	env->whitelist_bloom_fd = bpf_map__fd(env->skel->maps.whitelist_bloom);
@@ -234,12 +218,7 @@ static int env_open(struct test_env *env)
 	    env->global_blacklist_lpm0_fd < 0 ||
 	    env->global_blacklist_lpm1_fd < 0 ||
 	    env->global_blacklist_lpm_fd < 0 ||
-	    env->service_blacklist_bloom0_fd < 0 ||
-	    env->service_blacklist_bloom1_fd < 0 ||
-	    env->service_blacklist_bloom_fd < 0 ||
-	    env->service_blacklist_lpm0_fd < 0 ||
-	    env->service_blacklist_lpm1_fd < 0 ||
-	    env->service_blacklist_lpm_fd < 0 ||
+
 	    env->whitelist_bloom0_fd < 0 || env->whitelist_bloom1_fd < 0 ||
 	    env->whitelist_bloom_fd < 0 || env->whitelist_lpm0_fd < 0 ||
 	    env->whitelist_lpm1_fd < 0 || env->whitelist_lpm_fd < 0 ||
@@ -407,17 +386,7 @@ static int clear_global_blacklist_lpm_map(int fd)
 	return errno == ENOENT ? 0 : -1;
 }
 
-static int clear_service_blacklist_lpm_map(int fd)
-{
-	struct sbl_lpm_key key;
 
-	while (bpf_map_get_next_key(fd, NULL, &key) == 0) {
-		if (bpf_map_delete_elem(fd, &key) != 0)
-			return -1;
-	}
-
-	return errno == ENOENT ? 0 : -1;
-}
 
 static int reset_gbl_meta_map(int fd)
 {
@@ -541,8 +510,7 @@ static int reset_config(struct test_env *env)
 	    clear_rule_block_map(env->rule_block1_fd) != 0 ||
 	    clear_global_blacklist_lpm_map(env->global_blacklist_lpm0_fd) != 0 ||
 	    clear_global_blacklist_lpm_map(env->global_blacklist_lpm1_fd) != 0 ||
-	    clear_service_blacklist_lpm_map(env->service_blacklist_lpm0_fd) != 0 ||
-	    clear_service_blacklist_lpm_map(env->service_blacklist_lpm1_fd) != 0 ||
+
 	    clear_whitelist_lpm_map(env->whitelist_lpm0_fd) != 0 ||
 	    clear_whitelist_lpm_map(env->whitelist_lpm1_fd) != 0 ||
 	    clear_u32_hash_map(env->fair_config0_fd) != 0 ||
@@ -644,27 +612,7 @@ static int global_blacklist_lpm_fd_for_slot(struct test_env *env, __u32 slot)
 	return -1;
 }
 
-static int service_blacklist_bloom_fd_for_slot(struct test_env *env, __u32 slot)
-{
-	if (slot == 0)
-		return env->service_blacklist_bloom0_fd;
-	if (slot == 1)
-		return env->service_blacklist_bloom1_fd;
 
-	errno = EINVAL;
-	return -1;
-}
-
-static int service_blacklist_lpm_fd_for_slot(struct test_env *env, __u32 slot)
-{
-	if (slot == 0)
-		return env->service_blacklist_lpm0_fd;
-	if (slot == 1)
-		return env->service_blacklist_lpm1_fd;
-
-	errno = EINVAL;
-	return -1;
-}
 
 static int whitelist_bloom_fd_for_slot(struct test_env *env, __u32 slot)
 {

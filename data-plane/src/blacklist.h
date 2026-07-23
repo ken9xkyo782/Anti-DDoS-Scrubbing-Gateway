@@ -11,10 +11,7 @@
 #define GBL_BLOOM_MAX_ENTRIES (2u * 1024 * 1024)
 #define GBL_BLOOM_HASHES 5
 #define GBL_LPM_MAX_ENTRIES (1024 * 1024)
-#define SBL_BLOOM_PREFIX 24
-#define SBL_BLOOM_MAX_ENTRIES 65536
-#define SBL_BLOOM_HASHES 5
-#define SBL_LPM_MAX_ENTRIES 65536
+
 #define BLOCKED_PORT_WORDS 1024
 #define BL_SRC24_MASK 0xffffff00U
 
@@ -30,10 +27,7 @@ enum gbl_flags {
 	GBL_F_HAS_BROAD = 1 << 1,
 };
 
-enum bl_service_flags {
-	BL_F_ACTIVE = 1 << 0,
-	BL_F_HAS_BROAD = 1 << 1,
-};
+
 
 enum bloom_fp_stage {
 	BLOOM_FP_WHITELIST = 0,
@@ -47,16 +41,7 @@ struct bl_lpm_key {
 	__be32 src;
 };
 
-struct sbl_lpm_key {
-	__u32 prefixlen;
-	__be32 service_id;
-	__be32 src;
-};
 
-struct sbl_bloom_key {
-	__be32 service_id;
-	__be32 src24;
-};
 
 struct gbl_meta {
 	__u8 flags;
@@ -65,10 +50,7 @@ struct gbl_meta {
 
 _Static_assert(sizeof(struct bl_lpm_key) == 8,
 	       "bl_lpm_key size is part of the M4 map contract");
-_Static_assert(sizeof(struct sbl_lpm_key) == 12,
-	       "sbl_lpm_key size is part of the M4 map contract");
-_Static_assert(sizeof(struct sbl_bloom_key) == 8,
-	       "sbl_bloom_key size is part of the M4 map contract");
+
 _Static_assert(sizeof(struct gbl_meta) == 4,
 	       "gbl_meta size is part of the M4 map contract");
 
@@ -84,10 +66,8 @@ _Static_assert(sizeof(struct gbl_meta) == 4,
  * - Global bloom keys are /24 buckets. Prefixes 16..23 are expanded by the
  *   builder into their covered /24 keys; prefixes below 16, or snapshots that
  *   would over-fill the bloom, set GBL_F_HAS_BROAD instead of over-filling.
- * - Service blacklist keys are scoped by service_id and use the same /24 bloom
- *   bucket shape as AD-021 whitelist keys.
- * - GBL_F_ACTIVE/BL_F_ACTIVE are unset for empty scopes. Disabled or expired
- *   rows are omitted from both bloom and LPM maps.
+ * - GBL_F_ACTIVE is unset for empty scopes. Disabled or expired rows are
+ *   omitted from both bloom and LPM maps.
  */
 
 #ifdef __BPF__
@@ -145,50 +125,7 @@ struct {
 	},
 };
 
-struct sbl_bloom_inner_map_def {
-	__uint(type, BPF_MAP_TYPE_BLOOM_FILTER);
-	__uint(max_entries, SBL_BLOOM_MAX_ENTRIES);
-	__uint(map_extra, SBL_BLOOM_HASHES);
-	__type(value, struct sbl_bloom_key);
-};
 
-struct sbl_bloom_inner_map_def service_blacklist_bloom_0 SEC(".maps");
-struct sbl_bloom_inner_map_def service_blacklist_bloom_1 SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
-	__uint(max_entries, SERVICE_SLOTS);
-	__type(key, __u32);
-	__array(values, struct sbl_bloom_inner_map_def);
-} service_blacklist_bloom SEC(".maps") = {
-	.values = {
-		[0] = &service_blacklist_bloom_0,
-		[1] = &service_blacklist_bloom_1,
-	},
-};
-
-struct sbl_lpm_inner_map_def {
-	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
-	__uint(max_entries, SBL_LPM_MAX_ENTRIES);
-	__uint(map_flags, BPF_F_NO_PREALLOC);
-	__type(key, struct sbl_lpm_key);
-	__type(value, __u8);
-};
-
-struct sbl_lpm_inner_map_def service_blacklist_lpm_0 SEC(".maps");
-struct sbl_lpm_inner_map_def service_blacklist_lpm_1 SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
-	__uint(max_entries, SERVICE_SLOTS);
-	__type(key, __u32);
-	__array(values, struct sbl_lpm_inner_map_def);
-} service_blacklist_lpm SEC(".maps") = {
-	.values = {
-		[0] = &service_blacklist_lpm_0,
-		[1] = &service_blacklist_lpm_1,
-	},
-};
 
 struct blocked_port_bitmap_inner_map_def {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
