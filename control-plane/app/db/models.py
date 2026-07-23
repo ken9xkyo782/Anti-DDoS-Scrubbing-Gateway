@@ -80,7 +80,6 @@ class ChangeTrigger(StrEnum):
     plan = "plan"
     rule = "rule"
     whitelist = "whitelist"
-    blacklist = "blacklist"
     enable = "enable"
     disable = "disable"
     feed_manual = "feed_manual"
@@ -536,11 +535,6 @@ class ProtectedService(TimestampMixin, Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    blacklist_entries: Mapped[list["BlacklistEntry"]] = relationship(
-        back_populates="service",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
 
 
 class ServicePlan(TimestampMixin, Base):
@@ -717,20 +711,8 @@ class WhitelistEntry(Base):
 
 class BlacklistEntry(Base):
     __tablename__ = "blacklist_entry"
-    __table_args__ = (
-        CheckConstraint(
-            "(scope = 'service' AND service_id IS NOT NULL) OR "
-            "(scope = 'global' AND service_id IS NULL)",
-            name="ck_blacklist_scope_service_id",
-        ),
-    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    service_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("protected_service.id", ondelete="CASCADE"),
-        nullable=True,
-    )
     scope: Mapped[BlacklistScope] = mapped_column(blacklist_scope_enum, nullable=False)
     source: Mapped[BlacklistSource] = mapped_column(
         blacklist_source_enum,
@@ -749,7 +731,6 @@ class BlacklistEntry(Base):
         nullable=False,
     )
 
-    service: Mapped[ProtectedService | None] = relationship(back_populates="blacklist_entries")
     creator: Mapped[User | None] = relationship()
 
 
@@ -1037,13 +1018,7 @@ Index(
     func.lower(ProtectedService.name),
     unique=True,
 )
-Index(
-    "uq_blacklist_service_source_cidr",
-    BlacklistEntry.service_id,
-    BlacklistEntry.source_cidr,
-    unique=True,
-    postgresql_where=text("scope = 'service'"),
-)
+
 Index(
     "uq_blacklist_global_source_cidr",
     BlacklistEntry.source_cidr,

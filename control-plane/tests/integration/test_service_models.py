@@ -257,13 +257,6 @@ async def test_delete_service_cascades_rules_and_lists(db_session: AsyncSession)
                 source_cidr="198.51.100.7/32",
                 created_by=actor.id,
             ),
-            BlacklistEntry(
-                service_id=service.id,
-                scope=BlacklistScope.service,
-                source=BlacklistSource.manual,
-                source_cidr="45.0.0.0/8",
-                created_by=actor.id,
-            ),
         ]
     )
     await db_session.flush()
@@ -273,39 +266,6 @@ async def test_delete_service_cascades_rules_and_lists(db_session: AsyncSession)
 
     assert (await db_session.execute(select(func.count(AllowRule.id)))).scalar_one() == 0
     assert (await db_session.execute(select(func.count(WhitelistEntry.id)))).scalar_one() == 0
-    assert (await db_session.execute(select(func.count(BlacklistEntry.id)))).scalar_one() == 0
-
-
-async def test_blacklist_scope_service_id_xor_constraint(db_session: AsyncSession) -> None:
-    actor = await create_admin(db_session, "blacklist-xor-admin")
-    tenant = await create_tenant(db_session, "Blacklist XOR Tenant")
-    service = await create_service(db_session, tenant=tenant, actor=actor, name="blacklist")
-    db_session.add(
-        BlacklistEntry(
-            service_id=None,
-            scope=BlacklistScope.global_,
-            source=BlacklistSource.manual,
-            source_cidr="185.0.0.0/8",
-            created_by=actor.id,
-        )
-    )
-    await db_session.flush()
-
-    db_session.add(
-        BlacklistEntry(
-            service_id=None,
-            scope=BlacklistScope.service,
-            source=BlacklistSource.manual,
-            source_cidr="198.51.100.7/32",
-            created_by=actor.id,
-        )
-    )
-
-    with pytest.raises(IntegrityError) as exc_info:
-        await db_session.flush()
-
-    assert "ck_blacklist_scope_service_id" in str(exc_info.value)
-    assert service.id is not None
 
 
 async def test_service_rate_limit_fields(db_session: AsyncSession) -> None:

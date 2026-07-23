@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.db.models import AllowRule, BlacklistEntry, Protocol, ServicePlan, WhitelistEntry
+from app.db.models import AllowRule, Protocol, ServicePlan, WhitelistEntry
 from app.worker.applier import ServiceConfig, serialize_node_snapshot
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -41,7 +41,6 @@ def test_serialize_node_snapshot_matches_apply_snapshot_golden_fixture() -> None
             ),
         ),
         whitelist=(WhitelistEntry(source_cidr="192.51.100.0/24"),),
-        blacklist=(BlacklistEntry(source_cidr="203.0.113.5/32"),),
     )
     minimal = ServiceConfig(
         service_id=uuid4(),
@@ -61,7 +60,6 @@ def test_serialize_node_snapshot_matches_apply_snapshot_golden_fixture() -> None
         ),
         rules=(),
         whitelist=(),
-        blacklist=(),
     )
 
     snapshot = serialize_node_snapshot((rich, minimal))

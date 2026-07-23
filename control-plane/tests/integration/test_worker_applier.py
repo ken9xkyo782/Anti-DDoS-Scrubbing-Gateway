@@ -66,12 +66,6 @@ async def test_load_service_config_snapshots_populated_service(db_session: Async
             AllowRule(service_id=service.id, priority=10, protocol=Protocol.tcp),
             AllowRule(service_id=service.id, priority=20, protocol=Protocol.udp),
             WhitelistEntry(service_id=service.id, source_cidr="198.51.100.7/32"),
-            BlacklistEntry(
-                service_id=service.id,
-                scope=BlacklistScope.service,
-                source=BlacklistSource.manual,
-                source_cidr="45.0.0.0/8",
-            ),
         ]
     )
     await db_session.flush()
@@ -91,7 +85,6 @@ async def test_load_service_config_snapshots_populated_service(db_session: Async
     assert config.plan.id == plan.id
     assert len(config.rules) == 2
     assert len(config.whitelist) == 1
-    assert len(config.blacklist) == 1
     assert isinstance(config.rules, tuple)
     with pytest.raises(FrozenInstanceError):
         config.version = 8
@@ -113,7 +106,6 @@ async def test_load_service_config_snapshots_empty_child_collections(
     assert config.plan.id == plan.id
     assert config.rules == ()
     assert config.whitelist == ()
-    assert config.blacklist == ()
 
 
 async def test_load_service_config_returns_none_for_missing_service(
@@ -146,4 +138,3 @@ async def test_placeholder_applier_logs_and_succeeds(
     assert record.version == 3
     assert record.rule_count == 0
     assert record.whitelist_count == 0
-    assert record.blacklist_count == 0

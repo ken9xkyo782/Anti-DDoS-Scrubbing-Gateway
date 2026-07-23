@@ -109,12 +109,6 @@ async def create_apply_job(
                     dst_port_hi=443,
                 ),
                 WhitelistEntry(service=service, source_cidr="198.51.100.0/24"),
-                BlacklistEntry(
-                    service=service,
-                    scope=BlacklistScope.service,
-                    source=BlacklistSource.manual,
-                    source_cidr="203.0.113.12/32",
-                ),
             ]
         )
         await db.flush()

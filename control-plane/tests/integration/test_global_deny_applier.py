@@ -79,7 +79,7 @@ async def test_global_applier_writes_a_private_v2_snapshot_and_parses_result(
     result = await applier.apply_global(global_snapshot())
 
     assert (result.active_slot, result.node_map_version) == (1, 7)
-    assert snapshot_record.read_bytes()[8:16] == b"\x03\x00\x00\x00\x02\x00\x00\x00"
+    assert snapshot_record.read_bytes()[8:16] == b"\x04\x00\x00\x00\x02\x00\x00\x00"
     assert len(json.loads(argv_record.read_text())) == 1
     assert stat.S_IMODE(int(mode_record.read_text())) == 0o600
 

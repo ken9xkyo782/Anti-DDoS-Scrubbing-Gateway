@@ -205,7 +205,7 @@ async def test_add_global_blacklist_has_manual_source_and_no_version_bump(
         actor=admin,
     )
 
-    assert entry.service_id is None
+    assert entry.scope == BlacklistScope.global_
     assert entry.source == BlacklistSource.manual
     assert service.service.version == 1
 

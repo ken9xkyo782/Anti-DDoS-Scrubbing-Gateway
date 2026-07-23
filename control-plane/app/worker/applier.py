@@ -65,7 +65,6 @@ class ServiceConfig:
     plan: ServicePlan | None
     rules: tuple[AllowRule, ...]
     whitelist: tuple[WhitelistEntry, ...]
-    blacklist: tuple[BlacklistEntry, ...]
 
 
 class Applier(Protocol):
@@ -82,7 +81,6 @@ class PlaceholderApplier:
                 "version": config.version,
                 "rule_count": len(config.rules),
                 "whitelist_count": len(config.whitelist),
-                "blacklist_count": len(config.blacklist),
             },
         )
 
@@ -221,7 +219,6 @@ async def load_service_config(
                     selectinload(ProtectedService.plan),
                     selectinload(ProtectedService.rules),
                     selectinload(ProtectedService.whitelist_entries),
-                    selectinload(ProtectedService.blacklist_entries),
                 )
                 .where(ProtectedService.id == service_id)
             )
@@ -245,7 +242,6 @@ async def load_node_config(db: AsyncSession) -> tuple[ServiceConfig, ...]:
                     selectinload(ProtectedService.plan),
                     selectinload(ProtectedService.rules),
                     selectinload(ProtectedService.whitelist_entries),
-                    selectinload(ProtectedService.blacklist_entries),
                 )
                 .where(ProtectedService.enabled.is_(True))
                 .order_by(ProtectedService.dp_id)
@@ -351,7 +347,6 @@ def _service_config(service: ProtectedService) -> ServiceConfig:
         plan=service.plan,
         rules=tuple(sorted(service.rules, key=lambda rule: rule.priority)),
         whitelist=tuple(sorted(service.whitelist_entries, key=lambda entry: entry.source_cidr)),
-        blacklist=tuple(sorted(service.blacklist_entries, key=lambda entry: entry.source_cidr)),
     )
 
 

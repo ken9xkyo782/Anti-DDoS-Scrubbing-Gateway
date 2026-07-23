@@ -123,7 +123,6 @@ async def add_blacklist(
     entry = await _global_blacklist_entry_for_update(db, source)
     if entry is None:
         entry = BlacklistEntry(
-            service_id=None,
             scope=BlacklistScope.global_,
             source=BlacklistSource.manual,
             source_cidr=str(source),
@@ -248,7 +247,6 @@ async def _require_blacklist_entry(
     statement = select(BlacklistEntry).where(
         BlacklistEntry.scope == BlacklistScope.global_,
         BlacklistEntry.source_cidr == str(source),
-        BlacklistEntry.service_id.is_(None),
     )
     entry = (await db.execute(statement)).scalars().one_or_none()
     if entry is None:
@@ -269,7 +267,6 @@ async def _global_blacklist_entry_for_update(
                 select(BlacklistEntry)
                 .where(
                     BlacklistEntry.scope == BlacklistScope.global_,
-                    BlacklistEntry.service_id.is_(None),
                     BlacklistEntry.source_cidr == str(source),
                 )
                 .with_for_update()

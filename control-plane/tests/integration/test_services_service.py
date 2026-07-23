@@ -333,13 +333,6 @@ async def test_disable_retains_list_children(db_session: AsyncSession) -> None:
                 source_cidr="198.51.100.7/32",
                 created_by=admin.id,
             ),
-            BlacklistEntry(
-                service_id=record.service.id,
-                scope=BlacklistScope.service,
-                source=BlacklistSource.manual,
-                source_cidr="45.0.0.0/8",
-                created_by=admin.id,
-            ),
         ]
     )
     await db_session.flush()
@@ -351,7 +344,6 @@ async def test_disable_retains_list_children(db_session: AsyncSession) -> None:
     )
 
     assert (await db_session.execute(select(func.count(WhitelistEntry.id)))).scalar_one() == 1
-    assert (await db_session.execute(select(func.count(BlacklistEntry.id)))).scalar_one() == 1
 
 
 async def test_size_plan_accepts_boundaries_and_warns_on_oversubscription(
