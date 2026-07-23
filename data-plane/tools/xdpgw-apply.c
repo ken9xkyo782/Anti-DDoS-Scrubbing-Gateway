@@ -66,8 +66,7 @@
 #define APPLY_VIP_CONFIG_MAP_PIN APPLY_PIN_DIR "/vip_config_map"
 #define APPLY_GLOBAL_BLACKLIST_BLOOM_PIN APPLY_PIN_DIR "/global_blacklist_bloom"
 #define APPLY_GLOBAL_BLACKLIST_LPM_PIN APPLY_PIN_DIR "/global_blacklist_lpm"
-#define APPLY_SERVICE_BLACKLIST_BLOOM_PIN APPLY_PIN_DIR "/service_blacklist_bloom"
-#define APPLY_SERVICE_BLACKLIST_LPM_PIN APPLY_PIN_DIR "/service_blacklist_lpm"
+
 #define APPLY_UDP_BLOCKED_PORT_BITMAP_PIN APPLY_PIN_DIR "/udp_blocked_port_bitmap"
 #define APPLY_FAIR_CONFIG_MAP_PIN APPLY_PIN_DIR "/fair_config_map"
 #define APPLY_FAIR_NODE_CONFIG_PIN APPLY_PIN_DIR "/fair_node_config"
@@ -134,8 +133,7 @@ struct apply_fds {
 	int vip_config_map_fd;
 	int global_blacklist_bloom_fd;
 	int global_blacklist_lpm_fd;
-	int service_blacklist_bloom_fd;
-	int service_blacklist_lpm_fd;
+
 	int udp_blocked_port_bitmap_fd;
 	int fair_config_map_fd;
 	int fair_node_config_fd;
@@ -180,8 +178,6 @@ enum apply_service_outer {
 	APPLY_WHITELIST_BLOOM,
 	APPLY_WHITELIST_LPM,
 	APPLY_VIP_CONFIG_MAP,
-	APPLY_SERVICE_BLACKLIST_BLOOM,
-	APPLY_SERVICE_BLACKLIST_LPM,
 	APPLY_FAIR_CONFIG_MAP,
 	APPLY_SERVICE_OUTER_COUNT,
 };
@@ -335,6 +331,7 @@ static inline int parse_service(struct rdcur *c, struct cfg_service *svc)
 
 	if (parse_source_list(c, &svc->wl_count, &svc->wl) != 0)
 		return -1;
+	/* consumed and dropped; removed in schema v4 */
 	if (parse_source_list(c, &svc->sbl_count, &svc->sbl) != 0)
 		return -1;
 
@@ -668,7 +665,6 @@ static inline int apply_install_inner(int outer_fd, uint32_t slot, int inner_fd)
 
 static inline int apply_write_service(int service_fd, int rule_fd, int wl_bloom_fd,
 					     int wl_lpm_fd, int vip_fd,
-					     int sbl_bloom_fd, int sbl_lpm_fd,
 					     int fair_fd,
 					     const struct cfg_service *service,
 					     uint64_t k, uint64_t ref_pkt,
@@ -757,33 +753,6 @@ static inline int apply_write_service(int service_fd, int rule_fd, int wl_bloom_
 			return -1;
 	}
 
-	for (i = 0; i < service->sbl_count; i++) {
-		const struct cfg_source *source = &service->sbl[i];
-		struct sbl_lpm_key lpm_key = {
-			.prefixlen = 32 + source->prefixlen,
-			.service_id = htonl(service_id),
-			.src = source->addr,
-		};
-		__u8 present = 1;
-
-		if (source->prefixlen > 32) {
-			fprintf(stderr, "xdpgw-apply: invalid service blacklist prefix\n");
-			return -1;
-		}
-		if (source->prefixlen >= SBL_BLOOM_PREFIX) {
-			struct sbl_bloom_key bloom_key = {
-				.service_id = htonl(service_id),
-				.src24 = htonl(ntohl(source->addr) & BL_SRC24_MASK),
-			};
-
-			if (bpf_map_update_elem(sbl_bloom_fd, NULL, &bloom_key,
-						BPF_ANY) != 0)
-				return -1;
-		}
-		if (bpf_map_update_elem(sbl_lpm_fd, &lpm_key, &present, BPF_ANY) != 0)
-			return -1;
-	}
-
 	budget = fair_budget(service->committed_bps, service->ceiling_bps, k,
 				     ref_pkt);
 	fair_config.version = APPLY_CONFIG_VERSION;
@@ -831,8 +800,6 @@ static inline int build_inactive_slot(struct apply_fds *fds,
 	outers[APPLY_WHITELIST_BLOOM] = fds->whitelist_bloom_fd;
 	outers[APPLY_WHITELIST_LPM] = fds->whitelist_lpm_fd;
 	outers[APPLY_VIP_CONFIG_MAP] = fds->vip_config_map_fd;
-	outers[APPLY_SERVICE_BLACKLIST_BLOOM] = fds->service_blacklist_bloom_fd;
-	outers[APPLY_SERVICE_BLACKLIST_LPM] = fds->service_blacklist_lpm_fd;
 	outers[APPLY_FAIR_CONFIG_MAP] = fds->fair_config_map_fd;
 	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++)
 		fresh[i] = -1;
@@ -849,8 +816,6 @@ static inline int build_inactive_slot(struct apply_fds *fds,
 					fresh[APPLY_WHITELIST_BLOOM],
 					fresh[APPLY_WHITELIST_LPM],
 					fresh[APPLY_VIP_CONFIG_MAP],
-					fresh[APPLY_SERVICE_BLACKLIST_BLOOM],
-					fresh[APPLY_SERVICE_BLACKLIST_LPM],
 					fresh[APPLY_FAIR_CONFIG_MAP],
 					&node->services[i], k, ref_pkt,
 					&sum_committed) != 0)
@@ -909,8 +874,6 @@ static inline void apply_service_outers(const struct apply_fds *fds,
 	outers[APPLY_WHITELIST_BLOOM] = fds->whitelist_bloom_fd;
 	outers[APPLY_WHITELIST_LPM] = fds->whitelist_lpm_fd;
 	outers[APPLY_VIP_CONFIG_MAP] = fds->vip_config_map_fd;
-	outers[APPLY_SERVICE_BLACKLIST_BLOOM] = fds->service_blacklist_bloom_fd;
-	outers[APPLY_SERVICE_BLACKLIST_LPM] = fds->service_blacklist_lpm_fd;
 	outers[APPLY_FAIR_CONFIG_MAP] = fds->fair_config_map_fd;
 }
 
@@ -1099,8 +1062,6 @@ static inline int verify_slot(struct apply_fds *fds)
 	outers[APPLY_WHITELIST_BLOOM] = fds->whitelist_bloom_fd;
 	outers[APPLY_WHITELIST_LPM] = fds->whitelist_lpm_fd;
 	outers[APPLY_VIP_CONFIG_MAP] = fds->vip_config_map_fd;
-	outers[APPLY_SERVICE_BLACKLIST_BLOOM] = fds->service_blacklist_bloom_fd;
-	outers[APPLY_SERVICE_BLACKLIST_LPM] = fds->service_blacklist_lpm_fd;
 	outers[APPLY_FAIR_CONFIG_MAP] = fds->fair_config_map_fd;
 	for (i = 0; i < APPLY_SERVICE_OUTER_COUNT; i++)
 		inners[i] = -1;
@@ -1328,8 +1289,6 @@ static void init_apply_fds(struct apply_fds *fds)
 		.vip_config_map_fd = -1,
 		.global_blacklist_bloom_fd = -1,
 		.global_blacklist_lpm_fd = -1,
-		.service_blacklist_bloom_fd = -1,
-		.service_blacklist_lpm_fd = -1,
 		.udp_blocked_port_bitmap_fd = -1,
 		.fair_config_map_fd = -1,
 		.fair_node_config_fd = -1,
@@ -1348,8 +1307,6 @@ static void close_apply_fds(struct apply_fds *fds)
 		&fds->vip_config_map_fd,
 		&fds->global_blacklist_bloom_fd,
 		&fds->global_blacklist_lpm_fd,
-		&fds->service_blacklist_bloom_fd,
-		&fds->service_blacklist_lpm_fd,
 		&fds->udp_blocked_port_bitmap_fd,
 		&fds->fair_config_map_fd,
 		&fds->fair_node_config_fd,
@@ -1398,11 +1355,6 @@ static int open_apply_pins(struct apply_fds *fds)
 			   &fds->global_blacklist_bloom_fd) != 0 ||
 	    open_apply_pin("global_blacklist_lpm", APPLY_GLOBAL_BLACKLIST_LPM_PIN,
 			   &fds->global_blacklist_lpm_fd) != 0 ||
-	    open_apply_pin("service_blacklist_bloom",
-			   APPLY_SERVICE_BLACKLIST_BLOOM_PIN,
-			   &fds->service_blacklist_bloom_fd) != 0 ||
-	    open_apply_pin("service_blacklist_lpm", APPLY_SERVICE_BLACKLIST_LPM_PIN,
-			   &fds->service_blacklist_lpm_fd) != 0 ||
 	    open_apply_pin("udp_blocked_port_bitmap",
 			   APPLY_UDP_BLOCKED_PORT_BITMAP_PIN,
 			   &fds->udp_blocked_port_bitmap_fd) != 0 ||

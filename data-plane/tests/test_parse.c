@@ -6154,8 +6154,6 @@ static struct apply_fds apply_fds_for_env(struct test_env *env)
 		.vip_config_map_fd = env->vip_config_map_fd,
 		.global_blacklist_bloom_fd = env->global_blacklist_bloom_fd,
 		.global_blacklist_lpm_fd = env->global_blacklist_lpm_fd,
-		.service_blacklist_bloom_fd = env->service_blacklist_bloom_fd,
-		.service_blacklist_lpm_fd = env->service_blacklist_lpm_fd,
 		.udp_blocked_port_bitmap_fd = env->blocked_port_bitmap_fd,
 		.fair_config_map_fd = env->fair_config_map_fd,
 		.fair_node_config_fd = env->fair_node_config_fd,
@@ -6876,12 +6874,10 @@ static int test_global_apply_carries_service_outers_and_bitmap(void)
 		APPLY_WHITELIST_BLOOM,
 		APPLY_WHITELIST_LPM,
 		APPLY_VIP_CONFIG_MAP,
-		APPLY_SERVICE_BLACKLIST_BLOOM,
-		APPLY_SERVICE_BLACKLIST_LPM,
 		APPLY_FAIR_CONFIG_MAP,
 	};
 	int outer_fds[] = {
-		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0,
 	};
 	struct node_cfg node = global_deny_cfg(entries, 1);
 	struct fair_node_config before_node = {
@@ -6915,8 +6911,6 @@ static int test_global_apply_carries_service_outers_and_bitmap(void)
 	outer_fds[APPLY_WHITELIST_BLOOM] = env.whitelist_bloom_fd;
 	outer_fds[APPLY_WHITELIST_LPM] = env.whitelist_lpm_fd;
 	outer_fds[APPLY_VIP_CONFIG_MAP] = env.vip_config_map_fd;
-	outer_fds[APPLY_SERVICE_BLACKLIST_BLOOM] = env.service_blacklist_bloom_fd;
-	outer_fds[APPLY_SERVICE_BLACKLIST_LPM] = env.service_blacklist_lpm_fd;
 	outer_fds[APPLY_FAIR_CONFIG_MAP] = env.fair_config_map_fd;
 	for (__u32 i = 0; !err && i < APPLY_SERVICE_OUTER_COUNT; i++)
 		err = global_outer_id(outer_fds[i], slot0, &before_id[i]);
