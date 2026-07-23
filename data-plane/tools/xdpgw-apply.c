@@ -95,7 +95,7 @@ struct cfg_service {
 	uint32_t dp_id;
 	uint8_t enabled;
 	uint8_t wl_flags;
-	uint8_t bl_flags;
+	uint8_t reserved0;
 	uint8_t vip_flags;
 	uint64_t committed_bps;
 	uint64_t ceiling_bps;
@@ -302,7 +302,7 @@ static inline int parse_service(struct rdcur *c, struct cfg_service *svc)
 	    rd_u32le(c, &svc->dp_id) != 0 ||
 	    rd_u8(c, &svc->enabled) != 0 ||
 	    rd_u8(c, &svc->wl_flags) != 0 ||
-	    rd_u8(c, &svc->bl_flags) != 0 ||
+	    rd_u8(c, &svc->reserved0) != 0 ||
 	    rd_u64le(c, &svc->committed_bps) != 0 ||
 	    rd_u64le(c, &svc->ceiling_bps) != 0 ||
 	    rd_u64le(c, &svc->vip_pps) != 0 ||
@@ -312,6 +312,9 @@ static inline int parse_service(struct rdcur *c, struct cfg_service *svc)
 	    rd_u64le(c, &svc->service_bps) != 0 ||
 	    rd_u8(c, &svc->svc_rl_flags) != 0 ||
 	    rd_u16le(c, &rule_count) != 0)
+		return -1;
+
+	if (svc->reserved0 != 0)
 		return -1;
 
 	if (rule_count > RULE_MAX)
@@ -678,7 +681,7 @@ static inline int apply_write_service(int service_fd, int rule_fd, int wl_bloom_
 		.service_id = service->dp_id,
 		.enabled = service->enabled,
 		.wl_flags = service->wl_flags,
-		.bl_flags = service->bl_flags,
+		.reserved0 = 0,
 	};
 	struct rule_block block = {
 		.version = APPLY_CONFIG_VERSION,
@@ -1085,7 +1088,7 @@ static inline int verify_slot(struct apply_fds *fds)
 		if (bpf_map_lookup_elem(inners[APPLY_SERVICE_MAP], &key, &value) != 0 ||
 		    value.service_id != service->dp_id || !value.enabled ||
 		    value.wl_flags != service->wl_flags ||
-		    value.bl_flags != service->bl_flags ||
+		    value.reserved0 != 0 ||
 		    bpf_map_lookup_elem(inners[APPLY_RULE_BLOCK_MAP], &service->dp_id,
 					&block) != 0 ||
 		    block.version != APPLY_CONFIG_VERSION ||

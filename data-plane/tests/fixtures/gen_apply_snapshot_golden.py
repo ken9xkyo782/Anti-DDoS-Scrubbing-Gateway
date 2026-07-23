@@ -32,14 +32,14 @@ def be32(ipv4: str) -> bytes:
     return socket.inet_aton(ipv4)
 
 
-def service(*, dst_prefixlen, dst_ip, dp_id, enabled, wl_flags, bl_flags,
+def service(*, dst_prefixlen, dst_ip, dp_id, enabled, wl_flags, reserved0=0, bl_flags=0,
             committed_bps, ceiling_bps, vip_pps, vip_bps, vip_flags,
             service_pps, service_bps, svc_rl_flags,
             rules, whitelist, sbl) -> bytes:
     b = struct.pack("<I", dst_prefixlen)
     b += be32(dst_ip)
     b += struct.pack("<I", dp_id)
-    b += struct.pack("<BBB", enabled, wl_flags, bl_flags)
+    b += struct.pack("<BBB", enabled, wl_flags, reserved0 or bl_flags)
     b += struct.pack("<QQ", committed_bps, ceiling_bps)
     b += struct.pack("<QQ", vip_pps, vip_bps)
     b += struct.pack("<B", vip_flags)

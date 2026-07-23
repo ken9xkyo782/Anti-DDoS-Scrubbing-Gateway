@@ -30,7 +30,7 @@ def snapshot_service(dst_ip: str, dp_id: int) -> bytes:
         dp_id=dp_id,
         enabled=1,
         wl_flags=0,
-        bl_flags=0,
+        reserved0=0,
         committed_bps=0,
         ceiling_bps=500_000_000,
         vip_pps=0,

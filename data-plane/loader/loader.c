@@ -962,8 +962,8 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 		return -1;
 	}
 
-	printf("seeded service_inner_0/1 with SERVICE_DEST=%s service_id=%u enabled=1 wl_flags=0x%x bl_flags=0x%x\n",
-	       service_dest, val.service_id, val.wl_flags, val.bl_flags);
+	printf("seeded service_inner_0/1 with SERVICE_DEST=%s service_id=%u enabled=1 wl_flags=0x%x reserved0=0x%x\n",
+	       service_dest, val.service_id, val.wl_flags, val.reserved0);
 	if (seed_match_all_rule_blocks(skel, val.service_id) != 0)
 		return -1;
 	if (seed_fairness_for_service(skel, val.service_id, fair_seed) != 0)

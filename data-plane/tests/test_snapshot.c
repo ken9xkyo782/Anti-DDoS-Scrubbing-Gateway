@@ -47,7 +47,7 @@ static int check_service_golden(const char *path)
 	CHECK(a->dp_id == 42, "svc0 dp_id");
 	CHECK(a->enabled == 1, "svc0 enabled");
 	CHECK(a->wl_flags == WL_F_ACTIVE, "svc0 wl_flags");
-	CHECK(a->bl_flags == 0, "svc0 bl_flags");
+	CHECK(a->reserved0 == 0, "svc0 reserved0");
 	CHECK(a->committed_bps == 1000000000ULL, "svc0 committed_bps");
 	CHECK(a->ceiling_bps == 2000000000ULL, "svc0 ceiling_bps");
 	CHECK(a->vip_pps == 1000, "svc0 vip_pps");
