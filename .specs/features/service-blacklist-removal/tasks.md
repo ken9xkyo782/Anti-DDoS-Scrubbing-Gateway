@@ -378,16 +378,16 @@ telemetry golden fixture.
 
 **Done when**:
 
-- [ ] `BLOOM_FP_SERVICE` removed; `BLOOM_STAT_MAX` 3 → 2; `BLOOM_FP_WHITELIST=0` and
+- [x] `BLOOM_FP_SERVICE` removed; `BLOOM_STAT_MAX` 3 → 2; `BLOOM_FP_WHITELIST=0` and
       `BLOOM_FP_GLOBAL=1` **keep their values** (D-SBR-6 — no remap anywhere)
-- [ ] Both `dpstat.c` name tables (186-189, 650-654) drop the `service_blacklist` entry
-- [ ] `dpstat snapshot --json` emits exactly `{whitelist, global_blacklist}` under `node.bloom_stats`
-- [ ] `telemetry_snapshot_golden.json` regenerated with the two-key shape; the CP reader unit test
+- [x] Both `dpstat.c` name tables (186-189, 650-654) drop the `service_blacklist` entry
+- [x] `dpstat snapshot --json` emits exactly `{whitelist, global_blacklist}` under `node.bloom_stats`
+- [x] `telemetry_snapshot_golden.json` regenerated with the two-key shape; the CP reader unit test
       passes against it
-- [ ] `alert_sources.py` `bloom_hit_lpm_miss` behaviour unchanged
-- [ ] Gates pass: `make -C data-plane bpf skel loader apply dpstat`, `make -C data-plane test`, and
+- [x] `alert_sources.py` `bloom_hit_lpm_miss` behaviour unchanged
+- [x] Gates pass: `make -C data-plane bpf skel loader apply dpstat`, `make -C data-plane test`, and
       CP `ruff check . && ruff format --check . && mypy app/ && pytest -q -m unit`
-- [ ] Test count: DP `B - 1` pass; CP unit count unchanged
+- [x] Test count: DP `B - 1` pass; CP unit count unchanged
 
 **Verify**: `sudo ./build/dpstat snapshot --json | jq '.node.bloom_stats | keys'` →
 `["global_blacklist","whitelist"]`
@@ -412,19 +412,19 @@ the admin global-blacklist page and the legacy bloom label intact.
 
 **Done when**:
 
-- [ ] `BlacklistTab.tsx` deleted
-- [ ] `ServiceDetailPage.tsx`: import (16), `Tabs.Trigger` (111), `Tabs.Content` + child (180-181)
+- [x] `BlacklistTab.tsx` deleted
+- [x] `ServiceDetailPage.tsx`: import (16), `Tabs.Trigger` (111), `Tabs.Content` + child (180-181)
       removed, and the page description (71) no longer says "blacklists"
-- [ ] `useLists.ts`: `useBlacklist`, `useAddBlacklist`, `useRemoveBlacklist` (56-101) removed
-- [ ] `types.ts`: `BlacklistScope` narrowed to `'global'`; `BlacklistEntryResponse.service_id` removed
-- [ ] `BloomFpPanel.tsx`: the `service_blacklist` label is **kept** with a comment marking it
+- [x] `useLists.ts`: `useBlacklist`, `useAddBlacklist`, `useRemoveBlacklist` (56-101) removed
+- [x] `types.ts`: `BlacklistScope` narrowed to `'global'`; `BlacklistEntryResponse.service_id` removed
+- [x] `BloomFpPanel.tsx`: the `service_blacklist` label is **kept** with a comment marking it
       legacy-row-only (D-SBR-7); `BloomFpPanel.test.tsx`'s three-key case is **kept** and renamed to
       state it is a historical-row regression test
-- [ ] `ServiceDetailPage.test.tsx` blacklist-tab cases (248, 427, 471) and the `useLists.test.ts`
+- [x] `ServiceDetailPage.test.tsx` blacklist-tab cases (248, 427, 471) and the `useLists.test.ts`
       blacklist cases removed
-- [ ] `GlobalBlacklistPage` and its hooks untouched and still green
-- [ ] Gate passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build`
-- [ ] Test count: recorded (drops by exactly the removed cases; 225 was the last recorded total)
+- [x] `GlobalBlacklistPage` and its hooks untouched and still green
+- [x] Gate passes: `cd control-plane/frontend && npm run lint && npm run typecheck && npm run test -- --run && npm run build`
+- [x] Test count: recorded (drops by exactly the removed cases; 225 was the last recorded total)
 
 **Verify**: service detail page renders with Whitelist + Rules tabs and no Blacklist tab; admin
 global blacklist page unchanged
@@ -448,20 +448,20 @@ blacklist-filters requirements in line with the shipped system.
 
 **Done when**:
 
-- [ ] PRD §6.6 describes one global admin-owned scope; §6.5 drops the "service blacklist" bypass
+- [x] PRD §6.6 describes one global admin-owned scope; §6.5 drops the "service blacklist" bypass
       clause but keeps the global one; tenant capability lines (72, 117, 123, 136, 149) no longer
       promise tenant-scoped blacklist
-- [ ] `docs/danh-gia-hieu-nang-data-plane.md` §8.3 marks B2 done **and states that its per-packet
+- [x] `docs/danh-gia-hieu-nang-data-plane.md` §8.3 marks B2 done **and states that its per-packet
       saving is zero** because the branch was gated off by `bl_flags = 0`; §8.6 row 5 notes the
       "~15–25%" is carried by A4 and B1 alone
-- [ ] `data-plane/README.md` map inventory and seed-env table drop the sbl maps and
+- [x] `data-plane/README.md` map inventory and seed-env table drop the sbl maps and
       `XDPGW_SEED_SBL_CIDR`
-- [ ] `TESTING.md` corrected: deny-stage conventions drop "service-scoped bloom/LPM maps"; the corpus
+- [x] `TESTING.md` corrected: deny-stage conventions drop "service-scoped bloom/LPM maps"; the corpus
       line drops "global/service"; the stale "**v2** contract" reference becomes **v4**; the stale
       dp-unit count is reconciled with the measured one
-- [ ] ROADMAP and blacklist-filters BLK-03/BLK-04 + the BL-02 posture annotated **superseded by
+- [x] ROADMAP and blacklist-filters BLK-03/BLK-04 + the BL-02 posture annotated **superseded by
       this feature** rather than left contradicting it
-- [ ] No doc still claims tenants can blacklist
+- [x] No doc still claims tenants can blacklist
 
 **Verify**: `grep -rn "service blacklist\|service-scoped blacklist" PRD.md docs/ data-plane/README.md .specs/codebase/` returns only superseded-annotated hits
 
@@ -482,21 +482,21 @@ blacklist-filters requirements in line with the shipped system.
 
 **Done when**:
 
-- [ ] `make -C data-plane test` → `B - 1` pass
-- [ ] `sudo make -C data-plane smoke` green (redirect, fairness, apply, blocked-port, bypass)
-- [ ] `sudo make -C data-plane applybulk` and `sudo make -C data-plane blbulk` green (map definitions
+- [x] `make -C data-plane test` → `B - 1` pass
+- [x] `sudo make -C data-plane smoke` green (redirect, fairness, apply, blocked-port, bypass)
+- [x] `sudo make -C data-plane applybulk` and `sudo make -C data-plane blbulk` green (map definitions
       changed ⇒ TESTING.md requires the blacklist scale gate)
-- [ ] `make -C data-plane bench` **within ±1%** of the 2026-07-23 baseline, same repeat/rounds; a
+- [x] `make -C data-plane bench` **within ±1%** of the 2026-07-23 baseline, same repeat/rounds; a
       speedup is not expected and its absence is not a failure (spec P3, amended)
-- [ ] CP full gate green except the 6 pre-existing reds on record (2 M6-Alerting + 4 user-delete
+- [x] CP full gate green except the 6 pre-existing reds on record (2 M6-Alerting + 4 user-delete
       ordering pollution) — each confirmed pre-existing, not new
-- [ ] FE gate green
-- [ ] `alembic upgrade head` → `downgrade -1` → `upgrade head` clean on a both-scopes seeded DB
-- [ ] Residue grep over `data-plane/`, `control-plane/app/`, `control-plane/frontend/src/` for
+- [x] FE gate green
+- [x] `alembic upgrade head` → `downgrade -1` → `upgrade head` clean on a both-scopes seeded DB
+- [x] Residue grep over `data-plane/`, `control-plane/app/`, `control-plane/frontend/src/` for
       `sbl_|service_blacklist|BlacklistScope.service|XDPGW_SEED_SBL_CIDR` returns **only** the
       retained legacy UI label and its comment
-- [ ] A v3 snapshot is rejected by the v4 apply tool with maps provably untouched
-- [ ] STATE.md updated with measured counts and the bench result
+- [x] A v3 snapshot is rejected by the v4 apply tool with maps provably untouched
+- [x] STATE.md updated with measured counts and the bench result
 
 **Verify**: all of the above, recorded in the execution summary
 
