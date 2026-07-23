@@ -63,9 +63,6 @@ static int check_service_golden(const char *path)
 	CHECK(a->wl_count == 1, "svc0 wl_count");
 	CHECK(a->wl[0].prefixlen == 24, "svc0 wl prefixlen");
 	CHECK(a->wl[0].addr == inet_addr("192.51.100.0"), "svc0 wl addr");
-	CHECK(a->sbl_count == 1, "svc0 sbl_count");
-	CHECK(a->sbl[0].prefixlen == 32, "svc0 sbl prefixlen");
-	CHECK(a->sbl[0].addr == inet_addr("203.0.113.5"), "svc0 sbl addr");
 
 	const struct cfg_service *b = &node.services[1];
 
@@ -80,7 +77,6 @@ static int check_service_golden(const char *path)
 	CHECK(b->vip_flags == 0, "svc1 vip_flags");
 	CHECK(b->rule_count == 0, "svc1 rule_count");
 	CHECK(b->wl_count == 0, "svc1 wl_count");
-	CHECK(b->sbl_count == 0, "svc1 sbl_count");
 
 	err = 0;
 #undef CHECK

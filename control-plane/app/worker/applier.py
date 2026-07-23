@@ -27,7 +27,7 @@ from app.services.feed_reconcile import MAX_GLOBAL_DENY_ENTRIES, GlobalDenySnaps
 logger = logging.getLogger(__name__)
 
 APPLY_SNAPSHOT_MAGIC = b"XDPGWAP1"
-APPLY_SNAPSHOT_SCHEMA_VERSION = 3
+APPLY_SNAPSHOT_SCHEMA_VERSION = 4
 APPLY_SNAPSHOT_KIND_SERVICE_FULL = 1
 APPLY_SNAPSHOT_KIND_GLOBAL_DENY = 2
 _GBPS = 1_000_000_000
@@ -258,7 +258,7 @@ async def load_node_config(db: AsyncSession) -> tuple[ServiceConfig, ...]:
 
 
 def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
-    """Encode the explicit v3 SERVICE_FULL apply_snapshot.h wire format."""
+    """Encode the explicit v4 SERVICE_FULL apply_snapshot.h wire format."""
     payload = bytearray()
     payload.extend(APPLY_SNAPSHOT_MAGIC)
     payload.extend(
@@ -272,11 +272,10 @@ def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
     for service in node:
         dst_prefixlen, dst_addr = _cidr_parts(service.cidr_or_ip)
         whitelist = tuple(_cidr_parts(entry.source_cidr) for entry in service.whitelist)
-        blacklist = tuple(_cidr_parts(entry.source_cidr) for entry in service.blacklist)
         vip_flags = _vip_flags(service)
         svc_rl_flags = _svc_rl_flags(service)
         wl_flags = _list_flags(whitelist, active=bool(whitelist))
-        bl_flags = 0
+        reserved0 = 0
         committed_bps, ceiling_bps = _plan_rates(service.plan)
 
         payload.extend(
@@ -287,7 +286,7 @@ def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
                 service.dp_id,
                 int(service.enabled),
                 wl_flags,
-                bl_flags,
+                reserved0,
                 committed_bps,
                 ceiling_bps,
                 service.vip_pps or 0,
@@ -312,7 +311,6 @@ def serialize_node_snapshot(node: tuple[ServiceConfig, ...]) -> bytes:
                 )
             )
         _append_source_list(payload, whitelist)
-        _append_source_list(payload, blacklist)
     return bytes(payload)
 
 

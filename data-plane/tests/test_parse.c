@@ -6759,6 +6759,97 @@ static int test_apply_same_snapshot_toggles_slots_and_versions(void)
 	return err;
 }
 
+static int test_apply_rejects_v3_schema(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = 3,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 7);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		if (apply_node_cfg(&fds, &node) == 0)
+			err = -1;
+	}
+	if (!err)
+		err = expect_active_config(&env, 0, 7);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_rejects_non_zero_reserved0(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct pkt_frame frame;
+	struct pkt_meta meta;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 retval = 0;
+	int err;
+
+	if (build_default_udp_frame(&frame) != 0)
+		return -1;
+	apply_cfg_match_all(&service);
+	service.reserved0 = 1;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = seed_default_enabled_service(&env);
+	if (!err)
+		err = set_active(&env, 0, 7);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		if (apply_node_cfg(&fds, &node) == 0)
+			err = -1;
+	}
+	if (!err)
+		err = expect_active_config(&env, 0, 7);
+	if (!err)
+		err = run_frame_current_maps(&env, &frame, &retval);
+	if (!err)
+		err = expect_redirect_meta(&env, &meta, DEFAULT_SERVICE_ID, 0);
+
+	env_close(&env);
+	return err;
+}
+
 static struct node_cfg global_deny_cfg(struct cfg_source *entries,
 				       __u32 count)
 {
@@ -7412,6 +7503,9 @@ int main(void)
 		  test_apply_interruption_before_commit_preserves_live_slot },
 		{ "apply same snapshot toggles slots and versions",
 		  test_apply_same_snapshot_toggles_slots_and_versions },
+		{ "apply rejects v3 schema", test_apply_rejects_v3_schema },
+		{ "apply rejects non zero reserved0",
+		  test_apply_rejects_non_zero_reserved0 },
 		{ "global apply rebuilds hot path blacklist",
 		  test_global_apply_rebuilds_hot_path_blacklist },
 		{ "global apply carries service outers and bitmap",

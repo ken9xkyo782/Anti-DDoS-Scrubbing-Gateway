@@ -11,7 +11,7 @@
  */
 #define APPLY_SNAPSHOT_MAGIC "XDPGWAP1"
 #define APPLY_SNAPSHOT_MAGIC_SIZE 8U
-#define APPLY_SNAPSHOT_SCHEMA_VERSION 3U
+#define APPLY_SNAPSHOT_SCHEMA_VERSION 4U
 
 /* magic[8], schema_version: le32, snapshot_kind: le32 */
 #define APPLY_SNAPSHOT_HEADER_SIZE 16U
@@ -40,7 +40,7 @@
  *                           This is NOT the control-plane service UUID.
  *   enabled: u8
  *   wl_flags: u8
- *   bl_flags: u8
+ *   reserved0: u8        -- must be written 0; readers reject non-zero
  *   committed_bps: le64
  *   ceiling_bps: le64
  *   vip_pps: le64        -- service-level VIP ceiling (0 when VIP_F_PPS_SET unset)
@@ -59,8 +59,6 @@
  *   wl_count: le32
  *   wl[wl_count]:
  *     prefixlen: le32, src_addr: be32
- *   sbl_count: le32
- *   sbl[sbl_count]: prefixlen: le32, src_addr: be32
  *
  * VIP limits are per service (one vip_config row keyed by dp_id), not per
  * whitelist entry -- matching struct vip_config in whitelist.h and the
@@ -73,6 +71,5 @@
 #define APPLY_SNAPSHOT_SERVICE_FIXED_SIZE 67U
 #define APPLY_SNAPSHOT_RULE_SIZE 10U
 #define APPLY_SNAPSHOT_WHITELIST_ENTRY_SIZE 8U
-#define APPLY_SNAPSHOT_SERVICE_BLACKLIST_ENTRY_SIZE 8U
 
 #endif

@@ -108,8 +108,6 @@ struct cfg_service {
 	struct cfg_rule rules[RULE_MAX];
 	uint32_t wl_count;
 	struct cfg_source *wl;
-	uint32_t sbl_count;
-	struct cfg_source *sbl;
 };
 
 struct node_cfg {
@@ -250,7 +248,6 @@ static inline void free_node_cfg(struct node_cfg *node)
 	if (node->services) {
 		for (uint32_t i = 0; i < node->service_count; i++) {
 			free(node->services[i].wl);
-			free(node->services[i].sbl);
 		}
 		free(node->services);
 	}
@@ -333,9 +330,6 @@ static inline int parse_service(struct rdcur *c, struct cfg_service *svc)
 	}
 
 	if (parse_source_list(c, &svc->wl_count, &svc->wl) != 0)
-		return -1;
-	/* consumed and dropped; removed in schema v4 */
-	if (parse_source_list(c, &svc->sbl_count, &svc->sbl) != 0)
 		return -1;
 
 	return 0;
@@ -693,7 +687,7 @@ static inline int apply_write_service(int service_fd, int rule_fd, int wl_bloom_
 	uint16_t i;
 
 	if (service->dst_prefixlen > 32 || service->dp_id == 0 ||
-	    service->enabled > 1 || service->rule_count > RULE_MAX ||
+	    service->enabled > 1 || service->reserved0 != 0 || service->rule_count > RULE_MAX ||
 	    service->committed_bps > service->ceiling_bps) {
 		fprintf(stderr, "xdpgw-apply: invalid service %u configuration\n",
 			service->dp_id);
