@@ -154,8 +154,7 @@ map phía trước rồi mới bị loại: `bogon_drop` 335 ns so với từ ch
   tầng tốn ktime + lookup (+spin-lock). Hướng đề xuất: **giữ một tầng cap sớm và rẻ** làm lá
   chắn volumetric (xem mục 6), **cắt các tầng chồng lấn phía sau** (per-rule svc_rl, VIP
   ceiling) nếu deployment không thực sự dùng ⇒ tiết kiệm ~1–2 ktime + ~3–4 lookup mỗi gói.
-- **B2. Bỏ blacklist theo-service** nếu chỉ dùng global blacklist ⇒ deny-filter bớt một cặp
-  bloom+LPM.
+- **B2. Bỏ blacklist theo-service** (✅ **Đã hoàn thành**: gỡ bỏ toàn bộ nhánh service-blacklist, sbl bloom/LPM maps và wire payload ở feature `service-blacklist-removal`). Tác động ns/packet thực tế = **0** do nhánh trước đây đã được gate bởi `bl_flags = 0` (D-SBR-3); lợi ích chính là dọn dẹp RAM, map capacity và đơn giản hóa API/UI.
 - **B3. Lấy mẫu `svc_stat` thay vì cập nhật mỗi gói** ([svc_stat.h](../data-plane/src/svc_stat.h)):
   hiện mỗi gói được nhận ghi 1 hash update; chuyển sang đếm per-CPU + sample 1/N.
 - **B4. Bỏ hẳn whitelist/VIP** nếu tính năng không dùng (gate như A4, hoặc biên dịch tuỳ chọn).
@@ -184,7 +183,7 @@ map phía trước rồi mới bị loại: `bogon_drop` 335 ns so với từ ch
 | 2 | A2 + A3 (dedupe lookup/ktime) | ~10–15% accept | Rất thấp | Không |
 | 3 | D1 (mốc production) | — (đo lường) | Không | Không |
 | 4 | C1 (committed per-CPU) | Mở rộng đa lõi | Vừa | Không (giảm độ chính xác token) |
-| 5 | A4 + B1/B2 (gate & hợp nhất) | ~15–25% | Vừa | Có, tuỳ deployment |
+| 5 | A4 + B1 (gate & hợp nhất; B2 đã xong, B2 ns=0) | ~15–25% (gánh bởi A4 + B1) | Vừa | Có, tuỳ deployment |
 | 6 | C2 (bỏ double-indirection) | Lớn | Cao | Không |
 
 \* Rủi ro kỹ thuật thấp, nhưng cần chốt thay đổi **chính sách** whitelist-vs-bogon/amp (xem A1).

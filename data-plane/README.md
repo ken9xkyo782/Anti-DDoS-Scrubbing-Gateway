@@ -55,8 +55,6 @@ SERVICE_DEST=10.0.0.0/24 make run IFACE=<in-veth> OUT=<out-veth>
 Optional deny seed variables let you demo blacklist behavior before the M4 worker exists:
 
 - `XDPGW_SEED_GBL_CIDR=<source-cidr>` seeds one global blacklist CIDR in slot 0.
-- `XDPGW_SEED_SBL_CIDR=<source-cidr>` seeds one service-scoped blacklist CIDR in slot 0.
-  Set `SERVICE_DEST` with this variable so the loader can mark the demo service active.
 - `XDPGW_SEED_BLOCKED_PORT=<udp-source-port>` sets one slot-0 UDP blocked-port bitmap bit.
 
 The loader seed path is intentionally small. It writes one CIDR or port for smoke testing and leaves
@@ -186,7 +184,7 @@ bounded BL-08 residual self-DoS mode; alerting on repeated VIP ceiling hits belo
 
 ## Deny filters and blacklist
 
-`src/blacklist.h` is the M4 map-build contract for global and service-scoped blacklist maps. The deny
+`src/blacklist.h` is the M4 map-build contract for global blacklist maps (service-scoped blacklist superseded and removed in feature `service-blacklist-removal`). The deny
 stage runs after whitelist miss and before allow rules, so a whitelist hit can bypass deny filters only
 when the service has an active whitelist and VIP ceiling.
 
@@ -267,7 +265,7 @@ Counter maps reset when the XDP program is reloaded. Consumers must compute delt
 interpret values as lifetime totals. Sampling budget is per CPU; a rate of `256` permits up to
 `256 * online_cpu_count` events per second across the node, with burst `64` per CPU by default. Exact
 drop counters stay correct even when samples are suppressed or lost. `dpstat counters` also prints
-the `bloom_hit_lpm_miss` rows for whitelist, global blacklist, service blacklist, and total.
+the `bloom_hit_lpm_miss` rows for whitelist, global blacklist, and total.
 
 ## Per-service telemetry snapshot
 
@@ -300,10 +298,10 @@ increment per-service clean counters.
 
 ## Apply helper (xdpgw-apply)
 
-`xdpgw-apply` is the write side of the control plane → data plane apply path. The loader pins the 14
-slotted config maps (`service_map`, `rule_block_map`, `whitelist_bloom`/`_lpm`, `vip_config_map`,
-`global_blacklist_bloom`/`_lpm`, `service_blacklist_bloom`/`_lpm`, `udp_blocked_port_bitmap`,
-`fair_config_map`, `fair_node_config`, `gbl_meta`, `active_config`) under `/sys/fs/bpf/xdp_gateway/`;
+`xdpgw-apply` is the write side of the control plane → data plane apply path. The loader pins the slotted
+config maps (`service_map`, `rule_block_map`, `whitelist_bloom`/`_lpm`, `vip_config_map`,
+`global_blacklist_bloom`/`_lpm`, `udp_blocked_port_bitmap`, `fair_config_map`, `fair_node_config`,
+`gbl_meta`, `active_config`) under `/sys/fs/bpf/xdp_gateway/`;
 runtime-state maps, the static inner maps, and `tx_devmap` stay owned by the loader and are never opened
 here.
 

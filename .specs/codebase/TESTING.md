@@ -312,10 +312,9 @@ scenario; the live smoke remains a constrained single-service transition check.
 ### Deny-stage conventions
 
 Deny-stage tests seed services first, then use the blacklist helpers to populate slotted global
-blacklist bloom/LPM maps, service-scoped bloom/LPM maps, `gbl_meta`, and the UDP blocked-port
-bitmap. Use lower-level bloom-only helpers for deterministic false-positive induction. A bloom hit
-with an LPM miss must increment exactly one `bloom_stats` stage counter and must not change
-drop-reason counters.
+blacklist bloom/LPM maps, `gbl_meta`, and the UDP blocked-port bitmap. Use lower-level bloom-only helpers for
+deterministic false-positive induction. A bloom hit with an LPM miss must increment exactly one
+`bloom_stats` stage counter and must not change drop-reason counters.
 
 Packet sources in new non-bogon tests must come from the named public pools in
 `data-plane/tests/pkt_build.h`, such as `TEST_SRC_PUB_A`, `TEST_SRC_PUB_B`, and
@@ -348,7 +347,7 @@ untouched; two applies of one snapshot bump `version` V→V+1→V+2 with identic
 injected through `apply_test_set_fault()`, compiled only under `-DXDPGW_APPLY_TEST`; the helper binary
 has no runtime switch that can force a production apply to fail.
 
-The wire format is the `apply_snapshot.h` **v2** contract (magic `XDPGWAP1`, `schema_version`, a
+The wire format is the `apply_snapshot.h` **v4** contract (magic `XDPGWAP1`, `schema_version`, a
 `SERVICE_FULL | GLOBAL_DENY` kind, then either the per-service records — service-level VIP and the
 `dp_id` surrogate — or the sorted global-deny `{prefixlen, address_be32}` entries with the desired
 revision). `make apply` runs `build/test_snapshot` against **both** committed fixtures
@@ -377,8 +376,8 @@ the slotted config-map set changes.
 `dp-unit` tests use adversarial synthetic frames, including IPv6, unsupported EtherTypes, runt Ethernet,
 malformed IPv4, first and later IPv4 fragments, truncated L4 headers, ARP, single VLAN, QinQ, too-deep
 VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rule rate limits,
-whitelist scoped-match and VIP ceiling cases, blacklist amp-port, bogon, bitmap, global/service
+whitelist scoped-match and VIP ceiling cases, blacklist amp-port, bogon, bitmap, global
 bloom-to-LPM, bloom false-positive, sampling budget, and `xdpgw-apply` build/verify/flip, fresh-inner,
 fail-closed rollback, and `GLOBAL_DENY` inverse-carry-forward/alternation cases. The current quick suite
-has **130** tests plus the `build/test_snapshot` service+global golden self-tests. Each verdict task
+has **136** tests plus the `build/test_snapshot` service+global golden self-tests. Each verdict task
 states the expected passing test count to prevent silent deletions or skipped coverage.

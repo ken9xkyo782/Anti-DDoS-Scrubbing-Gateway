@@ -69,7 +69,7 @@ Gateway hoạt động inbound-only, giữ nguyên header L3 của packet sạch
 ### 3.1. Mục tiêu sản phẩm
 
 - Bảo vệ các IP/CIDR được admin cấp phát cho tenant trước tấn công volumetric L3/L4.
-- Cho phép tenant tự cấu hình service, allow-rule, whitelist, blacklist, và theo dõi tình trạng traffic theo thời gian thực.
+- Cho phép tenant tự cấu hình service, allow-rule, whitelist, và theo dõi tình trạng traffic theo thời gian thực.
 - Cho phép admin quản trị tenant, user, IP/CIDR, service toàn hệ thống, whitelist/blacklist, và threat intelligence feed.
 - Đảm bảo data-plane có hiệu năng cao bằng native XDP/eBPF, fail-fast verdict pipeline, bloom filter, LPM trie, per-CPU counter/rate-limit, và cập nhật map an toàn qua worker.
 
@@ -120,7 +120,7 @@ Gateway hoạt động inbound-only, giữ nguyên header L3 của packet sạch
 ### 5.2. Nguyên tắc cách ly tenant
 
 - Tenant chỉ được tạo service trên IP/CIDR đã được admin cấp phát.
-- Tenant không được xem, sửa, xóa service, whitelist, blacklist, telemetry chi tiết của tenant khác.
+- Tenant không được xem, sửa, xóa service, whitelist, telemetry chi tiết của tenant khác.
 - Mọi API ghi dữ liệu phải kiểm tra ownership theo `tenant_id` và phạm vi `AllocatedCIDR`.
 - Lỗi phân quyền phải fail-closed: trả lỗi truy cập, không trả dữ liệu partial của tenant khác.
 
@@ -195,7 +195,7 @@ Chính sách precedence:
 - Chỉ áp dụng sau khi packet đã parse hợp lệ trong phạm vi IPv4 non-fragment.
 - IPv6, malformed IPv4, fragment, EtherType không hỗ trợ vẫn bị drop trước khi whitelist được xét.
 - Whitelist/VIP yêu cầu packet match một `ProtectedService` enabled; IP đích chưa khai báo service vẫn bị `service_miss`.
-- Whitelist/VIP bypass bogon check, global blacklist, service blacklist, threat-intel feed, UDP amplification policy và allow-rule — **chỉ trong phạm vi service/tenant sở hữu whitelist**; lookup data-plane dùng key có `service_id` nên không bypass chéo sang service khác.
+- Whitelist/VIP bypass bogon check, global blacklist, threat-intel feed, UDP amplification policy và allow-rule — **chỉ trong phạm vi service/tenant sở hữu whitelist**; lookup data-plane dùng key có `service_id` nên không bypass chéo sang service khác.
 - Whitelist **không** chỉnh sửa hay loại entry khỏi global blacklist/threat-feed map; bypass được đánh giá per-packet theo scope. Whitelist một IP đang nằm trong threat feed phải phát **cảnh báo + audit**, và admin có cờ chính sách cấm whitelist IP thuộc feed.
 - Whitelist/VIP vẫn chịu VIP ceiling aggregate PPS/BPS per service để giảm rủi ro spoofing whitelist.
 
@@ -208,10 +208,9 @@ Acceptance criteria:
 
 ### 6.6. Blacklist
 
-Blacklist gồm 2 phạm vi:
+Blacklist áp dụng phạm vi toàn hệ thống (global admin-owned scope; service-scoped blacklist đã gỡ bỏ ở B2):
 
 - Global blacklist: do admin hoặc threat intelligence feed tạo.
-- Service/tenant blacklist: do tenant hoặc admin tạo trong phạm vi service/tenant.
 
 Yêu cầu:
 
@@ -377,8 +376,8 @@ Ghi chú kỹ thuật:
 | `rule_block_map` | array/hash theo `service_id` | Lưu block allow-rule tối đa 16 rule/service |
 | `global_blacklist_bloom` | bloom/bitmap | Bypass LPM khi chắc chắn không match global blacklist |
 | `global_blacklist_lpm` | LPM trie | Confirm global blacklist CIDR |
-| `service_blacklist_bloom` | bloom/bitmap | Bypass LPM service blacklist |
-| `service_blacklist_lpm` | LPM trie | Confirm service/tenant blacklist CIDR |
+| `service_blacklist_bloom` | *(Gỡ bỏ ở B2)* | Formerly bypass LPM service blacklist |
+| `service_blacklist_lpm` | *(Gỡ bỏ ở B2)* | Formerly confirm service/tenant blacklist CIDR |
 | `whitelist_bloom` | bloom/bitmap | Bypass LPM khi không match whitelist/VIP |
 | `whitelist_lpm` | LPM trie, key = `service_id` + source CIDR | Confirm whitelist/VIP theo scope service (không bypass chéo service) |
 | `udp_blocked_port_bitmap` | array/bitmap | Dynamic source-port block |

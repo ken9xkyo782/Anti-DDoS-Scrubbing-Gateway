@@ -1,5 +1,7 @@
 # Blacklist (Bloom + LPM) & Deny Filters Specification
 
+> **Notice (2026-07-23):** Service-scoped blacklist functionality (BLK-03, BLK-04 service part) and BL-02 service posture have been **superseded by feature `service-blacklist-removal` (B2)**. Blacklist is now a single global admin-owned scope.
+
 **Milestone:** M3 — Policy enforcement & fairness
 **Feature #3 of M3** (the deny-filter stage of the §8.2 pipeline: amplification ports, bogon check,
 dynamic blocked-port bitmap, global + service blacklist)
