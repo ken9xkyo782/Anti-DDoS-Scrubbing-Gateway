@@ -24,7 +24,6 @@
 #define BL_STATE_BOGON 3
 #define BL_STATE_AMP_BITMAP 4
 #define BL_STATE_GLOBAL_HIT 5
-#define BL_STATE_SERVICE_HIT 6
 
 enum gbl_flags {
 	GBL_F_ACTIVE = 1 << 0,
@@ -300,17 +299,6 @@ static __always_inline int bl_record_drop(struct pkt_meta *meta, __u8 state,
 	return record_drop(meta, reason);
 }
 
-static __always_inline struct sbl_bloom_key sbl_bloom_key(__u32 service_id,
-							  __be32 src)
-{
-	struct sbl_bloom_key key = {
-		.service_id = bpf_htonl(service_id),
-		.src24 = src & bpf_htonl(BL_SRC24_MASK),
-	};
-
-	return key;
-}
-
 static __always_inline int gbl_bloom_maybe(__u32 slot, __be32 src,
 					   int *maybe)
 {
@@ -350,50 +338,8 @@ static __always_inline int gbl_lpm_hit(__u32 slot, __be32 src, int *hit)
 	return 0;
 }
 
-static __always_inline int sbl_bloom_maybe(__u32 slot, __u32 service_id,
-					   __be32 src, int *maybe)
-{
-	struct sbl_bloom_key key = sbl_bloom_key(service_id, src);
-	void *inner = bpf_map_lookup_elem(&service_blacklist_bloom, &slot);
-	long ret;
-
-	if (!inner)
-		return -1;
-
-	ret = bpf_map_peek_elem(inner, &key);
-	if (ret == 0) {
-		*maybe = 1;
-		return 0;
-	}
-	if (ret == -ENOENT) {
-		*maybe = 0;
-		return 0;
-	}
-	return -1;
-}
-
-static __always_inline int sbl_lpm_hit(__u32 slot, __u32 service_id,
-				       __be32 src, int *hit)
-{
-	struct sbl_lpm_key key = {
-		.prefixlen = 64,
-		.service_id = bpf_htonl(service_id),
-		.src = src,
-	};
-	void *inner = bpf_map_lookup_elem(&service_blacklist_lpm, &slot);
-	__u8 *present;
-
-	if (!inner)
-		return -1;
-
-	present = bpf_map_lookup_elem(inner, &key);
-	*hit = present != 0;
-	return 0;
-}
-
 static __always_inline int deny_filter_stage(struct xdp_md *ctx,
-					     struct pkt_meta *meta, __u32 slot,
-					     __u8 bl_flags)
+					     struct pkt_meta *meta, __u32 slot)
 {
 	__u16 sport = bpf_ntohs(meta->sport);
 	struct gbl_meta *global_meta;
@@ -439,7 +385,7 @@ static __always_inline int deny_filter_stage(struct xdp_md *ctx,
 				return bl_record_drop(meta, BL_STATE_NONE,
 						      DR_MAP_ERROR);
 			if (!maybe)
-				goto service_blacklist;
+				goto clean;
 			bloom_consulted = 1;
 		}
 
@@ -451,33 +397,6 @@ static __always_inline int deny_filter_stage(struct xdp_md *ctx,
 					      DR_BLACKLIST_DROP);
 		if (bloom_consulted)
 			bump_bloom_fp(BLOOM_FP_GLOBAL);
-	}
-
-service_blacklist:
-	if (bl_flags & BL_F_ACTIVE) {
-		int bloom_consulted = 0;
-		int maybe = 1;
-		int hit = 0;
-
-		if (!(bl_flags & BL_F_HAS_BROAD)) {
-			if (sbl_bloom_maybe(slot, meta->service_id,
-					    meta->src_ip, &maybe) != 0)
-				return bl_record_drop(meta, BL_STATE_NONE,
-						      DR_MAP_ERROR);
-			if (!maybe)
-				goto clean;
-			bloom_consulted = 1;
-		}
-
-		if (sbl_lpm_hit(slot, meta->service_id, meta->src_ip,
-				&hit) != 0)
-			return bl_record_drop(meta, BL_STATE_NONE,
-					      DR_MAP_ERROR);
-		if (hit)
-			return bl_record_drop(meta, BL_STATE_SERVICE_HIT,
-					      DR_BLACKLIST_DROP);
-		if (bloom_consulted)
-			bump_bloom_fp(BLOOM_FP_SERVICE);
 	}
 
 clean:

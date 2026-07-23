@@ -338,13 +338,13 @@ static __always_inline int vip_bucket_admit(const struct vip_config *config,
 
 static __always_inline int whitelist_miss(struct xdp_md *ctx,
 					  struct pkt_meta *meta, __u32 slot,
-					  __u8 bl_flags, int record_state)
+					  int record_state)
 {
 	if (record_state) {
 		meta->wl_state = WL_STATE_MISS;
 		write_test_meta(meta);
 	}
-	return deny_filter_stage(ctx, meta, slot, bl_flags);
+	return deny_filter_stage(ctx, meta, slot);
 }
 
 static __always_inline int whitelist_stage(struct xdp_md *ctx,
@@ -356,21 +356,20 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 	struct vip_config *config;
 	__u64 pkt_len = data_end - data;
 	__u8 wl_flags = service->wl_flags;
-	__u8 bl_flags = service->bl_flags;
 	int bloom_consulted = 0;
 	int admitted;
 	int maybe = 1;
 	int hit = 0;
 
 	if (!(wl_flags & WL_F_ACTIVE))
-		return whitelist_miss(ctx, meta, slot, bl_flags, 0);
+		return whitelist_miss(ctx, meta, slot, 0);
 
 	if (!(wl_flags & WL_F_HAS_BROAD)) {
 		if (wl_bloom_maybe(slot, meta->service_id, meta->src_ip,
 				   &maybe) != 0)
 			return record_drop(meta, DR_MAP_ERROR);
 		if (!maybe)
-			return whitelist_miss(ctx, meta, slot, bl_flags, 1);
+			return whitelist_miss(ctx, meta, slot, 1);
 		bloom_consulted = 1;
 	}
 
@@ -379,14 +378,14 @@ static __always_inline int whitelist_stage(struct xdp_md *ctx,
 	if (!hit) {
 		if (bloom_consulted)
 			bump_bloom_fp(BLOOM_FP_WHITELIST);
-		return whitelist_miss(ctx, meta, slot, bl_flags, 1);
+		return whitelist_miss(ctx, meta, slot, 1);
 	}
 
 	config = vip_config_lookup(slot, meta->service_id);
 	if (!config)
 		return record_drop(meta, DR_MAP_ERROR);
 	if (!(config->flags & (VIP_F_PPS_SET | VIP_F_BPS_SET)))
-		return whitelist_miss(ctx, meta, slot, bl_flags, 1);
+		return whitelist_miss(ctx, meta, slot, 1);
 
 	admitted = vip_bucket_admit(config, meta, pkt_len);
 	if (admitted < 0)
