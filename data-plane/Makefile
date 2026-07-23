@@ -22,6 +22,8 @@ TEST_SRC := $(TEST_DIR)/test_parse.c
 TEST_BIN := $(BUILD_DIR)/test_parse
 BULK_SRC := $(TEST_DIR)/bulk_blacklist.c
 BULK_BIN := $(BUILD_DIR)/bulk_blacklist
+BENCH_SRC := $(TEST_DIR)/bench_dp.c
+BENCH_BIN := $(BUILD_DIR)/bench_dp
 APPLY_SRC := $(TOOLS_DIR)/xdpgw-apply.c
 APPLY := $(BUILD_DIR)/xdpgw-apply
 TEST_SNAPSHOT_SRC := $(TEST_DIR)/test_snapshot.c
@@ -39,7 +41,7 @@ LIBBPF_CFLAGS := $(shell pkg-config --cflags libbpf 2>/dev/null)
 LIBBPF_LIBS := $(shell pkg-config --libs libbpf 2>/dev/null || echo -lbpf)
 USER_CFLAGS := -g -O2 -Wall -Wextra -I$(BUILD_DIR) -I$(SRC_DIR) $(LIBBPF_CFLAGS)
 
-.PHONY: all bpf skel loader dpstat apply applybulk globalapplysmoke globalapplyscale test smoke blbulk clean run
+.PHONY: all bpf skel loader dpstat apply applybulk globalapplysmoke globalapplyscale test smoke blbulk bench clean run
 
 all: bpf skel loader
 
@@ -109,6 +111,12 @@ $(TEST_BIN): $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_D
 
 blbulk: $(BULK_BIN)
 	$(BULK_BIN)
+
+bench: $(BENCH_BIN)
+	$(BENCH_BIN)
+
+$(BENCH_BIN): $(BENCH_SRC) $(TEST_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/drop_event.h $(SRC_DIR)/whitelist.h $(SRC_DIR)/fairness.h $(SRC_DIR)/node_control.h $(APPLY_SRC) $(APPLY_HDRS) $(TEST_SKEL) | $(BUILD_DIR)
+	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz
 
 $(BULK_BIN): $(BULK_SRC) $(TEST_DIR)/pkt_build.h $(SRC_DIR)/blacklist.h $(SRC_DIR)/rules.h $(SRC_DIR)/service.h $(SKEL) | $(BUILD_DIR)
 	$(CC) $(USER_CFLAGS) -I$(SRC_DIR) -I$(TEST_DIR) $< -o $@ $(LIBBPF_LIBS) -lelf -lz

@@ -7656,6 +7656,7 @@ static int test_nexthop_bypass_verbatim(void)
 	return err;
 }
 
+#ifndef TEST_PARSE_NO_MAIN
 int main(void)
 {
 		const struct test_case tests[] = {
@@ -7931,3 +7932,4 @@ int main(void)
 	printf("%zu passed\n", passed);
 	return 0;
 }
+#endif /* TEST_PARSE_NO_MAIN */
