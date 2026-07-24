@@ -24,7 +24,7 @@ PASS_PIN=/sys/fs/bpf/xdp_gateway_fairness_pass_$$
 LOADER_PID=
 FRAME_LEN=60
 POSSIBLE_CPUS=$(awk -F, '{ for (i = 1; i <= NF; i++) { split($i, r, "-"); n += r[2] ? r[2] - r[1] + 1 : 1 } } END { print n }' /sys/devices/system/cpu/possible)
-COMMITTED_BPS=$((FRAME_LEN * 2))
+COMMITTED_BPS=$((FRAME_LEN * 2 * POSSIBLE_CPUS))
 CEILING_BPS=$((COMMITTED_BPS + FRAME_LEN * 2 * POSSIBLE_CPUS))
 
 cleanup()
