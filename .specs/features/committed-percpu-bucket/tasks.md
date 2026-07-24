@@ -100,21 +100,21 @@ against **one** `service_id` — plus its `make benchmc` target.
 
 **Done when**:
 
-- [ ] Sweeps `N ∈ {1,2,4,8,16,…}` up to available cores, stopping at the real core count (CPB-01)
-- [ ] Benches **both** `clean_redirect` (subject) and `bogon_drop` (lock-free control) each run
-- [ ] Reports per-thread `opts.duration` median, wall-clock aggregate Mpps, scaling efficiency, and
+- [x] Sweeps `N ∈ {1,2,4,8,16,…}` up to available cores, stopping at the real core count (CPB-01)
+- [x] Benches **both** `clean_redirect` (subject) and `bogon_drop` (lock-free control) each run
+- [x] Reports per-thread `opts.duration` median, wall-clock aggregate Mpps, scaling efficiency, and
       **relative efficiency** (subject ÷ control) (CPB-02, D-042-2/3)
-- [ ] Prints min/median/max spread across rounds rather than hiding it (CPB-04)
-- [ ] **CPU-spread self-check**: after each N-run, reads per-CPU `counter_map` across all possible
+- [x] Prints min/median/max spread across rounds rather than hiding it (CPB-04)
+- [x] **CPU-spread self-check**: after each N-run, reads per-CPU `counter_map` across all possible
       CPUs and asserts **exactly N slots advanced**; a failed check **aborts** instead of printing a
       number (CPB-01, CPB-04)
-- [ ] Control-curve check wired: if the lock-free control also flattens, the harness says so
-- [ ] `--cpus a,b,c` override; default `0..N-1` with an SMT caveat in the banner (design §4.4)
-- [ ] Non-root / no-JIT fails with `bench_dp`'s diagnostics, never a misleading number (CPB-05)
-- [ ] Coordinator does all map seeding with **no worker threads alive** (design §4.1)
-- [ ] No fairness reseeding added — `fair_default_config()` suffices (design F2, CPB-03)
-- [ ] Gate check passes: `make -C data-plane bpf skel loader apply dpstat && make -C data-plane benchmc`
-- [ ] **Self-verified**: `sudo build/bench_mc 50000 3 --max-threads 2` prints two rows with
+- [x] Control-curve check wired: if the lock-free control also flattens, the harness says so
+- [x] `--cpus a,b,c` override; default `0..N-1` with an SMT caveat in the banner (design §4.4)
+- [x] Non-root / no-JIT fails with `bench_dp`'s diagnostics, never a misleading number (CPB-05)
+- [x] Coordinator does all map seeding with **no worker threads alive** (design §4.1)
+- [x] No fairness reseeding added — `fair_default_config()` suffices (design F2, CPB-03)
+- [x] Gate check passes: `make -C data-plane bpf skel loader apply dpstat && make -C data-plane benchmc`
+- [x] **Self-verified**: `sudo build/bench_mc 50000 3 --max-threads 2` prints two rows with
       `cpus_advanced ok` on both
 
 **Tests**: none — userspace measurement tooling; the DP-established pattern for `dpstat`
@@ -142,16 +142,16 @@ and **decide R1**: is the contention measurable at all?
 
 **Done when**:
 
-- [ ] Full sweep run as root on an idle host; host, kernel, CPU model and `bpf_jit_enable` recorded
-- [ ] Before-curve table pasted into design §4.5, replacing the illustrative sketch (CPB-07)
-- [ ] Every row's `cpus_advanced` check passed
-- [ ] **R1 verdict recorded, one of:**
+- [x] Full sweep run as root on an idle host; host, kernel, CPU model and `bpf_jit_enable` recorded
+- [x] Before-curve table pasted into design §4.5, replacing the illustrative sketch (CPB-07)
+- [x] Every row's `cpus_advanced` check passed
+- [x] **R1 verdict recorded, one of:**
       **(a) PROCEED** — control scales ≈ linearly while the subject flattens ⇒ contention is real and
       measurable; or
       **(b) ESCALATE** — control also flattens ⇒ the harness/host cannot measure this. **Stop and
       report to the user**; C1 may still land on correctness/simplification grounds, but the scaling
       claim must be marked *unverified* in every document and `CPB-16` reduced to "no regression".
-- [ ] Two runs agree within the reported spread (CPB-04)
+- [x] Two runs agree within the reported spread (CPB-04)
 
 **Tests**: dp-integration (privileged, not parallel-safe)
 **Gate**: build
@@ -175,9 +175,9 @@ callers of a single `read_percpu_bucket_cpu0(env, fd, key, struct rl_bucket *out
 
 **Done when**:
 
-- [ ] One helper; both existing readers delegate to it; no behaviour change
-- [ ] Gate check passes: `make -C data-plane test`
-- [ ] Test count: **137** tests pass — unchanged (no silent deletions)
+- [x] One helper; both existing readers delegate to it; no behaviour change
+- [x] Gate check passes: `make -C data-plane test`
+- [x] Test count: **137** tests pass — unchanged (no silent deletions)
 
 **Tests**: dp-unit
 **Gate**: quick
@@ -206,29 +206,29 @@ the FAIR-22 probe are deleted; committed tests move to per-CPU reads.
 
 **Done when**:
 
-- [ ] `svc_committed_state` = `BPF_MAP_TYPE_PERCPU_HASH`, key `__u32`, value `struct rl_bucket`,
+- [x] `svc_committed_state` = `BPF_MAP_TYPE_PERCPU_HASH`, key `__u32`, value `struct rl_bucket`,
       `max_entries` still `FAIR_CONFIG_MAX_ENTRIES` (CPB-08)
-- [ ] `struct fair_committed_bucket` + its `_Static_assert` + the "top-level HASH is required"
+- [x] `struct fair_committed_bucket` + its `_Static_assert` + the "top-level HASH is required"
       comment deleted (CPB-09)
-- [ ] `fair_committed_admit()` rewritten per design C-1 — per-CPU share via
+- [x] `fair_committed_admit()` rewritten per design C-1 — per-CPU share via
       `rl_burst(committed_bps, rl_cpu_count(), tnr)`, lazy version reset, first-packet seed decides
       in-call (CPB-10, CPB-11, CPB-12)
-- [ ] `fair_admit_stage()` **untouched**: same `FAIR_COMMITTED`, same fall-through to burst → node
+- [x] `fair_admit_stage()` **untouched**: same `FAIR_COMMITTED`, same fall-through to burst → node
       headroom, same frozen drop reasons (CPB-13); `committed_bps == 0` still admits nothing (CPB-14)
-- [ ] No added map ops or `bpf_ktime_get_ns()` calls; lock/unlock removed (CPB-15)
-- [ ] `fair_test_spin_lock_mutate()`, `FAIR_TEST_TRIGGER_SPIN_LOCK`, `FAIR_TEST_LOCK_SERVICE_ID`,
+- [x] No added map ops or `bpf_ktime_get_ns()` calls; lock/unlock removed (CPB-15)
+- [x] `fair_test_spin_lock_mutate()`, `FAIR_TEST_TRIGGER_SPIN_LOCK`, `FAIR_TEST_LOCK_SERVICE_ID`,
       `test_fair_spin_lock_probe()` and its call site all deleted (CPB-09, CPB-20)
-- [ ] `test_fair_committed_spin_lock_mutates_tokens` deleted **and** its registry entry removed (−1)
-- [ ] **New** `test_fair_committed_state_is_percpu`: `bpf_map_get_info_by_fd` on
+- [x] `test_fair_committed_spin_lock_mutates_tokens` deleted **and** its registry entry removed (−1)
+- [x] **New** `test_fair_committed_state_is_percpu`: `bpf_map_get_info_by_fd` on
       `svc_committed_state` asserts `type == BPF_MAP_TYPE_PERCPU_HASH` and `value_size == 32` (+1,
       machine-verifies CPB-08)
-- [ ] `test_fair_committed_exact_admit_count` and `test_fair_zero_committed_uses_burst_only` keep
+- [x] `test_fair_committed_exact_admit_count` and `test_fair_zero_committed_uses_burst_only` keep
       their arithmetic; only the reader call and `tokens` → `bps_tokens` change (CPB-18, design F3)
-- [ ] `clear_u32_hash_map(svc_committed_state_fd)` left **as-is** and verified working (CPB-19, F4)
-- [ ] M3 gate scenario (flood A / starve B) still passes bit-for-bit (CPB-23)
-- [ ] `grep -rn "spin_lock" data-plane/src data-plane/tests` → **0 hits**
-- [ ] Gate check passes: `make -C data-plane test`
-- [ ] Test count: **137** tests pass (−1 probe, +1 percpu assertion — no silent deletions)
+- [x] `clear_u32_hash_map(svc_committed_state_fd)` left **as-is** and verified working (CPB-19, F4)
+- [x] M3 gate scenario (flood A / starve B) still passes bit-for-bit (CPB-23)
+- [x] `grep -rn "spin_lock" data-plane/src data-plane/tests` → **0 hits**
+- [x] Gate check passes: `make -C data-plane test`
+- [x] Test count: **137** tests pass (−1 probe, +1 percpu assertion — no silent deletions)
 
 **Tests**: dp-unit
 **Gate**: quick
@@ -262,15 +262,15 @@ asserts what it exists to assert.
 
 **Done when**:
 
-- [ ] `COMMITTED_BPS=$((FRAME_LEN * 2 * POSSIBLE_CPUS))`; `CEILING_BPS` and
+- [x] `COMMITTED_BPS=$((FRAME_LEN * 2 * POSSIBLE_CPUS))`; `CEILING_BPS` and
       `XDPGW_NODE_CLEAN_CAPACITY_BPS` formulas untouched (CPB-21, design F5)
-- [ ] Live run: **exactly 2 frames redirected** (unchanged assertion)
-- [ ] Live run: `service_ceiling_drop`, `congestion_drop`, `ingress_cap_drop` **all positive**;
+- [x] Live run: **exactly 2 frames redirected** (unchanged assertion)
+- [x] Live run: `service_ceiling_drop`, `congestion_drop`, `ingress_cap_drop` **all positive**;
       observed values recorded (design F5 predicts 2 / 10 / 4) (CPB-22)
-- [ ] **R3**: if the ingress-cap margin proves fragile, lower `XDPGW_FAIR_K` in the smoke — do
+- [x] **R3**: if the ingress-cap margin proves fragile, lower `XDPGW_FAIR_K` in the smoke — do
       **not** revert the rescale; record whichever path was taken
-- [ ] Gate check passes: `make -C data-plane test && sudo make -C data-plane smoke`
-- [ ] Test count: 137 dp-unit + redirect/fairness/apply smokes all pass
+- [x] Gate check passes: `make -C data-plane test && sudo make -C data-plane smoke`
+- [x] Test count: 137 dp-unit + redirect/fairness/apply smokes all pass
 
 **Tests**: dp-integration (privileged, not parallel-safe)
 **Gate**: full
@@ -294,12 +294,12 @@ three fairness reasons non-zero.
 
 **Done when**:
 
-- [ ] Same host, kernel and build flags as T2 — stated explicitly (design §8)
-- [ ] After-curve recorded; **relative efficiency at max N materially better than T2's** (CPB-16)
-- [ ] `make -C data-plane bench` shows `clean_redirect` **≤ ~620 ns** — no single-core regression
+- [x] Same host, kernel and build flags as T2 — stated explicitly (design §8)
+- [x] After-curve recorded; **relative efficiency at max N materially better than T2's** (CPB-16)
+- [x] `make -C data-plane bench` shows `clean_redirect` **≤ ~620 ns** — no single-core regression
       (CPB-15, CPB-32)
-- [ ] R4 noted when quoting the delta: the test object also lost the probe's entry overhead
-- [ ] If R1 was escalated in T2, this task records "no regression" only and says the scaling claim
+- [x] R4 noted when quoting the delta: the test object also lost the probe's entry overhead
+- [x] If R1 was escalated in T2, this task records "no regression" only and says the scaling claim
       is unverified
 
 **Tests**: dp-integration (privileged, not parallel-safe)
@@ -327,14 +327,14 @@ CM-04 framing), `.specs/project/ROADMAP.md` (M3 fairness entry + AD-025 line)
 
 **Done when**:
 
-- [ ] All six rows of the spec's Superseded Requirements table edited in place (CPB-24)
-- [ ] Each amendment states both halves: isolation unchanged and structural; full-rate delivery now
+- [x] All six rows of the spec's Superseded Requirements table edited in place (CPB-24)
+- [x] Each amendment states both halves: isolation unchanged and structural; full-rate delivery now
       RSS-dependent (CPB-25)
-- [ ] The sub-MTU pathology is quantified concretely, naming fall-through-to-burst (not drop)
+- [x] The sub-MTU pathology is quantified concretely, naming fall-through-to-burst (not drop)
       (CPB-26)
-- [ ] **R6 respected**: the *engineering* statement is amended; the customer-facing commercial
+- [x] **R6 respected**: the *engineering* statement is amended; the customer-facing commercial
       wording in PRD §15 is flagged inline for the user, not silently rewritten
-- [ ] No document still claims exactness or RSS-independence
+- [x] No document still claims exactness or RSS-independence
 
 **Tests**: none (documentation)
 **Gate**: none
@@ -358,11 +358,11 @@ CM-04 framing), `.specs/project/ROADMAP.md` (M3 fairness entry + AD-025 line)
 
 **Done when**:
 
-- [ ] TESTING.md instructs future committed tests to use the CPU-pinned runner + `test_no_refill`,
+- [x] TESTING.md instructs future committed tests to use the CPU-pinned runner + `test_no_refill`,
       exactly like burst/node/cap; the "does not depend on CPU pinning because it is global and
       spin-locked" sentence is gone (CPB-27)
-- [ ] README map table shows `svc_committed_state` as per-CPU with `rl_bucket` values (CPB-28)
-- [ ] The dp-unit count stated in TESTING.md is reconciled with the measured baseline (R2)
+- [x] README map table shows `svc_committed_state` as per-CPU with `rl_bucket` values (CPB-28)
+- [x] The dp-unit count stated in TESTING.md is reconciled with the measured baseline (R2)
 
 **Tests**: none (documentation)
 **Gate**: none
@@ -386,11 +386,11 @@ memory `dp-load-benchmark.md`
 
 **Done when**:
 
-- [ ] §8.4 C1 marked done with the measured before/after scaling numbers and the host line (CPB-29)
-- [ ] §6's "spin-lock is the multi-core bottleneck" finding updated — it is no longer true (CPB-33)
-- [ ] §3 clean-accept figure refreshed or annotated with the new measurement (CPB-32)
-- [ ] §8.6 priority table: C1 row marked done; remaining items renumbered if needed
-- [ ] `dp-load-benchmark` memory updated: new bottleneck ranking + `make benchmc` documented
+- [x] §8.4 C1 marked done with the measured before/after scaling numbers and the host line (CPB-29)
+- [x] §6's "spin-lock is the multi-core bottleneck" finding updated — it is no longer true (CPB-33)
+- [x] §3 clean-accept figure refreshed or annotated with the new measurement (CPB-32)
+- [x] §8.6 priority table: C1 row marked done; remaining items renumbered if needed
+- [x] `dp-load-benchmark` memory updated: new bottleneck ranking + `make benchmc` documented
       (CPB-33)
 
 **Tests**: none (documentation)
@@ -416,13 +416,13 @@ SRL-36 oversubscription warning) + `control-plane/tests/integration/`
 
 **Done when**:
 
-- [ ] **R5 resolved first**: pick the node-CPU-count source (settings value vs node-health payload
+- [x] **R5 resolved first**: pick the node-CPU-count source (settings value vs node-health payload
       vs `dpstat`) and record the choice — this is an open design question, not a given
-- [ ] Warning (not a block) when `committed_bytes_per_sec / node_cpu_count < MTU` (CPB-30)
-- [ ] The message names the CPU count and the computed per-core share (CPB-31)
-- [ ] Plan creation still succeeds
-- [ ] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
-- [ ] Test count: `B_cp` + ≥2 new integration tests; the 6 pre-existing reds unchanged
+- [x] Warning (not a block) when `committed_bytes_per_sec / node_cpu_count < MTU` (CPB-30)
+- [x] The message names the CPU count and the computed per-core share (CPB-31)
+- [x] Plan creation still succeeds
+- [x] Gate check passes: `ruff check . && ruff format --check . && mypy app/ && pytest -q`
+- [x] Test count: `B_cp` + ≥2 new integration tests; the 6 pre-existing reds unchanged
 
 **Tests**: integration (⇒ never `[P]`, per TESTING.md)
 **Gate**: full
