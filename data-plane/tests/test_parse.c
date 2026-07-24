@@ -1205,18 +1205,17 @@ static int read_fair_cap_bucket_cpu0(struct test_env *env, __u32 service_id,
 	return err;
 }
 
-static int read_fair_burst_bucket_cpu0(struct test_env *env, __u32 service_id,
-				       struct rl_bucket *bucket)
+static int read_percpu_bucket_cpu0(struct test_env *env, int map_fd, __u32 key,
+				   struct rl_bucket *bucket)
 {
 	struct rl_bucket *values;
-	__u32 key = service_id;
 	int err;
 
 	values = calloc(env->possible_cpus, sizeof(*values));
 	if (!values)
 		return -1;
 
-	err = bpf_map_lookup_elem(env->svc_burst_state_fd, &key, values);
+	err = bpf_map_lookup_elem(map_fd, &key, values);
 	if (err == 0)
 		*bucket = values[0];
 
@@ -1224,23 +1223,16 @@ static int read_fair_burst_bucket_cpu0(struct test_env *env, __u32 service_id,
 	return err;
 }
 
+static int read_fair_burst_bucket_cpu0(struct test_env *env, __u32 service_id,
+				       struct rl_bucket *bucket)
+{
+	return read_percpu_bucket_cpu0(env, env->svc_burst_state_fd, service_id, bucket);
+}
+
 static int read_fair_node_bucket_cpu0(struct test_env *env,
 				      struct rl_bucket *bucket)
 {
-	struct rl_bucket *values;
-	__u32 key = 0;
-	int err;
-
-	values = calloc(env->possible_cpus, sizeof(*values));
-	if (!values)
-		return -1;
-
-	err = bpf_map_lookup_elem(env->node_burst_state_fd, &key, values);
-	if (err == 0)
-		*bucket = values[0];
-
-	free(values);
-	return err;
+	return read_percpu_bucket_cpu0(env, env->node_burst_state_fd, 0, bucket);
 }
 
 static int read_fair_committed_bucket(struct test_env *env, __u32 service_id,
