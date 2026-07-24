@@ -6048,19 +6048,24 @@ struct test_case {
 	int (*run)(void);
 };
 
-static int pin_to_cpu0(void)
+static int pin_to_cpu(int cpu)
 {
 	cpu_set_t set;
 
 	CPU_ZERO(&set);
-	CPU_SET(0, &set);
+	CPU_SET(cpu, &set);
 	if (sched_setaffinity(0, sizeof(set), &set) != 0) {
-		fprintf(stderr, "failed to pin test runner to CPU 0: %s\n",
-			strerror(errno));
+		fprintf(stderr, "failed to pin test runner to CPU %d: %s\n",
+			cpu, strerror(errno));
 		return -1;
 	}
 
 	return 0;
+}
+
+static int pin_to_cpu0(void)
+{
+	return pin_to_cpu(0);
 }
 
 static struct cfg_service apply_cfg_service(__u32 dst_host, __u32 dp_id,
