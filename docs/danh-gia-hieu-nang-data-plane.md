@@ -83,11 +83,7 @@ Các con số trên là **cận trên lạc quan** cho pps thực địa, vì:
 
 ## 6. Phát hiện đáng lưu ý (cho thiết kế)
 
-- **Nút cổ chai mở rộng: spin-lock của committed bucket.** `fair_committed_admit()` lấy
-  `bpf_spin_lock` trên **một bucket global theo từng service** cộng `bpf_ktime_get_ns` mỗi gói
-  được nhận. Khi RSS trải lưu lượng của **một VIP nóng** ra nhiều lõi, tất cả lõi tranh chấp
-  đúng một cache-line có lock ⇒ nhánh **chấp nhận sẽ KHÔNG mở rộng tuyến tính cho một service
-  đơn lẻ**. Đây là giới hạn thông lượng tổng chính đối với lưu lượng hợp lệ dồn về một đích.
+- **Nút cổ chai mở rộng: spin-lock của committed bucket.** (✅ **Đã giải quyết ở C1 / feature `committed-percpu-bucket`**): `svc_committed_state` chuyển sang `PERCPU_HASH`, xoá bỏ `bpf_spin_lock`. Đo lường bằng `make benchmc` trên host 96 core cho thấy thông lượng accept dồn về 1 service đạt 148.14 Mpps (tăng 29.5×), relative efficiency đạt 99.7%. Nút cổ chai này không còn tồn tại.
 - **Kịch bản xấu nhất về CPU: flood "trông sạch" làm cạn ngân sách.** Lưu lượng vượt qua mọi
   bộ lọc rồi vắt kiệt committed+ceiling và bị loại ở tầng fairness có chi phí **≈ nhánh chấp
   nhận (~600 ns)** vì đi hết chuỗi. Khuyến nghị đặt **ingress rate-cap** (rẻ, sớm hơn trong
@@ -161,11 +157,7 @@ map phía trước rồi mới bị loại: `bogon_drop` 335 ns so với từ ch
 
 ### 8.4 Nhóm 3 — Cấu trúc / mở rộng đa lõi (rủi ro vừa)
 
-- **C1. ⭐ Chuyển committed bucket sang per-CPU (bỏ spin-lock global).** Các bucket khác
-  (cap/burst/VIP/svc_rl) **đã** là PERCPU; chỉ committed còn dùng spin-lock để chính xác tuyệt
-  đối. Đổi sang per-CPU (mỗi lõi nhận `committed_bps/ncpus`) sẽ **xoá nút cổ chai đa lõi** nêu
-  ở mục 6 — đánh đổi là sai số token nhỏ ở tốc độ thấp. Đây là điều kiện để nhánh accept mở
-  rộng tuyến tính theo 96 lõi.
+- **C1. ⭐ Chuyển committed bucket sang per-CPU (bỏ spin-lock global).** (✅ **Đã hoàn thành**: chuyển `svc_committed_state` sang `PERCPU_HASH` ở feature `committed-percpu-bucket`). Đo lường thực tế trên host 96 core (`Intel Xeon Platinum 8163` @ 2.50GHz, Linux 6.8): thông lượng accept 96 core tăng từ **5.03 Mpps** lên **148.14 Mpps** (tăng **29.5×**), ns/gói trung bình giảm từ **19,080 ns** xuống **648 ns** (giảm **29.4×**), relative efficiency đạt **99.7%**. Single-core timing `clean_redirect` giữ mức **612 ns** (không suy hao).
 - **C2. Giảm double-indirection ARRAY_OF_MAPS.** Cơ chế blue-green 2 slot khiến mỗi subsystem
   tốn 2 lần lookup. Tác động lớn nhưng đụng vào cơ chế apply nguyên tử ⇒ **rủi ro cao, để sau cùng.**
 
@@ -173,7 +165,7 @@ map phía trước rồi mới bị loại: `bogon_drop` 335 ns so với từ ch
 
 - **D1. Bench trên object production** (không `PKT_TEST_HOOKS`). Bản test còn thêm ~3 map-lookup
   mỗi gói ngay đầu chương trình ([xdp_gateway.bpf.c:210-217](../data-plane/src/xdp_gateway.bpf.c#L210)),
-  nên số production **đã thấp hơn** số trong mục 3. Cần mốc này trước khi đo đối chứng tối ưu.
+  nếu production **đã thấp hơn** số trong mục 3. Cần mốc này trước khi đo đối chứng tối ưu.
 
 ### 8.6 Thứ tự triển khai đề xuất
 
@@ -182,7 +174,7 @@ map phía trước rồi mới bị loại: `bogon_drop` 335 ns so với từ ch
 | 1 | A1 (hoist bogon/amp) | ~4× nhánh drop | Thấp\* | Không |
 | 2 | A2 + A3 (dedupe lookup/ktime) | ~10–15% accept | Rất thấp | Không |
 | 3 | D1 (mốc production) | — (đo lường) | Không | Không |
-| 4 | C1 (committed per-CPU) | Mở rộng đa lõi | Vừa | Không (giảm độ chính xác token) |
+| 4 | C1 (committed per-CPU) | Mở rộng đa lõi (✅ Đã hoàn thành) | Vừa | Không (giảm độ chính xác token) |
 | 5 | A4 + B1 (gate & hợp nhất; B2 đã xong, B2 ns=0) | ~15–25% (gánh bởi A4 + B1) | Vừa | Có, tuỳ deployment |
 | 6 | C2 (bỏ double-indirection) | Lớn | Cao | Không |
 
