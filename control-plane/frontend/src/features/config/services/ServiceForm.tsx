@@ -11,6 +11,8 @@ interface ServiceFormProps {
     mode: string
     vip_pps?: number | null
     vip_bps?: number | null
+    service_pps?: number | null
+    service_bps?: number | null
   }) => Promise<void>
   onCancel: () => void
   isSubmitting?: boolean
@@ -34,13 +36,19 @@ export function ServiceForm({ service, onSubmit, onCancel, isSubmitting = false 
   const [cidr, setCidr] = useState(service?.cidr_or_ip ?? '')
   // Mode is fixed to allow-rule-only and hidden from the form.
   const mode = service?.mode ?? 'allow-rule-only'
-  // VIP limits are hidden; new services default to 5000 pps / 1 Gbps (1e9 bps),
-  // while existing services keep whatever value they already have.
-  const [vipPps] = useState<string>(
+  const [vipPps, setVipPps] = useState<string>(
     service?.vip_pps != null ? String(service.vip_pps) : (service ? '' : '5000'),
   )
-  const [vipBps] = useState<string>(
+  const [vipBps, setVipBps] = useState<string>(
     service?.vip_bps != null ? String(service.vip_bps) : (service ? '' : '1000000000'),
+  )
+  // Service rate-limit caps clean (non-VIP) allowed traffic. Empty = unlimited (NULL) so a
+  // new service is never accidentally rate-limited.
+  const [servicePps, setServicePps] = useState<string>(
+    service?.service_pps != null ? String(service.service_pps) : '',
+  )
+  const [serviceBps, setServiceBps] = useState<string>(
+    service?.service_bps != null ? String(service.service_bps) : '',
   )
 
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -61,6 +69,34 @@ export function ServiceForm({ service, onSubmit, onCancel, isSubmitting = false 
       nextErrors.cidr_or_ip = 'Must be a valid IP address or CIDR block'
     }
 
+    if (vipPps.trim() !== '') {
+      const ppsNum = Number(vipPps)
+      if (isNaN(ppsNum) || ppsNum < 0) {
+        nextErrors.vip_pps = 'VIP PPS Limit must be a non-negative number'
+      }
+    }
+
+    if (vipBps.trim() !== '') {
+      const bpsNum = Number(vipBps)
+      if (isNaN(bpsNum) || bpsNum < 0) {
+        nextErrors.vip_bps = 'VIP BPS Limit must be a non-negative number'
+      }
+    }
+
+    if (servicePps.trim() !== '') {
+      const ppsNum = Number(servicePps)
+      if (isNaN(ppsNum) || ppsNum < 0) {
+        nextErrors.service_pps = 'Service PPS Limit must be a non-negative number'
+      }
+    }
+
+    if (serviceBps.trim() !== '') {
+      const bpsNum = Number(serviceBps)
+      if (isNaN(bpsNum) || bpsNum < 0) {
+        nextErrors.service_bps = 'Service BPS Limit must be a non-negative number'
+      }
+    }
+
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
       return
@@ -71,8 +107,10 @@ export function ServiceForm({ service, onSubmit, onCancel, isSubmitting = false 
         name: name.trim(),
         cidr_or_ip: cidr.trim(),
         mode,
-        vip_pps: vipPps ? Number(vipPps) : null,
-        vip_bps: vipBps ? Number(vipBps) : null,
+        vip_pps: vipPps.trim() !== '' ? Number(vipPps) : null,
+        vip_bps: vipBps.trim() !== '' ? Number(vipBps) : null,
+        service_pps: servicePps.trim() !== '' ? Number(servicePps) : null,
+        service_bps: serviceBps.trim() !== '' ? Number(serviceBps) : null,
       })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -117,6 +155,64 @@ export function ServiceForm({ service, onSubmit, onCancel, isSubmitting = false 
           disabled={isSubmitting}
         />
       </Field>
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
+        <h4 style={{ margin: '0 0 var(--space-1) 0', fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>
+          VIP Ceiling (Optional)
+        </h4>
+        <p style={{ margin: '0 0 var(--space-2) 0', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
+          Caps whitelisted / bypass traffic. Leave blank for no ceiling.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+          <Field label="VIP PPS Limit" error={errors.vip_pps}>
+            <NumberInput
+              value={vipPps}
+              onChange={(e) => setVipPps(e.target.value)}
+              placeholder="e.g. 5000"
+              disabled={isSubmitting}
+              aria-label="VIP PPS Limit"
+            />
+          </Field>
+          <Field label="VIP BPS Limit (Bytes/sec)" error={errors.vip_bps}>
+            <NumberInput
+              value={vipBps}
+              onChange={(e) => setVipBps(e.target.value)}
+              placeholder="e.g. 1000000000"
+              disabled={isSubmitting}
+              aria-label="VIP BPS Limit"
+            />
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
+        <h4 style={{ margin: '0 0 var(--space-1) 0', fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>
+          Service Rate Limit (Optional)
+        </h4>
+        <p style={{ margin: '0 0 var(--space-2) 0', fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
+          Caps clean (non-VIP) allowed traffic for the whole service. Leave blank for no limit.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+          <Field label="Service PPS Limit" error={errors.service_pps}>
+            <NumberInput
+              value={servicePps}
+              onChange={(e) => setServicePps(e.target.value)}
+              placeholder="e.g. 200000"
+              disabled={isSubmitting}
+              aria-label="Service PPS Limit"
+            />
+          </Field>
+          <Field label="Service BPS Limit (Bytes/sec)" error={errors.service_bps}>
+            <NumberInput
+              value={serviceBps}
+              onChange={(e) => setServiceBps(e.target.value)}
+              placeholder="e.g. 2000000000"
+              disabled={isSubmitting}
+              aria-label="Service BPS Limit"
+            />
+          </Field>
+        </div>
+      </div>
 
       {isEdit && service?.plan && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--space-4)' }}>

@@ -27,22 +27,6 @@ function formatPorts(lo: number | null, hi: number | null): string {
   return `${lo}-${hi}`
 }
 
-function formatLimits(pps: number | null, bps: number | null): string {
-  if (pps == null && bps == null) return '-'
-  const parts: string[] = []
-  if (pps != null) parts.push(`${pps.toLocaleString()} pps`)
-  if (bps != null) {
-    if (bps >= 1_000_000) {
-      parts.push(`${(bps / 1_000_000).toFixed(1)} Mbps`)
-    } else if (bps >= 1_000) {
-      parts.push(`${(bps / 1_000).toFixed(1)} Kbps`)
-    } else {
-      parts.push(`${bps} bps`)
-    }
-  }
-  return parts.join(', ')
-}
-
 export function RulesTab({ serviceId }: RulesTabProps) {
   const { data: rules = [], isLoading, error } = useRules(serviceId)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -63,8 +47,6 @@ export function RulesTab({ serviceId }: RulesTabProps) {
     src_port_hi?: number | null
     dst_port_lo?: number | null
     dst_port_hi?: number | null
-    pps?: number | null
-    bps?: number | null
     enabled: boolean
   }) => {
     try {
@@ -85,8 +67,6 @@ export function RulesTab({ serviceId }: RulesTabProps) {
     src_port_hi?: number | null
     dst_port_lo?: number | null
     dst_port_hi?: number | null
-    pps?: number | null
-    bps?: number | null
     enabled?: boolean
   }) => {
     try {
@@ -156,11 +136,6 @@ export function RulesTab({ serviceId }: RulesTabProps) {
           {rule.protocol === 'icmp' ? '-' : formatPorts(rule.dst_port_lo, rule.dst_port_hi)}
         </span>
       ),
-    },
-    {
-      key: 'limits',
-      header: 'Rate Limits',
-      render: (rule: RuleResponse) => formatLimits(rule.pps, rule.bps),
     },
     {
       key: 'status',
