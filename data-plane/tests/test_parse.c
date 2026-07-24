@@ -1235,11 +1235,10 @@ static int read_fair_node_bucket_cpu0(struct test_env *env,
 	return read_percpu_bucket_cpu0(env, env->node_burst_state_fd, 0, bucket);
 }
 
-static int read_fair_committed_bucket(struct test_env *env, __u32 service_id,
-				      struct fair_committed_bucket *bucket)
+static int read_fair_committed_bucket_cpu0(struct test_env *env, __u32 service_id,
+					   struct rl_bucket *bucket)
 {
-	return bpf_map_lookup_elem(env->svc_committed_state_fd, &service_id,
-				  bucket);
+	return read_percpu_bucket_cpu0(env, env->svc_committed_state_fd, service_id, bucket);
 }
 
 static int __attribute__((unused)) read_meta(struct test_env *env,
@@ -1733,40 +1732,22 @@ static int test_bad_reason_clamps_to_map_error(void)
 	return err;
 }
 
-static int test_fair_committed_spin_lock_mutates_tokens(void)
+static int test_fair_committed_state_is_percpu(void)
 {
-	struct fair_committed_bucket bucket = {};
-	struct pkt_frame frame;
+	struct bpf_map_info info = {};
+	__u32 len = sizeof(info);
 	struct test_env env;
-	__u32 key = FAIR_TEST_LOCK_SERVICE_ID;
-	__u32 retval = 0;
 	int err;
-
-	if (build_default_udp_frame(&frame) != 0)
-		return -1;
 
 	err = env_open(&env);
 	if (err)
 		return -1;
 
-	err = reset_maps(&env);
+	err = bpf_map_get_info_by_fd(env.svc_committed_state_fd, &info, &len);
 	if (!err)
-		err = bpf_map_update_elem(env.svc_committed_state_fd, &key, &bucket,
-					  BPF_ANY);
+		err = expect_u32("committed map type", info.type, BPF_MAP_TYPE_PERCPU_HASH);
 	if (!err)
-		err = set_test_trigger(&env, FAIR_TEST_TRIGGER_SPIN_LOCK);
-	if (!err)
-		err = run_frame_current_maps(&env, &frame, &retval);
-	if (!err)
-		err = expect_u32("retval", retval, XDP_PASS);
-	if (!err &&
-	    bpf_map_lookup_elem(env.svc_committed_state_fd, &key, &bucket) != 0) {
-		fprintf(stderr, "failed to read committed bucket: %s\n",
-			strerror(errno));
-		err = -1;
-	}
-	if (!err)
-		err = expect_u64("committed lock tokens", bucket.tokens, 1);
+		err = expect_u32("committed value size", info.value_size, sizeof(struct rl_bucket));
 
 	env_close(&env);
 	return err;
@@ -2101,7 +2082,7 @@ static int test_fair_committed_exact_admit_count(void)
 {
 	struct pkt_frame frame;
 	struct test_env env;
-	struct fair_committed_bucket bucket;
+	struct rl_bucket bucket;
 	struct fair_config config;
 	struct fair_node_config node = {
 		.version = 1,
@@ -2138,9 +2119,9 @@ static int test_fair_committed_exact_admit_count(void)
 	if (!err)
 		err = expect_counter(&env, DR_SERVICE_CEILING_DROP, 1);
 	if (!err)
-		err = read_fair_committed_bucket(&env, DEFAULT_SERVICE_ID, &bucket);
+		err = read_fair_committed_bucket_cpu0(&env, DEFAULT_SERVICE_ID, &bucket);
 	if (!err)
-		err = expect_u64("committed tokens", bucket.tokens, 0);
+		err = expect_u64("committed tokens", bucket.bps_tokens, 0);
 
 	env_close(&env);
 	return err;
@@ -2284,7 +2265,7 @@ static int test_fair_zero_committed_uses_burst_only(void)
 {
 	struct pkt_frame frame;
 	struct test_env env;
-	struct fair_committed_bucket committed;
+	struct rl_bucket committed;
 	struct fair_config config;
 	struct fair_node_config node = {
 		.version = 1,
@@ -2310,9 +2291,9 @@ static int test_fair_zero_committed_uses_burst_only(void)
 	if (!err)
 		err = expect_u8("best effort fair_state", meta.fair_state, FAIR_BURST);
 	if (!err)
-		err = read_fair_committed_bucket(&env, DEFAULT_SERVICE_ID, &committed);
+		err = read_fair_committed_bucket_cpu0(&env, DEFAULT_SERVICE_ID, &committed);
 	if (!err)
-		err = expect_u64("best effort committed tokens", committed.tokens, 0);
+		err = expect_u64("best effort committed tokens", committed.bps_tokens, 0);
 
 	env_close(&env);
 	return err;
@@ -7519,8 +7500,8 @@ int main(void)
 		  test_global_apply_verify_failure_preserves_live_slot },
 		{ "global apply alternates with service apply",
 		  test_global_apply_alternates_with_service_apply },
-			{ "fair committed spin lock mutates tokens",
-			  test_fair_committed_spin_lock_mutates_tokens },
+			{ "fair committed state is percpu",
+			  test_fair_committed_state_is_percpu },
 			{ "ingress cap under limit continues",
 			  test_ingress_cap_under_cap_continues },
 			{ "ingress cap PPS exhausts independently",

@@ -1,0 +1,34 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    subgraph before ["BEFORE — committed = global bucket + bpf_spin_lock"]
+        direction LR
+        rssA["RSS spreads one hot VIP<br/>across N cores"]
+        cpuA0["core 0<br/>fair_committed_admit()"]
+        cpuA1["core 1"]
+        cpuAn["core N-1"]
+        lockA["svc_committed_state<br/>HASH 1024 → fair_committed_bucket (24 B)<br/>bpf_spin_lock + tokens + last_ns<br/><b>one cache line per service</b>"]
+        rssA --> cpuA0 --> lockA
+        rssA --> cpuA1 --> lockA
+        rssA --> cpuAn --> lockA
+    end
+
+    subgraph after ["AFTER — committed = per-CPU bucket, lock-free"]
+        direction LR
+        rssB["RSS spreads one hot VIP<br/>across N cores"]
+        cpuB0["core 0"]
+        cpuB1["core 1"]
+        cpuBn["core N-1"]
+        pcB0["slot cpu0<br/>rl_bucket (32 B)"]
+        pcB1["slot cpu1"]
+        pcBn["slot cpuN-1"]
+        rssB --> cpuB0 --> pcB0
+        rssB --> cpuB1 --> pcB1
+        rssB --> cpuBn --> pcBn
+    end
+
+    before -.->|"C1: PERCPU_HASH + rl_burst(rate, ncpus)<br/>each core gets committed_bps / ncpus"| after
+
+    classDef hot fill:#f59e0b,stroke:#d97706,color:#ffffff
+    classDef good fill:#10b981,stroke:#059669,color:#ffffff
+    class lockA hot
+    class pcB0,pcB1,pcBn good

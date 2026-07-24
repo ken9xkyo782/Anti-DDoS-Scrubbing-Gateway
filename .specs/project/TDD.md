@@ -220,7 +220,7 @@ Hai nhóm map, tách theo tính chất **config (versioned/slotted)** và **runt
 | `whitelist_bloom` / `_lpm` | bloom + LPM trie, key = `service_id`+src CIDR | config (slot) | Whitelist/VIP scoped (không bypass chéo) |
 | `udp_blocked_port_bitmap` | array/bitmap | config (slot) | Dynamic source-port block |
 | `rate_limit_state` | per-CPU array/hash | runtime | Aggregate token bucket per service/rule |
-| `service_agg_rate_state` | committed = global array + `bpf_spin_lock`; burst = per-CPU | runtime | Token bucket 2 tầng per-service (non-VIP) |
+| `svc_committed_state` / `svc_burst_state` | per-CPU `PERCPU_HASH` *(amended by C1)* | runtime | Token bucket 2 tầng per-service (non-VIP) |
 | `node_burst_state` | per-CPU array | runtime | Node headroom bucket = `node_clean_capacity − Σ committed` |
 | `service_ingress_cap_state` | per-CPU array/hash | runtime | Trần chi phí ingress per-service (`k × ceiling`) |
 | `vip_ceiling_state` | per-CPU array/hash | runtime | Aggregate token bucket cho whitelist/VIP |
@@ -234,7 +234,7 @@ Hai nhóm map, tách theo tính chất **config (versioned/slotted)** và **runt
 Mục tiêu (CM-04): mỗi service luôn được giao đủ `committed_clean_gbps`, không bị service khác đang bị tấn công kéo xuống dưới mức cam kết trên data-plane dùng chung. Ba cơ chế:
 
 1. **Token bucket 2 tầng per-service (`service_agg_rate_state`):**
-   - *Committed bucket* refill theo `committed_clean_gbps`, dùng **map global + `bpf_spin_lock`** để chính xác bất kể phân bố RSS/CPU (tranh chấp bị chặn trên bởi committed rate thấp, không phải attack rate). Gói khớp bucket này **luôn admit**.
+   - *Committed bucket* refill theo `committed_clean_gbps / ncpus`, dùng **per-CPU (`PERCPU_HASH`)** *(amended by C1)*. Gói khớp bucket này **luôn admit**.
    - *Burst bucket* refill theo `ceiling − committed`, dùng **per-CPU** (chấp nhận sai số). Gói vượt committed nhưng dưới ceiling rút từ đây.
    - Vì bucket tách theo service, service A bị flood chỉ tiêu committed+burst của **chính A** ⇒ committed của B được bảo toàn.
 2. **Node headroom bucket (`node_burst_state`, per-CPU)** = `node_clean_capacity − Σ committed`. Gói **burst** phải rút token từ **cả** service-burst **và** node-headroom; gói **committed** bỏ qua node bucket. Node cạn headroom → shed toàn bộ burst (`congestion_drop`), committed vẫn chảy. Ràng buộc `Σ committed ≤ node_clean_capacity` (7.2) đảm bảo committed luôn có chỗ.
@@ -353,7 +353,7 @@ Object chính (trường tối thiểu — xem PRD 7.1) và ràng buộc trọng
 | Config swap không nhất quán (rule mới + service cũ) | Cao (drop nhầm/pass nhầm) | Thấp | Double-buffer `active_slot`, swap atomic một lần ghi, pin slot tại ingress (AD-005/BL-06) |
 | Bloom filter fill-rate cao | Trung bình (LPM lookup tăng âm thầm) | Trung bình | Đo `bloom_hit_lpm_miss`; rebuild/resize theo lịch (PRD 13, 6.6) |
 | Vỡ cách ly tenant (whitelist gỡ global cho tenant khác) | Cao (bảo mật) | Thấp | Bypass **scoped** `service_id`, không sửa global map; alert+audit khi trùng feed (AD-003/BL-01/02) |
-| Per-CPU token bucket sai số | Trung bình (quota lệch theo CPU/RSS) | Cao | Tài liệu hóa sai số; committed bucket dùng global+spin_lock để chính xác; benchmark theo cấu hình prod |
+| Per-CPU token bucket sai số | Trung bình (quota lệch theo CPU/RSS) | Cao | Tài liệu hóa sai số; per-CPU committed bucket (C1) bù đắp bằng khả năng mở rộng đa lõi; benchmark theo cấu hình prod |
 | Single-node SPOF (fail-closed inline) | Cao (outage khi lỗi/bảo trì) | Trung bình | **Pilot:** loại Availability khỏi SLA + link bypass + global bypass + maintenance + OLA runbook (AD-007/OP-03). **GA:** HA active/passive (CM-01) |
 | Whitelist spoofing (giả IP whitelisted) | Trung bình | Trung bình | VIP ceiling aggregate bắt buộc; audit + review whitelist định kỳ; cảnh báo khi VIP ceiling chạm liên tục (BL-08) |
 | IPv6 hard-drop blackhole cho user hợp lệ | Cao (mất truy cập) | Trung bình | Cảnh báo onboarding rõ + checklist (tắt AAAA / route IPv6 vòng qua) — CM-02 (Pilot, Product-owned) |
@@ -524,7 +524,7 @@ Cơ chế cốt lõi là **double-buffer `active_slot`** (AD-005): worker build/
 | **L2 transparent bridge** | Cầu nối trong suốt tầng 2, không sửa header L3 (không giảm TTL, không đổi checksum). |
 | **Inbound-only** | Chỉ xử lý chiều `IN→OUT`; return path đi đường khác (asymmetric/DSR). |
 | **LPM trie / Bloom filter** | LPM = tra cứu CIDR theo longest-prefix-match; bloom = bộ lọc xác suất bỏ qua LPM khi chắc chắn không khớp (có FP đo được). |
-| **Token bucket** | Cơ chế rate-limit; per-CPU giảm contention (chấp nhận sai số theo CPU/RSS); committed bucket dùng global+spin_lock để chính xác. |
+| **Token bucket** | Cơ chế rate-limit; per-CPU giảm contention (chấp nhận sai số theo CPU/RSS); committed bucket per-CPU (C1). |
 | **Committed / Ceiling clean Gbps** | Committed = băng thông sạch cam kết (bảo đảm cứng, cơ sở SLA & floor chargeback); Ceiling = trần cứng aggregate non-VIP. |
 | **VIP ceiling** | Trần aggregate PPS/BPS cho traffic whitelist/VIP (giảm rủi ro spoofing). |
 | **Active slot / double-buffer** | Hai bộ config map; swap atomic bằng một lần ghi `active_slot`; lật ngược = rollback. |

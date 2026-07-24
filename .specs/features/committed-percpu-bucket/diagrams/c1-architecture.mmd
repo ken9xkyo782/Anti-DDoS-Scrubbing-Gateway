@@ -1,0 +1,34 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#3730a3', 'lineColor': '#94a3b8', 'secondaryColor': '#10b981', 'tertiaryColor': '#f59e0b', 'background': '#ffffff', 'mainBkg': '#f8fafc', 'nodeBorder': '#cbd5e1', 'clusterBkg': '#f1f5f9', 'clusterBorder': '#e2e8f0', 'titleColor': '#1e293b', 'edgeLabelBackground': '#ffffff', 'textColor': '#334155' }}}%%
+flowchart LR
+    subgraph meas ["1 — Measurement track (lands first, on locked code)"]
+        direction TB
+        benchmc["bench_mc.c (new)<br/>N threads pinned to N cores,<br/>one shared service_id"]
+        control["control curve = bogon_drop<br/>(lock-free) + per-CPU spread check"]
+        before["'before' scaling curve<br/>CPB-07"]
+        benchmc --> control --> before
+    end
+
+    subgraph change ["2 — Change track"]
+        direction TB
+        fair["fairness.h<br/>svc_committed_state → PERCPU_HASH of rl_bucket<br/>fair_committed_admit() = fair_burst_admit() twin"]
+        probe["xdp_gateway.bpf.c<br/>drop the spin-lock probe"]
+        tests["test_parse.c<br/>per-CPU reader, probe test removed (137→136)"]
+        smoke["smoke_fairness.sh<br/>COMMITTED_BPS x POSSIBLE_CPUS"]
+        fair --> probe --> tests --> smoke
+    end
+
+    subgraph rec ["3 — Record track"]
+        direction TB
+        docs["6-document guarantee restatement<br/>FAIR-05, TDD, PRD, TESTING, README, ROADMAP"]
+        perf["perf report 8.4/8.6 + dp-load-benchmark memory"]
+    end
+
+    before ==> fair
+    smoke ==> after["'after' curve, same harness<br/>relative efficiency ~ 1.0 — CPB-16"]
+    after --> perf
+    smoke --> docs
+
+    classDef derisk fill:#f59e0b,stroke:#d97706,color:#ffffff
+    classDef core fill:#10b981,stroke:#059669,color:#ffffff
+    class control derisk
+    class fair core

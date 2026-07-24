@@ -3,7 +3,7 @@
 **Spec**: `.specs/features/fairness-bandwidth/spec.md` (FAIR-01..27)
 **Context**: `.specs/features/fairness-bandwidth/context.md` (D-FAIR-1..2, A-FAIR-1..8; AD-024)
 **Status**: Approved (2026-07-10)
-**Design decision record**: **AD-025** (STATE.md)
+**Design decision record**: **AD-025** (STATE.md) *(amended by C1 / AD-042: committed bucket is per-CPU `PERCPU_HASH`)*
 
 ---
 

@@ -572,7 +572,7 @@ Mức cam kết per-tenant được chốt là **cao**. Các chiều SLA và cá
 
 Yêu cầu phát sinh do SLA cao:
 
-- **Fairness/reservation ở data-plane (CM-04) — đã thiết kế ở 8.4:** `committed_clean_gbps` là băng thông *được đảm bảo* per-service qua token bucket 2 tầng (committed global + burst per-CPU), node headroom bucket shed burst khi node bão hòa, và trần chi phí ingress per-service bảo vệ CPU phân loại. Committed clean bandwidth được bảo đảm cứng; residual CPU-fairness dưới flood cực đại là giới hạn single-node (8.4.6), thuộc capacity/HA.
+- **Fairness/reservation ở data-plane (CM-04) — đã thiết kế ở 8.4:** `committed_clean_gbps` là băng thông *được đảm bảo* per-service qua token bucket 2 tầng (committed per-CPU *(C1 amended: full-rate delivery for sub-MTU rates depends on RSS spread)* + burst per-CPU), node headroom bucket shed burst khi node bão hòa, và trần chi phí ingress per-service bảo vệ CPU phân loại. Committed clean bandwidth được bảo đảm cứng; residual CPU-fairness dưới flood cực đại là giới hạn single-node (8.4.6), thuộc capacity/HA.
 - **Quyết định (đã chốt 2026-07-07): chọn phương án (ii).** Ở Pilot **loại trừ có chủ đích chiều Availability** khỏi cam kết SLA (best-effort, có maintenance window + bypass procedure ghi trong OLA); cam kết cao ở các chiều latency/accuracy/propagation/fairness. **HA (active/passive + bypass) là điều kiện GA** để cam kết Availability cao. OLA nội bộ phải nêu rõ giới hạn Availability giai đoạn Pilot để bên trả phí đồng thuận trước khi vận hành.
 - **SLA report per-tenant định kỳ** (đạt/không đạt từng chiều) là bắt buộc, gắn với `BillingUsage` để đối soát chargeback.
 

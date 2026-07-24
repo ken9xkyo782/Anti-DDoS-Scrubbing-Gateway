@@ -1,5 +1,8 @@
 # Fairness & Bandwidth Reservation (§8.4) Specification
 
+> [!WARNING]
+> **⚠️ AMENDED**: The committed bandwidth bucket was converted from a global spin-locked bucket to a per-CPU `PERCPU_HASH` bucket in feature [`committed-percpu-bucket`](../committed-percpu-bucket/spec.md) (CPB-24..26). While strict per-service isolation remains structural, full-rate committed delivery for sub-MTU rates now depends on RSS/CPU distribution.
+
 **Milestone:** M3 — Policy enforcement & fairness
 **Feature #4 of M3** (final M3 feature — the committed/burst/node admit ladder + ingress-cost cap;
 completes the §8.2 verdict pipeline and the M3 milestone target: *flooding service A never starves
@@ -42,9 +45,7 @@ service B's committed bandwidth*)
   flooded neighbor must never pull another service below its commitment on the shared data-plane.
   Three mechanisms, all in this feature: the 2-tier per-service token bucket, the node headroom
   bucket, and the per-service ingress-cost cap.
-- **TDD §4.3/§4.4 (bucket accuracy posture):** the *committed* bucket uses a **global map +
-  `bpf_spin_lock`** — exact regardless of RSS/CPU distribution (contention is bounded by the low
-  committed rate, not the attack rate). The *burst* bucket (`ceiling − committed`) and the *node
+- **TDD §4.3/§4.4 (bucket accuracy posture):** *(amended by C1)* the *committed* bucket is **per-CPU (`PERCPU_HASH`)**, refilled at `committed_bps / ncpus`. Per-service isolation remains structural, while full-rate committed delivery for sub-MTU rates depends on RSS/CPU distribution. The *burst* bucket (`ceiling − committed`) and the *node
   headroom* bucket are **per-CPU** (documented error accepted). `service_agg_rate_state`,
   `node_burst_state`, `service_ingress_cap_state` are **runtime-state maps — never slotted**
   (§8.3/AD-005).
@@ -86,8 +87,7 @@ reasons (11/12/13), and delivers the M3 milestone gate: the fairness test.
 - [ ] A service flooded past its ceiling loses only its **own** burst/committed budget: every other
       service's committed-rate traffic keeps admitting bit-for-bit (CM-04 hard guarantee,
       demonstrated by a deterministic fairness test).
-- [ ] Clean non-VIP traffic admits through the two-tier ladder — committed (exact, spin-locked
-      global bucket) always admits; burst (`ceiling − committed`, per-CPU) admits only while node
+- [ ] Clean non-VIP traffic admits through the two-tier ladder — committed (*(amended by C1)* per-CPU `PERCPU_HASH` bucket) admits up to its per-core share; burst (`ceiling − committed`, per-CPU) admits only while node
       headroom (`node_clean_capacity − Σ committed`, per-CPU) has tokens; the three over-limit
       outcomes drop with the correct frozen reasons: `service_ceiling_drop` (11),
       `congestion_drop` (12).
@@ -139,9 +139,7 @@ commercially incoherent if committed is not actually guaranteed.
    VIP admit path SHALL remain untouched — whitelisted traffic never enters the ladder (§8.4.6
    structural, AD-021). `(FAIR-01)`
 2. WHEN the ladder runs THEN it SHALL first draw the packet's cost from the service's **committed
-   bucket** — refilled at `committed_clean_gbps` (converted to bytes/sec at build), accounted
-   **exactly** via a global (non-per-CPU) bucket protected by `bpf_spin_lock` so accuracy is
-   independent of RSS/CPU distribution — and on success SHALL admit immediately (clean-committed),
+   bucket** — *(amended by C1)* refilled per-CPU at `committed_bps / ncpus` (`svc_committed_state` `PERCPU_HASH` of `struct rl_bucket`) — and on success SHALL admit immediately (clean-committed),
    **skipping both** the burst and node buckets. `(FAIR-02)`
 3. WHEN the committed bucket lacks tokens THEN the ladder SHALL try the service's **burst bucket**
    — refilled at `ceiling_clean_gbps − committed_clean_gbps`, per-CPU with a documented deviation
@@ -278,11 +276,7 @@ kernel mechanism in this feature and must be de-risked fail-fast.
    per-CPU counts plus rate-limited ringbuf sampling; no enum change, no renumbering; `dpstat`'s
    drop-reason output decodes them with **zero code changes**. With this feature, all 16 §9.2
    reasons are live. `(FAIR-21)`
-3. WHEN the committed bucket is implemented THEN the `bpf_spin_lock` global-bucket mechanism SHALL
-   be proven at the **first build/load gate** (verifier acceptance in XDP on the target kernel —
-   fail-fast, not assumed); a documented, verdict-preserving fallback ladder (Design-owned, e.g.
-   atomics-based global bucket with bounded skew) SHALL exist in case of rejection, with the
-   accuracy deviation documented. `(FAIR-22)`
+3. *(Amended by C1)* WHEN the committed bucket is implemented THEN it SHALL use a lock-free `PERCPU_HASH` map refilled per-CPU (`committed_bps/ncpus`), retiring the `bpf_spin_lock` mechanism and its test probe. `(FAIR-22)`
 4. WHEN the gateway loads with the **default seed** THEN plan rates SHALL be generous enough that
    every post-BLK baseline case keeps its exact verdict (baseline traffic admits clean-committed;
    caps never trigger) — the dp-unit suite passes unchanged and the live smoke keeps its current
