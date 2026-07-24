@@ -6078,6 +6078,7 @@ static struct apply_fds apply_fds_for_env(struct test_env *env)
 		.whitelist_bloom_fd = env->whitelist_bloom_fd,
 		.whitelist_lpm_fd = env->whitelist_lpm_fd,
 		.vip_config_map_fd = env->vip_config_map_fd,
+		.svc_rl_config_map_fd = env->svc_rl_config_map_fd,
 		.global_blacklist_bloom_fd = env->global_blacklist_bloom_fd,
 		.global_blacklist_lpm_fd = env->global_blacklist_lpm_fd,
 		.udp_blocked_port_bitmap_fd = env->blocked_port_bitmap_fd,
@@ -6154,6 +6155,71 @@ static int test_apply_swap_adds_allow_rule(void)
 		err = expect_u32("active slot", active.active_slot, 1);
 	if (!err)
 		err = expect_u32("active version", active.version, 8);
+
+	env_close(&env);
+	return err;
+}
+
+static int test_apply_writes_service_rate_limit(void)
+{
+	struct cfg_service service = apply_cfg_service(0x0a000002,
+						       DEFAULT_SERVICE_ID, 1);
+	struct node_cfg node = {
+		.schema_version = APPLY_SNAPSHOT_SCHEMA_VERSION,
+		.service_count = 1,
+		.services = &service,
+	};
+	struct active_config active;
+	struct svc_rl_config config;
+	struct test_env env;
+	struct apply_fds fds;
+	__u32 zero = 0;
+	__u32 service_id = DEFAULT_SERVICE_ID;
+	int active_fd;
+	int err;
+
+	apply_cfg_match_all(&service);
+	service.service_pps = 4242;
+	service.svc_rl_flags = SVC_RL_F_PPS_SET;
+
+	err = env_open(&env);
+	if (err)
+		return -1;
+
+	err = reset_maps(&env);
+	if (!err)
+		err = set_active(&env, 0, 1);
+	if (!err) {
+		fds = apply_fds_for_env(&env);
+		err = apply_cfg_core(&fds, &node);
+	}
+	if (!err && bpf_map_lookup_elem(env.active_config_fd, &zero, &active) != 0)
+		err = -1;
+	if (!err)
+		err = expect_u32("active slot after apply", active.active_slot, 1);
+	active_fd = -1;
+	if (!err) {
+		/* The swap installs a fresh inner into the active slot, so the
+		 * config must be read back through the outer map, not the static
+		 * svc_rl_config_0/1 maps. */
+		active_fd = apply_inner_fd_for_test(env.svc_rl_config_map_fd,
+						    active.active_slot);
+		if (active_fd < 0)
+			err = -1;
+	}
+	if (!err && bpf_map_lookup_elem(active_fd, &service_id, &config) != 0)
+		err = -1;
+	if (active_fd >= 0)
+		close(active_fd);
+	if (!err)
+		err = expect_u32("svc_rl version", config.version,
+				 APPLY_CONFIG_VERSION);
+	if (!err)
+		err = expect_u32("svc_rl flags", config.flags, SVC_RL_F_PPS_SET);
+	if (!err)
+		err = expect_u64("svc_rl pps", config.pps, 4242);
+	if (!err)
+		err = expect_u64("svc_rl bps", config.bps, 0);
 
 	env_close(&env);
 	return err;
@@ -6891,11 +6957,10 @@ static int test_global_apply_carries_service_outers_and_bitmap(void)
 		APPLY_WHITELIST_BLOOM,
 		APPLY_WHITELIST_LPM,
 		APPLY_VIP_CONFIG_MAP,
+		APPLY_SVC_RL_CONFIG_MAP,
 		APPLY_FAIR_CONFIG_MAP,
 	};
-	int outer_fds[] = {
-		0, 0, 0, 0, 0, 0,
-	};
+	int outer_fds[APPLY_SERVICE_OUTER_COUNT] = { 0 };
 	struct node_cfg node = global_deny_cfg(entries, 1);
 	struct fair_node_config before_node = {
 		.version = 7,
@@ -6928,6 +6993,7 @@ static int test_global_apply_carries_service_outers_and_bitmap(void)
 	outer_fds[APPLY_WHITELIST_BLOOM] = env.whitelist_bloom_fd;
 	outer_fds[APPLY_WHITELIST_LPM] = env.whitelist_lpm_fd;
 	outer_fds[APPLY_VIP_CONFIG_MAP] = env.vip_config_map_fd;
+	outer_fds[APPLY_SVC_RL_CONFIG_MAP] = env.svc_rl_config_map_fd;
 	outer_fds[APPLY_FAIR_CONFIG_MAP] = env.fair_config_map_fd;
 	for (__u32 i = 0; !err && i < APPLY_SERVICE_OUTER_COUNT; i++)
 		err = global_outer_id(outer_fds[i], slot0, &before_id[i]);
@@ -7467,6 +7533,8 @@ int main(void)
 		{ "apply fresh inner install round-trips",
 		  test_apply_fresh_inner_install },
 		{ "apply swap adds allow rule", test_apply_swap_adds_allow_rule },
+		{ "apply writes service rate limit",
+		  test_apply_writes_service_rate_limit },
 		{ "apply swap adds service and preserves existing",
 		  test_apply_swap_adds_service_and_preserves_existing },
 		{ "apply swap disables service", test_apply_swap_disables_service },

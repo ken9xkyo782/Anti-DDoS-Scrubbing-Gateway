@@ -22,6 +22,8 @@ interface ServiceFormPayload {
   mode: string
   vip_pps?: number | null
   vip_bps?: number | null
+  service_pps?: number | null
+  service_bps?: number | null
 }
 
 export function ServicesPage() {
@@ -39,6 +41,8 @@ export function ServicesPage() {
       mode: payload.mode,
       vip_pps: payload.vip_pps,
       vip_bps: payload.vip_bps,
+      service_pps: payload.service_pps,
+      service_bps: payload.service_bps,
     })
     setIsCreateOpen(false)
   }
@@ -51,6 +55,8 @@ export function ServicesPage() {
       mode: payload.mode,
       vip_pps: payload.vip_pps,
       vip_bps: payload.vip_bps,
+      service_pps: payload.service_pps,
+      service_bps: payload.service_bps,
     })
     setEditingService(null)
   }

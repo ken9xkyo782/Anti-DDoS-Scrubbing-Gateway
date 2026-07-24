@@ -54,6 +54,8 @@ export function AdminServicesPage() {
     tenant_id: string
     vip_pps?: number | null
     vip_bps?: number | null
+    service_pps?: number | null
+    service_bps?: number | null
     committed_clean_gbps?: number | null
     ceiling_clean_gbps?: number | null
   }) => {
@@ -72,6 +74,8 @@ export function AdminServicesPage() {
       tenant_id: payload.tenant_id,
       vip_pps: payload.vip_pps,
       vip_bps: payload.vip_bps,
+      service_pps: payload.service_pps,
+      service_bps: payload.service_bps,
       plan,
     })
 
@@ -85,6 +89,8 @@ export function AdminServicesPage() {
     mode: string
     vip_pps?: number | null
     vip_bps?: number | null
+    service_pps?: number | null
+    service_bps?: number | null
   }) => {
     if (!editingService) return
     await updateMutation.mutateAsync({
@@ -93,6 +99,8 @@ export function AdminServicesPage() {
       mode: payload.mode,
       vip_pps: payload.vip_pps,
       vip_bps: payload.vip_bps,
+      service_pps: payload.service_pps,
+      service_bps: payload.service_bps,
     })
     toast({ title: 'Service updated successfully', variant: 'success' })
     setEditingService(null)
@@ -419,6 +427,8 @@ interface AdminCreateFormProps {
     tenant_id: string
     vip_pps: number | null
     vip_bps: number | null
+    service_pps: number | null
+    service_bps: number | null
     committed_clean_gbps: number | null
     ceiling_clean_gbps: number | null
   }) => Promise<void>
@@ -439,6 +449,8 @@ function AdminCreateServiceForm({
   const [tenantId, setTenantId] = useState('')
   const [vipPps, setVipPps] = useState('')
   const [vipBps, setVipBps] = useState('')
+  const [servicePps, setServicePps] = useState('')
+  const [serviceBps, setServiceBps] = useState('')
 
   // Sizing plan inline parameters
   const [committed, setCommitted] = useState('')
@@ -483,6 +495,8 @@ function AdminCreateServiceForm({
         tenant_id: tenantId,
         vip_pps: vipPps ? Number(vipPps) : null,
         vip_bps: vipBps ? Number(vipBps) : null,
+        service_pps: servicePps ? Number(servicePps) : null,
+        service_bps: serviceBps ? Number(serviceBps) : null,
         committed_clean_gbps: committed ? Number(committed) : null,
         ceiling_clean_gbps: ceiling ? Number(ceiling) : null,
       })
@@ -569,6 +583,26 @@ function AdminCreateServiceForm({
         />
       </Field>
 
+      <Field label="Service PPS Limit (Optional)">
+        <NumberInput
+          value={servicePps}
+          onChange={(e) => setServicePps(e.target.value)}
+          placeholder="e.g. 200000"
+          disabled={isSubmitting}
+          aria-label="Service PPS Limit"
+        />
+      </Field>
+
+      <Field label="Service BPS Limit (Optional)">
+        <NumberInput
+          value={serviceBps}
+          onChange={(e) => setServiceBps(e.target.value)}
+          placeholder="e.g. 2000000000"
+          disabled={isSubmitting}
+          aria-label="Service BPS Limit"
+        />
+      </Field>
+
       <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 'var(--space-4)' }}>
         <h4 style={{ margin: '0 0 var(--space-3) 0', fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>Plan Sizing (Optional)</h4>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
@@ -614,6 +648,8 @@ interface AdminEditFormProps {
     mode: string
     vip_pps: number | null
     vip_bps: number | null
+    service_pps: number | null
+    service_bps: number | null
   }) => Promise<void>
   onCancel: () => void
   isSubmitting: boolean
@@ -630,6 +666,8 @@ function AdminEditServiceForm({
   const [mode, setMode] = useState<string>(service.mode)
   const [vipPps, setVipPps] = useState(service.vip_pps != null ? String(service.vip_pps) : '')
   const [vipBps, setVipBps] = useState(service.vip_bps != null ? String(service.vip_bps) : '')
+  const [servicePps, setServicePps] = useState(service.service_pps != null ? String(service.service_pps) : '')
+  const [serviceBps, setServiceBps] = useState(service.service_bps != null ? String(service.service_bps) : '')
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -661,6 +699,8 @@ function AdminEditServiceForm({
         mode,
         vip_pps: vipPps ? Number(vipPps) : null,
         vip_bps: vipBps ? Number(vipBps) : null,
+        service_pps: servicePps ? Number(servicePps) : null,
+        service_bps: serviceBps ? Number(serviceBps) : null,
       })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -732,6 +772,26 @@ function AdminEditServiceForm({
           placeholder="e.g. 10000000"
           disabled={isSubmitting}
           aria-label="VIP BPS Limit"
+        />
+      </Field>
+
+      <Field label="Service PPS Limit (Optional)">
+        <NumberInput
+          value={servicePps}
+          onChange={(e) => setServicePps(e.target.value)}
+          placeholder="e.g. 200000"
+          disabled={isSubmitting}
+          aria-label="Service PPS Limit"
+        />
+      </Field>
+
+      <Field label="Service BPS Limit (Optional)">
+        <NumberInput
+          value={serviceBps}
+          onChange={(e) => setServiceBps(e.target.value)}
+          placeholder="e.g. 2000000000"
+          disabled={isSubmitting}
+          aria-label="Service BPS Limit"
         />
       </Field>
 

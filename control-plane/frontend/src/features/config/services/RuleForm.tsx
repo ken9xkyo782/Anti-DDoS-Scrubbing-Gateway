@@ -14,8 +14,6 @@ interface RuleFormProps {
     src_port_hi?: number | null
     dst_port_lo?: number | null
     dst_port_hi?: number | null
-    pps?: number | null
-    bps?: number | null
     enabled: boolean
   }) => Promise<void>
   onCancel: () => void
@@ -37,8 +35,6 @@ export function RuleForm({
   const [srcPortHi, setSrcPortHi] = useState(rule?.src_port_hi != null ? String(rule.src_port_hi) : '')
   const [dstPortLo, setDstPortLo] = useState(rule?.dst_port_lo != null ? String(rule.dst_port_lo) : '')
   const [dstPortHi, setDstPortHi] = useState(rule?.dst_port_hi != null ? String(rule.dst_port_hi) : '')
-  const [pps, setPps] = useState(rule?.pps != null ? String(rule.pps) : '')
-  const [bps, setBps] = useState(rule?.bps != null ? String(rule.bps) : '')
   const [enabled, setEnabled] = useState(rule?.enabled ?? true)
 
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -149,20 +145,6 @@ export function RuleForm({
       }
     }
 
-    // Rate limits checks
-    if (pps) {
-      const val = Number(pps)
-      if (isNaN(val) || val < 0) {
-        nextErrors.pps = 'Must be a non-negative number'
-      }
-    }
-    if (bps) {
-      const val = Number(bps)
-      if (isNaN(val) || val < 0) {
-        nextErrors.bps = 'Must be a non-negative number'
-      }
-    }
-
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
       return
@@ -176,8 +158,6 @@ export function RuleForm({
         src_port_hi: srcPortHi && protocol !== 'icmp' ? Number(srcPortHi) : null,
         dst_port_lo: dstPortLo && protocol !== 'icmp' ? Number(dstPortLo) : null,
         dst_port_hi: dstPortHi && protocol !== 'icmp' ? Number(dstPortHi) : null,
-        pps: pps ? Number(pps) : null,
-        bps: bps ? Number(bps) : null,
         enabled,
       })
     } catch (err) {
@@ -313,30 +293,6 @@ export function RuleForm({
           </div>
         </>
       )}
-
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
-        <h4 style={{ margin: '0 0 var(--space-2) 0', fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>Rate Limits (Optional)</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
-          <Field label="PPS Limit" error={errors.pps}>
-            <NumberInput
-              value={pps}
-              onChange={(e) => setPps(e.target.value)}
-              placeholder="e.g. 5000"
-              disabled={isSubmitting}
-              min={0}
-            />
-          </Field>
-          <Field label="BPS Limit (Bytes/sec)" error={errors.bps}>
-            <NumberInput
-              value={bps}
-              onChange={(e) => setBps(e.target.value)}
-              placeholder="e.g. 1000000"
-              disabled={isSubmitting}
-              min={0}
-            />
-          </Field>
-        </div>
-      </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
         <Switch

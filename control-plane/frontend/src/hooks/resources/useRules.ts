@@ -23,8 +23,6 @@ export function useCreateRule(serviceId: string) {
       src_port_hi?: number | null
       dst_port_lo?: number | null
       dst_port_hi?: number | null
-      pps?: number | null
-      bps?: number | null
       enabled: boolean
     }
   >({
@@ -57,8 +55,6 @@ export function useUpdateRule(serviceId: string, ruleId: string) {
       src_port_hi?: number | null
       dst_port_lo?: number | null
       dst_port_hi?: number | null
-      pps?: number | null
-      bps?: number | null
       enabled?: boolean
     }
   >({

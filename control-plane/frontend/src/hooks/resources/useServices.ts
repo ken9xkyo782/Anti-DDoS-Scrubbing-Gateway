@@ -29,6 +29,8 @@ export function useCreateService() {
       mode: string
       vip_pps?: number | null
       vip_bps?: number | null
+      service_pps?: number | null
+      service_bps?: number | null
       tenant_id?: string
       plan?: {
         committed_clean_gbps: number
@@ -62,6 +64,8 @@ export function useUpdateService(id: string) {
       mode?: string
       vip_pps?: number | null
       vip_bps?: number | null
+      service_pps?: number | null
+      service_bps?: number | null
     }
   >({
     mutationFn: (payload) =>

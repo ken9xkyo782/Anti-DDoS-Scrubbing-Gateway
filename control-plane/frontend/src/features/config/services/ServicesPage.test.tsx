@@ -47,6 +47,8 @@ describe('ServicesPage & ServiceForm', () => {
       enabled: true,
       vip_pps: 1000,
       vip_bps: 1000000,
+      service_pps: 150000,
+      service_bps: null,
       apply_status: 'active' as const,
       version: 2,
       active_version: 2,
@@ -72,6 +74,8 @@ describe('ServicesPage & ServiceForm', () => {
       enabled: false,
       vip_pps: null,
       vip_bps: null,
+      service_pps: null,
+      service_bps: null,
       apply_status: 'failed' as const,
       version: 1,
       active_version: null,
@@ -238,6 +242,8 @@ describe('ServicesPage & ServiceForm', () => {
         mode: 'allow-rule-only',
         vip_pps: 5000,
         vip_bps: 1000000000,
+        service_pps: null,
+        service_bps: null,
       })
     })
   })
@@ -265,7 +271,7 @@ describe('ServicesPage & ServiceForm', () => {
     })
   })
 
-  it('renders committed and ceiling plan limits as read-only in Edit dialog', async () => {
+  it('renders committed and ceiling plan limits as read-only and allows editing VIP and Service PPS/BPS limits in Edit dialog', async () => {
     render(
       <MemoryRouter>
         <ServicesPage />
@@ -289,6 +295,39 @@ describe('ServicesPage & ServiceForm', () => {
     expect(committedInput).toHaveValue(1)
     expect(ceilingInput).toBeDisabled()
     expect(ceilingInput).toHaveValue(5)
+
+    // VIP ceiling limits are present and editable
+    const vipPpsInput = screen.getByLabelText(/vip pps limit/i)
+    const vipBpsInput = screen.getByLabelText(/vip bps limit/i)
+    expect(vipPpsInput).toHaveValue(1000)
+    expect(vipBpsInput).toHaveValue(1000000)
+
+    // Service rate-limit limits are present, populated from the service, and editable.
+    // service_bps is null on the mock, so its input starts empty (unlimited).
+    const servicePpsInput = screen.getByLabelText(/service pps limit/i)
+    const serviceBpsInput = screen.getByLabelText(/service bps limit/i)
+    expect(servicePpsInput).toHaveValue(150000)
+    expect(serviceBpsInput).toHaveValue(null)
+
+    fireEvent.change(vipPpsInput, { target: { value: '8000' } })
+    fireEvent.change(vipBpsInput, { target: { value: '2000000000' } })
+    fireEvent.change(servicePpsInput, { target: { value: '300000' } })
+    fireEvent.change(serviceBpsInput, { target: { value: '500000000' } })
+
+    const submitBtn = screen.getByRole('button', { name: 'Save Changes' })
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(mockUpdateMutate).toHaveBeenCalledWith({
+        name: 'Alpha Backend',
+        cidr_or_ip: '192.168.1.0/24',
+        mode: 'allow-rule-only',
+        vip_pps: 8000,
+        vip_bps: 2000000000,
+        service_pps: 300000,
+        service_bps: 500000000,
+      })
+    })
   })
 
   it('triggers a warning and confirm dialog when disabling a service', async () => {

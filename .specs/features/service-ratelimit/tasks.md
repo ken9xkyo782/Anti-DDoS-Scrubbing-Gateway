@@ -13,6 +13,24 @@ added-test floor. **Tools:** `coding-guidelines` (code), `docs-writer` (CT5). No
 Legend: `[P]` = parallel-safe (disjoint files). Every task: *What / Where / Depends / Reuses / Done-when /
 Tests / Gate*.
 
+> **Execution status (updated 2026-07-24):** **ALL TASKS DONE (DT1·CT1·DT2·CT2·CT3·DT3·CT4·DT4·CT5).**
+> Landed commits: `293d103` (DT1), `eee161b` (CT1), `5a6592b` (DT2), `d66ccc6` (CT2+CT3 + `xdpgw-apply`
+> v3 reader); then this session: `dc59fd9` (**CT4** SPA — remove per-rule pps/bps from
+> RuleForm/RulesTab/types/hooks; add `service_pps`/`service_bps` to **both** the tenant ServiceForm and
+> the admin create/edit forms; fe gate green 219 tests/52 files), `150045b` (**DT4** + a **DT3 gap fix**),
+> and the docs/tracking commit (**CT5**).
+>
+> **⚠️ DT3 was incomplete when marked done.** `xdpgw-apply` parsed `service_pps/service_bps/svc_rl_flags`
+> off the wire but **never wrote `svc_rl_config_map`**, and the loader never pinned it — so the service
+> rate limit was a **no-op in production** (set in DB/UI, never enforced). `150045b` completes it:
+> `xdpgw-apply` now writes `svc_rl_config` per service (rebuilt into the inactive slot, carried forward,
+> structurally verified like vip/fair); loader pins `svc_rl_config_map` + `svc_rl_state` and adds
+> `XDPGW_SEED_SVC_PPS/BPS`; added dp-unit `apply writes service rate limit` (+ fixed a latent OOB
+> `outer_fds[]` literal). **DT4** = `tests/smoke_ratelimit.sh` (into `make smoke`) — live veth proof:
+> over-budget clean → `rate_limit_drop` (burst passes), whitelisted source unaffected (VIP path), limit
+> unset → zero drops. **137 dp-unit pass; smoke passes as root.** Wire format is at **v4** (sbl removal
+> `78e9401` bumped v3→v4; the svc_rl fields carried forward unchanged).
+
 ---
 
 ## Phase 0 — contract + CP schema (parallel)
@@ -28,7 +46,7 @@ Tests / Gate*.
 - **Tests:** none (constants); covered by DT2/DT3 build + CT2 golden + DT4 smoke.
 - **Gate:** `make -C data-plane bpf` compiles.
 
-### CT1 — Models + migration · reqs SVR-02, SVR-07
+### [x] CT1 — Models + migration · reqs SVR-02, SVR-07
 - **What:** `ProtectedService += service_pps, service_bps` (`BigInteger`, nullable);
   `AllowRule -= pps, bps`. Alembic revision off current head: add the two service columns, drop the two
   rule columns (downgrade reverses; old rule values discarded — documented in the revision docstring).
@@ -42,7 +60,7 @@ Tests / Gate*.
 
 ## Phase 1 — data-plane core ∥ CP serialize/API
 
-### DT2 — Maps + hot-path stage + per-rule removal · reqs SVR-01, SVR-03, SVR-04, SVR-08, SVR-09
+### [x] DT2 — Maps + hot-path stage + per-rule removal · reqs SVR-01, SVR-03, SVR-04, SVR-08, SVR-09
 - **What:** add `struct svc_rl_config` (=layout of `vip_config`), `svc_rl_config_map` (slotted) +
   `svc_rl_state` (unslotted PERCPU `rl_bucket`), and `svc_rl_admit()` (clone `vip_bucket_admit`, reuse
   `rl_burst`). Wire into `rules.h::allow_rule_stage`: on rule match → `svc_rl_admit(service_id,…)` →
@@ -60,7 +78,7 @@ Tests / Gate*.
   34-case suite (drop per-rule-rate cases). Floor: net **≥ B_dp** (removed cases offset by new).
 - **Gate:** `make -C data-plane test` green; native load + verifier probe.
 
-### CT2 — Applier serialization v3 + golden · reqs SVR-06, SVR-01
+### [x] CT2 — Applier serialization v3 + golden · reqs SVR-06, SVR-01
 - **What:** `ServiceConfig` snapshot `+= service_pps/service_bps`; `AllowRule` snapshot `−= pps/bps`; add
   `_svc_rl_flags()` (mirror `_vip_flags`); pack string `"<I4sIBBBQQQQBH"` → `"<I4sIBBBQQQQBQQBH"`
   (append `service_pps or 0, service_bps or 0, _svc_rl_flags(service)` before `rule_count`). Regenerate
@@ -71,7 +89,7 @@ Tests / Gate*.
 - **Tests:** regenerated golden equality + a field-level assert on the new offsets (`+`≥1).
 - **Gate:** `ruff && mypy && pytest -q tests/unit/test_snapshot_serialize.py`.
 
-### CT3 — API schemas + service service · reqs SVR-02, SVR-04, SVR-10
+### [x] CT3 — API schemas + service service · reqs SVR-02, SVR-04, SVR-10
 - **What:** service create/patch schemas `+= service_pps/service_bps: int|None` (`ge=0`); AllowRule
   schemas `−= pps/bps`; `create_service`/`update_service` persist the two service fields (mirror
   `vip_pps/vip_bps`); rule create/replace stops reading pps/bps.
@@ -88,7 +106,7 @@ Tests / Gate*.
 
 ## Phase 2 — apply reader/loader ∥ SPA ∥ docs
 
-### DT3 — `xdpgw-apply` v3 read + loader pin/seed · reqs SVR-06, SVR-08
+### [x] DT3 — `xdpgw-apply` v3 read + loader pin/seed · reqs SVR-06, SVR-08
 - **What:** `parse_service` reads `service_pps/service_bps/svc_rl_flags` (after vip), validates; build +
   write the `svc_rl_config` inner (clone the `vip_config` write); add `svc_rl_config_map` to the slotted
   rebuild/flip + structural read-back; accept schema v3 (reject v2). Loader: pin `svc_rl_config_map` +
@@ -100,7 +118,7 @@ Tests / Gate*.
   build-gated tooling covered live by DT4.
 - **Gate:** `make -C data-plane apply loader test`.
 
-### DT4 — Live veth smoke · reqs SVR-03, SVR-05, SVR-11 (verify)
+### [x] DT4 — Live veth smoke · reqs SVR-03, SVR-05, SVR-11 (verify)
 - **What:** privileged veth smoke: seed `svc_rl_config` (pps+bps), drive traffic; assert under-budget
   `clean` rises, over-budget `rate_limit_drop` rises; a whitelisted source on the same service is
   unaffected (VIP only); both-unset → zero `rate_limit_drop`.
@@ -110,7 +128,7 @@ Tests / Gate*.
 - **Tests:** dp-integration (privileged, run as root per gate-running-environment memory).
 - **Gate:** full dp smoke green.
 
-### CT4 — SPA forms · reqs SVR-10 · [P]
+### [x] CT4 — SPA forms · reqs SVR-10 · [P]
 - **What:** service form `+=` rate-limit inputs (mirror VIP inputs, NULL-clearable); rule form `−=` pps/bps.
 - **Where:** `control-plane/frontend/src/features/config/…` (service + rule forms), resource hooks/DTOs.
 - **Depends:** CT3 (API field contract). **Reuses:** VIP input components, `fieldErrorsFrom422`.
@@ -118,7 +136,7 @@ Tests / Gate*.
 - **Tests:** fe-unit for the service form field + rule form absence. Floor `+`≥2.
 - **Gate:** `npm run lint && typecheck && test --run && build`.
 
-### CT5 — Docs + memory · reqs SVR-11 · [P]
+### [x] CT5 — Docs + memory · reqs SVR-11 · [P]
 - **What:** update `data-plane/README.md` (rewrite the "Allow rules" per-rule-RL paragraph → service RL),
   PRD §6.4, ARL `spec.md` amendment (per-rule rate-limit removed → SVR), and project memory
   `[[allow-rule-pps-bps-flags-blackhole]]` (mark resolved-by-SVR). Confirm the `apply_snapshot.h` note

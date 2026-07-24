@@ -79,8 +79,6 @@ export interface RuleResponse {
   src_port_hi: number | null
   dst_port_lo: number | null
   dst_port_hi: number | null
-  pps: number | null
-  bps: number | null
   enabled: boolean
   warnings: string[]
   created_at: string
@@ -110,6 +108,8 @@ export interface ServiceResponse {
   enabled: boolean
   vip_pps: number | null
   vip_bps: number | null
+  service_pps: number | null
+  service_bps: number | null
   apply_status: ApplyStatus
   version: number
   active_version: number | null
