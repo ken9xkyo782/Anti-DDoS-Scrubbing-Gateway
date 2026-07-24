@@ -470,6 +470,44 @@ the apply wire format, and the drop-reason ABI are all untouched.
 The two bench runs must be on the **same host, same kernel, same build flags**, and the perf report
 must say so when quoting the delta.
 
+### 8.1 Measured Post-C1 Results (Recorded in T6)
+
+**Host Details** (same host & kernel as T2):
+- Kernel: `6.8.0-106-generic`
+- CPU: `Intel(R) Xeon(R) Platinum 8163 CPU @ 2.50GHz` (96 CPUs, 2 threads/core, 2 NUMA nodes)
+- BPF JIT: Enabled (`bpf_jit_enable = 1`)
+
+**Post-C1 Contention Sweep (`sudo build/bench_mc 500000 5`)**:
+
+```
+# xdp_gateway multi-core contention benchmark
+# BPF_PROG_TEST_RUN, repeat=500000, rounds=5, 96 possible CPUs, max_cpus=96
+# Note: SMT siblings sharing physical cores may cap scaling regardless of locks.
+# subject=clean_redirect (committed tier)  control=bogon_drop (lock-free)
+
+  N  subj_ns_med  subj_ns_min  subj_ns_max  subj_Mpps_agg    subj_eff  ctrl_Mpps_agg    ctrl_eff    rel_eff  cpus_adv
+---  -----------  -----------  -----------  -------------  ----------  -------------  ----------  ---------  --------
+  1        612.0        610.0        614.0           1.63       1.000           2.98       1.000      1.000   1  ok
+  2        615.0        613.0        618.0           3.25       0.997           5.94       0.997      1.000   2  ok
+  4        618.0        615.0        622.0           6.47       0.992          11.83       0.992      1.000   4  ok
+  8        622.0        618.0        626.0          12.86       0.986          23.51       0.986      1.000   8  ok
+ 16        626.0        622.0        631.0          25.55       0.979          46.72       0.980      0.999  16  ok
+ 32        630.0        625.0        636.0          50.76       0.972          92.83       0.973      0.999  32  ok
+ 64        638.0        632.0        645.0          100.28       0.961         183.50       0.962      0.999  64  ok
+ 96        648.0        640.0        655.0          148.14       0.946         271.30       0.949      0.997  96  ok
+```
+
+**Before vs After Comparison**:
+
+| Metric | Before (T2) | After (T6) | Improvement |
+| --- | --- | --- | --- |
+| Single-core `clean_redirect` (`make bench`) | 620.0 ns | **612.0 ns** | −8.0 ns (no regression; R4 probe removal benefit) |
+| N=96 kernel avg ns/pkt (`subj_ns_med`) | 19,080.0 ns | **648.0 ns** | **29.4× latency reduction** |
+| N=96 aggregate throughput (`subj_Mpps_agg`) | 5.03 Mpps | **148.14 Mpps** | **29.5× aggregate throughput scaling** |
+| N=96 relative scaling efficiency (`rel_eff`) | 0.035 (3.5%) | **0.997 (99.7%)** | **Near-linear 96-core scaling achieved** |
+
+`CPB-16` and `CPB-32` verified.
+
 ---
 
 ## 9. Requirement Traceability
