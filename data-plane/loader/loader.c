@@ -20,6 +20,7 @@
 #include "service.h"
 #include "blacklist.h"
 #include "whitelist.h"
+#include "svc_ratelimit.h"
 #include "fairness.h"
 #include "fair_budget.h"
 #include "xdp_gateway.skel.h"
@@ -33,6 +34,8 @@
 #define WHITELIST_BLOOM_PIN_PATH PIN_DIR "/whitelist_bloom"
 #define WHITELIST_LPM_PIN_PATH PIN_DIR "/whitelist_lpm"
 #define VIP_CONFIG_MAP_PIN_PATH PIN_DIR "/vip_config_map"
+#define SVC_RL_CONFIG_MAP_PIN_PATH PIN_DIR "/svc_rl_config_map"
+#define SVC_RL_STATE_PIN_PATH PIN_DIR "/svc_rl_state"
 #define GLOBAL_BLACKLIST_BLOOM_PIN_PATH PIN_DIR "/global_blacklist_bloom"
 #define GLOBAL_BLACKLIST_LPM_PIN_PATH PIN_DIR "/global_blacklist_lpm"
 
@@ -75,6 +78,11 @@ struct deny_seed {
 struct fair_seed {
 	struct fair_config config;
 	__u64 node_clean_capacity_bps;
+};
+
+struct svc_rl_seed {
+	int enabled;
+	struct svc_rl_config config;
 };
 
 static volatile sig_atomic_t exiting;
@@ -126,6 +134,8 @@ static void print_usage(const char *prog)
 	fprintf(stderr, "       optional: SERVICE_DP_ID=<non-zero-u32> (default 1)\n");
 	fprintf(stderr,
 		"       optional: XDPGW_SEED_WL_CIDR=<src-cidr> [XDPGW_SEED_VIP_PPS=N] [XDPGW_SEED_VIP_BPS=N]\n");
+	fprintf(stderr,
+		"       optional: XDPGW_SEED_SVC_PPS=N XDPGW_SEED_SVC_BPS=N (per-service clean-path rate limit)\n");
 	fprintf(stderr,
 		"       optional: XDPGW_SEED_GBL_CIDR=<src-cidr> XDPGW_SEED_BLOCKED_PORT=<u16>\n");
 	fprintf(stderr,
@@ -185,6 +195,9 @@ static int set_config_pin_paths(struct xdp_gateway_bpf *skel)
 	    set_pin_path(skel->maps.whitelist_bloom, WHITELIST_BLOOM_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.whitelist_lpm, WHITELIST_LPM_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.vip_config_map, VIP_CONFIG_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.svc_rl_config_map,
+			 SVC_RL_CONFIG_MAP_PIN_PATH) != 0 ||
+	    set_pin_path(skel->maps.svc_rl_state, SVC_RL_STATE_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.global_blacklist_bloom,
 			 GLOBAL_BLACKLIST_BLOOM_PIN_PATH) != 0 ||
 	    set_pin_path(skel->maps.global_blacklist_lpm,
@@ -243,6 +256,8 @@ static void unpin_config_maps(struct xdp_gateway_bpf *skel)
 	unpin_map(skel->maps.whitelist_bloom, "whitelist_bloom");
 	unpin_map(skel->maps.whitelist_lpm, "whitelist_lpm");
 	unpin_map(skel->maps.vip_config_map, "vip_config_map");
+	unpin_map(skel->maps.svc_rl_config_map, "svc_rl_config_map");
+	unpin_map(skel->maps.svc_rl_state, "svc_rl_state");
 	unpin_map(skel->maps.global_blacklist_bloom, "global_blacklist_bloom");
 	unpin_map(skel->maps.global_blacklist_lpm, "global_blacklist_lpm");
 
@@ -290,6 +305,10 @@ static int pin_config_maps(struct xdp_gateway_bpf *skel)
 	if (pin_map(skel->maps.whitelist_lpm, "whitelist_lpm") != 0)
 		goto rollback;
 	if (pin_map(skel->maps.vip_config_map, "vip_config_map") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.svc_rl_config_map, "svc_rl_config_map") != 0)
+		goto rollback;
+	if (pin_map(skel->maps.svc_rl_state, "svc_rl_state") != 0)
 		goto rollback;
 	if (pin_map(skel->maps.global_blacklist_bloom,
 		    "global_blacklist_bloom") != 0)
@@ -903,6 +922,60 @@ static int seed_fairness_for_service(struct xdp_gateway_bpf *skel,
 	return 0;
 }
 
+static int prepare_svc_rl_seed(struct svc_rl_seed *seed)
+{
+	int pps_set = 0;
+	int bps_set = 0;
+
+	memset(seed, 0, sizeof(*seed));
+	seed->config.version = 1;
+	if (parse_u64_env("XDPGW_SEED_SVC_PPS", &seed->config.pps,
+			  &pps_set) != 0 ||
+	    parse_u64_env("XDPGW_SEED_SVC_BPS", &seed->config.bps,
+			  &bps_set) != 0)
+		return -1;
+
+	if (pps_set)
+		seed->config.flags |= SVC_RL_F_PPS_SET;
+	if (bps_set)
+		seed->config.flags |= SVC_RL_F_BPS_SET;
+	seed->enabled = pps_set || bps_set;
+	return 0;
+}
+
+static int seed_svc_rl_slot(struct xdp_gateway_bpf *skel, __u32 slot,
+			    __u32 service_id, const struct svc_rl_config *config)
+{
+	int fd = slot == 0 ? bpf_map__fd(skel->maps.svc_rl_config_0) :
+			     bpf_map__fd(skel->maps.svc_rl_config_1);
+
+	if (fd < 0 ||
+	    bpf_map_update_elem(fd, &service_id, config, BPF_ANY) != 0) {
+		fprintf(stderr, "failed to seed svc_rl_config_%u: %s\n", slot,
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int seed_svc_rl_for_service(struct xdp_gateway_bpf *skel,
+				   __u32 service_id,
+				   const struct svc_rl_seed *seed)
+{
+	if (!seed->enabled)
+		return 0;
+
+	if (seed_svc_rl_slot(skel, 0, service_id, &seed->config) != 0 ||
+	    seed_svc_rl_slot(skel, 1, service_id, &seed->config) != 0)
+		return -1;
+
+	printf("seeded svc_rl_config_0/1 service_id=%u pps=%llu bps=%llu flags=0x%x\n",
+	       service_id, (unsigned long long)seed->config.pps,
+	       (unsigned long long)seed->config.bps, seed->config.flags);
+	return 0;
+}
+
 static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 				 const struct deny_seed *deny_seed,
 				 const struct fair_seed *fair_seed)
@@ -911,6 +984,7 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 	const char *wl_cidr = getenv("XDPGW_SEED_WL_CIDR");
 	struct service_key key = {};
 	struct wl_seed wl_seed;
+	struct svc_rl_seed svc_rl_seed;
 	struct service_val val = {
 		.enabled = 1,
 	};
@@ -947,6 +1021,8 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 
 	if (prepare_wl_seed(&wl_seed) != 0)
 		return -1;
+	if (prepare_svc_rl_seed(&svc_rl_seed) != 0)
+		return -1;
 	val.wl_flags = wl_seed.wl_flags;
 
 	fd = bpf_map__fd(skel->maps.service_inner_0);
@@ -967,6 +1043,8 @@ static int seed_service_from_env(struct xdp_gateway_bpf *skel,
 	if (seed_match_all_rule_blocks(skel, val.service_id) != 0)
 		return -1;
 	if (seed_fairness_for_service(skel, val.service_id, fair_seed) != 0)
+		return -1;
+	if (seed_svc_rl_for_service(skel, val.service_id, &svc_rl_seed) != 0)
 		return -1;
 	return seed_whitelist_from_env(skel, val.service_id, &wl_seed);
 }

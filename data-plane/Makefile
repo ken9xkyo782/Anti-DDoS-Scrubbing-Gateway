@@ -104,6 +104,7 @@ smoke: loader dpstat apply
 	$(TEST_DIR)/smoke_redirect.sh
 	$(TEST_DIR)/smoke_bypass.sh
 	$(TEST_DIR)/smoke_fairness.sh
+	$(TEST_DIR)/smoke_ratelimit.sh
 	$(TEST_DIR)/smoke_apply.sh
 	$(TEST_DIR)/smoke_nexthop.sh
 	$(TEST_DIR)/smoke_blocked_port.sh
