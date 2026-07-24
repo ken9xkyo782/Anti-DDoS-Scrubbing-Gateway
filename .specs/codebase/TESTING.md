@@ -295,10 +295,7 @@ tests that need constrained budgets overwrite that row with `seed_fair_config()`
 active slot's `fair_node_config` with `seed_fair_node_config()`. Use the lower-level service-only
 setup only to prove the required missing-fairness-row `map_error` failure case.
 
-Set `rl_config.test_no_refill=1` for every exact fairness quota. Committed-bucket assertions do
-not depend on CPU pinning because `svc_committed_state` is global and spin-locked. Burst, node
-headroom, and ingress-cap assertions use the CPU-pinned runner and the same no-refill setting,
-because those buckets are per-CPU. When testing a burst miss at the node, assert the
+Set `rl_config.test_no_refill=1` for every exact fairness quota. Committed, burst, node headroom, and ingress-cap assertions all use the CPU-pinned runner and the same no-refill setting, because all bucket tiers are per-CPU (*(amended by C1)*). When testing a burst miss at the node, assert the
 service-then-node order: the service burst token is consumed first and is not refunded when the
 node has no headroom.
 
@@ -379,5 +376,5 @@ VLAN stacks, service lookup verdicts, allow-rule matching, deterministic per-rul
 whitelist scoped-match and VIP ceiling cases, blacklist amp-port, bogon, bitmap, global
 bloom-to-LPM, bloom false-positive, sampling budget, and `xdpgw-apply` build/verify/flip, fresh-inner,
 fail-closed rollback, and `GLOBAL_DENY` inverse-carry-forward/alternation cases. The current quick suite
-has **136** tests plus the `build/test_snapshot` service+global golden self-tests. Each verdict task
+has **137** tests plus the `build/test_snapshot` service+global golden self-tests. Each verdict task
 states the expected passing test count to prevent silent deletions or skipped coverage.

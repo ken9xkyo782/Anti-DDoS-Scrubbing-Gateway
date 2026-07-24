@@ -134,26 +134,13 @@ as `cap_bps = min(FAIR_RATE_MAX, K * ceiling_bps)` and
 clamped to `FAIR_RATE_MAX = 16000000000` B/s (128 Gbps), which keeps refill arithmetic inside its
 supported range.
 
-For clean non-VIP traffic, the ladder first consumes the service's global, spin-locked committed
-bucket. That bucket is exact across CPUs; a successful committed admit bypasses the remaining
-buckets. If it is empty, the packet consumes the service's per-CPU burst bucket, then the shared
-per-CPU node-headroom bucket. An empty service bucket drops `service_ceiling_drop`; an empty node
-bucket drops `congestion_drop`. The burst draw is deliberately service-then-node: a node miss does
-not refund the service-burst token.
+For clean non-VIP traffic, the ladder first consumes the service's per-CPU committed bucket (`svc_committed_state` `PERCPU_HASH`, refilled at `committed_bps / ncpus`). A successful committed admit bypasses the remaining buckets. If it is empty, the packet consumes the service's per-CPU burst bucket, then the shared per-CPU node-headroom bucket. An empty service bucket drops `service_ceiling_drop`; an empty node bucket drops `congestion_drop`. The burst draw is deliberately service-then-node: a node miss does not refund the service-burst token.
 
-The raw ingress cap runs immediately after enabled-service lookup, before whitelist, deny, or rule
-lookups. It is destination-service keyed and enforces both PPS and byte budgets; an over-cap packet
-drops `ingress_cap_drop`. Therefore VIP traffic remains subject to the ingress cap. A VIP packet
-that passes the cap and its own VIP ceiling redirects from the whitelist stage and never enters the
-clean-traffic ladder.
+The raw ingress cap runs immediately after enabled-service lookup, before whitelist, deny, or rule lookups. It is destination-service keyed and enforces both PPS and byte budgets; an over-cap packet drops `ingress_cap_drop`. Therefore VIP traffic remains subject to the ingress cap. A VIP packet that passes the cap and its own VIP ceiling redirects from the whitelist stage and never enters the clean-traffic ladder.
 
-Node headroom is `max(0, node_clean_capacity - sum(committed))`. If commitments exceed the node
-capacity, headroom is zero: committed traffic still uses its exact bucket, while burst traffic sheds
-as `congestion_drop` once it reaches the node bucket. The default seed has equal committed and
-ceiling rates, so its burst rate is zero and the zero default headroom is harmless.
+Node headroom is `max(0, node_clean_capacity - sum(committed))`. If commitments exceed the node capacity, headroom is zero: committed traffic still uses its per-CPU bucket, while burst traffic sheds as `congestion_drop` once it reaches the node bucket. The default seed has equal committed and ceiling rates, so its burst rate is zero and the zero default headroom is harmless.
 
-The TDD name `service_agg_rate_state` is realized by two maps: `svc_committed_state` holds the
-exact global committed state, and `svc_burst_state` holds the per-CPU service-burst state.
+The TDD name `service_agg_rate_state` is realized by two maps: `svc_committed_state` holds the per-CPU committed state (`rl_bucket` value), and `svc_burst_state` holds the per-CPU service-burst state.
 `node_burst_state` is the shared per-CPU node-headroom state, and
 `service_ingress_cap_state` holds the per-CPU dual cap state. These fairness maps are not part of
 the loader's pinned observability-map interface.
