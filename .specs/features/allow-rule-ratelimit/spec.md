@@ -1,5 +1,15 @@
 # Allow-Rule Matching & Rate-Limit Specification
 
+> **⚠️ Amended by `service-ratelimit` (SVR, 2026-07-24).** The **per-rule `pps`/`bps` rate-limit
+> described below was removed.** It was never plumbed through the M4 apply wire format (rule records
+> carry only ports/proto/flags), so setting the flags black-holed a rule's traffic as `rate_limit_drop`
+> (diagnosed 2026-07-20). Allow rules are now **pure matchers** (protocol + port ranges + enabled +
+> priority). Rate-limiting moved to a **single per-service aggregate** — `ProtectedService.service_pps` /
+> `service_bps`, enforced by `svc_rl_admit()` at the same clean-path allow→admit seam, reusing
+> `DR_RATE_LIMIT_DROP` (idx 10). The first-match-by-priority + terminal-verdict semantics in this spec
+> still hold; only the *source* of the rate-limit changed from per-rule to per-service. See
+> `.specs/features/service-ratelimit/`.
+
 **Milestone:** M3 — Policy enforcement & fairness
 **Feature #1 of M3** (the allow-rule / rate-limit stage of the §8.2 pipeline)
 **Category ID:** ARL

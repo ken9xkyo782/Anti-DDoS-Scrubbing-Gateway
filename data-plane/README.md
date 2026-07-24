@@ -94,18 +94,24 @@ sudo ip link set dev <out-iface> xdpdrv obj <xdp_pass.o> sec xdp   # detach: xdp
 ## Allow rules and tunnel traffic
 
 `src/rules.h` is the M4 map-build contract for allow rules. Rule blocks must be pre-sorted by ascending
-priority, because the hot path treats array position as first-match order. The `bps` field is bytes per
-second; the future worker must convert any control-plane unit before writing the map.
+priority, because the hot path treats array position as first-match order. Allow rules are **pure
+matchers**: protocol + optional src/dst port ranges + `enabled` + `priority`. They carry no rate limit
+(`struct rule_entry` is 16 bytes); the earlier per-rule `pps`/`bps` was removed after it proved
+un-plumbable through the apply wire format (it black-holed a rule's traffic as `rate_limit_drop`,
+diagnosed 2026-07-20 on service `118.107.78.137:2283`).
 
-**Per-rule `pps`/`bps` rate-limits are NOT plumbed through the control-plane apply path.** The v2 apply
-wire format (`src/apply_snapshot.h`, `APPLY_SNAPSHOT_RULE_SIZE == 10`) carries only ports, proto and
-flags per rule — no rate values. A writer that sets `RULE_F_PPS_SET`/`RULE_F_BPS_SET` without also
-seeding tokens makes `rl_bucket_consume` admit nothing, so **100% of that rule's traffic drops as
-`rate_limit_drop`** (verified 2026-07-20 on service `118.107.78.137:2283`). The control-plane worker
-(`_rule_flags`) therefore emits only `RULE_F_ENABLED`; per-rule rate-limits are a no-op until the wire
-format is extended (schema bump). Use the service **VIP ceiling** (`vip_pps`/`vip_bps`, which *is*
-carried) or the **`ServicePlan`** committed/ceiling for bandwidth control. The demo loader can still
-seed per-rule limits directly into the map struct for data-plane testing.
+**Rate-limiting is a single per-service aggregate.** `struct svc_rl_config` (`src/svc_ratelimit.h`;
+`service_pps`/`service_bps`, each nullable) is enforced on the **clean (non-VIP) allowed path** — after a
+rule matches, immediately before the fairness ladder. Over-budget packets drop `rate_limit_drop`
+(drop-reason idx 10, terminal); both dimensions unset means the service is not rate-limited
+(NULL = unlimited, never an accidental block). The bucket is aggregate-per-service, per-CPU
+(`svc_rl_state` `PERCPU_HASH`, rate ÷ ncpus), mirroring the VIP ceiling. The config lives in the slotted
+`svc_rl_config_map`, populated by `xdpgw-apply` from the v4 snapshot
+(`service_pps`/`service_bps`/`svc_rl_flags`) and carried forward across double-buffer swaps. The loader
+pins `svc_rl_config_map` + `svc_rl_state` and accepts `XDPGW_SEED_SVC_PPS` / `XDPGW_SEED_SVC_BPS` to seed
+one service for standalone tests (see `tests/smoke_ratelimit.sh`). The **VIP ceiling**
+(`vip_pps`/`vip_bps`) still governs whitelisted bypass traffic and **`ServicePlan`** committed/ceiling
+still drives fairness — the three controls stay orthogonal.
 
 `RULE_PROTO_ANY` matches only TCP, UDP, and ICMP. GRE, ESP, and other non-TCP/UDP/ICMP IPv4 protocols
 are unmatchable in v1 and drop with `not_allowed`, even when a service has a match-all `any` rule.

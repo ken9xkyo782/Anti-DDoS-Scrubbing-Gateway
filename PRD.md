@@ -170,6 +170,14 @@ Acceptance criteria:
 
 ### 6.4. Allow-rule và rate-limit
 
+> **Sửa đổi (SVR, 2026-07-24):** Rate-limit **per-rule đã bị loại bỏ** (không plumb được qua wire format
+> apply → từng black-hole traffic của rule thành `rate_limit_drop`). Allow-rule nay là **matcher thuần**
+> (protocol + port range + enabled + priority). Rate-limit chuyển thành **một aggregate per-service**:
+> `ProtectedService.service_pps` / `service_bps` (mỗi chiều nullable, NULL = không giới hạn), cưỡng chế bởi
+> `svc_rl_admit()` đúng tại seam allow→admit của nhánh clean (non-VIP), trước thang fairness, tái dùng
+> `rate_limit_drop` (idx 10). Ngữ nghĩa first-match theo priority + verdict terminal vẫn giữ nguyên; chỉ
+> *nguồn* của rate-limit đổi từ per-rule sang per-service. Xem `.specs/features/service-ratelimit/`.
+
 Allow-rule là luật cho phép traffic đi qua service sau khi vượt qua các kiểm tra hard drop. Rule gồm:
 
 - Protocol: TCP, UDP, ICMP, hoặc ANY trong phạm vi được hỗ trợ.
@@ -265,8 +273,8 @@ Yêu cầu reliability:
 | `Tenant` | `id`, `name`, `status`, `created_at`, `updated_at` |
 | `User` | `id`, `tenant_id`, `role`, `username`, `password_hash`, `status`, `last_login_at` |
 | `AllocatedCIDR` | `id`, `tenant_id`, `cidr`, `status`, `allocated_by`, `created_at` |
-| `ProtectedService` | `id`, `tenant_id`, `cidr_or_ip`, `name`, `mode`, `enabled`, `plan_id`, `vip_pps`, `vip_bps` |
-| `AllowRule` | `id`, `service_id`, `protocol`, `src_port_start`, `src_port_end`, `dst_port_start`, `dst_port_end`, `pps`, `bps`, `reason`, `enabled`, `priority` |
+| `ProtectedService` | `id`, `tenant_id`, `cidr_or_ip`, `name`, `mode`, `enabled`, `plan_id`, `vip_pps`, `vip_bps`, `service_pps`, `service_bps` |
+| `AllowRule` | `id`, `service_id`, `protocol`, `src_port_start`, `src_port_end`, `dst_port_start`, `dst_port_end`, `reason`, `enabled`, `priority` (rate-limit đã chuyển sang `service_pps`/`service_bps` — SVR) |
 | `WhitelistEntry` | `id`, `tenant_id`, `service_id`, `cidr`, `scope`, `reason`, `created_by`, `expires_at`, `enabled` |
 | `BlacklistEntry` | `id`, `tenant_id`, `service_id`, `cidr`, `scope`, `source`, `reason`, `expires_at`, `enabled` |
 | `ThreatFeedSource` | `id`, `name`, `url`, `format`, `schedule`, `enabled`, `last_sync_status`, `last_sync_at` |
@@ -381,7 +389,7 @@ Ghi chú kỹ thuật:
 | `whitelist_bloom` | bloom/bitmap | Bypass LPM khi không match whitelist/VIP |
 | `whitelist_lpm` | LPM trie, key = `service_id` + source CIDR | Confirm whitelist/VIP theo scope service (không bypass chéo service) |
 | `udp_blocked_port_bitmap` | array/bitmap | Dynamic source-port block |
-| `rate_limit_state` | per-CPU array/hash | Aggregate token bucket per service/rule |
+| `svc_rl_state` | per-CPU hash (key = `service_id`) | Aggregate rate-limit token bucket **per service** (clean/non-VIP), config ở `svc_rl_config_map` (`service_pps`/`service_bps`) — SVR |
 | `service_agg_rate_state` | 2 tầng: committed = global array + `bpf_spin_lock`; burst = per-CPU | Token bucket per service (non-VIP): tầng committed (`committed_clean_gbps`, bảo đảm chính xác) + tầng burst (`ceiling_clean_gbps − committed_clean_gbps`) — xem 8.4 |
 | `node_burst_state` | per-CPU array | Node headroom bucket = `node_clean_capacity − Σ committed_clean_gbps`; chỉ traffic burst rút token, committed bỏ qua — xem 8.4 |
 | `service_ingress_cap_state` | per-CPU array/hash | Trần chi phí ingress per-service (`k × ceiling`) áp sớm sau service match để bảo vệ CPU phân loại — xem 8.4 |
