@@ -1,3 +1,4 @@
+import os
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
@@ -275,6 +276,7 @@ async def size_plan(
             "ceiling_clean_gbps": str(ceiling_clean_gbps),
         },
     )
+    await db.flush()
     warnings = await _oversubscription_warnings(db)
     return PlanSizingResult(service=service, plan=plan, warnings=warnings)
 
@@ -451,6 +453,8 @@ def _validate_plan(committed: Decimal, ceiling: Decimal) -> None:
 
 
 async def _oversubscription_warnings(db: AsyncSession) -> list[str]:
+    warnings: list[str] = []
+
     total = (
         await db.execute(
             select(func.coalesce(func.sum(ServicePlan.committed_clean_gbps), Decimal("0")))
@@ -459,11 +463,37 @@ async def _oversubscription_warnings(db: AsyncSession) -> list[str]:
         )
     ).scalar_one()
     capacity = get_settings().node_clean_capacity_gbps
-    if total <= capacity:
-        return []
-    return [
-        f"Committed clean bandwidth {total:.2f} exceeds node capacity {capacity:.2f}",
-    ]
+    if total > capacity:
+        warnings.append(
+            f"Committed clean bandwidth {total:.2f} exceeds node capacity {capacity:.2f}"
+        )
+
+    # CPB-30, CPB-31: Check low-committed-rate per-core share warning
+    rows = (
+        await db.execute(
+            select(ProtectedService.name, ServicePlan.committed_clean_gbps)
+            .join(ProtectedService, ProtectedService.id == ServicePlan.service_id)
+            .where(
+                ProtectedService.enabled.is_(True),
+                ServicePlan.committed_clean_gbps > Decimal("0"),
+            )
+        )
+    ).all()
+
+    ncpus = os.cpu_count() or 1
+    frame_len = 1500  # MTU frame length in bytes
+
+    for service_name, committed_gbps in rows:
+        bps = float(committed_gbps) * 1e9 / 8.0
+        per_core_bps = bps / ncpus
+        if per_core_bps < frame_len:
+            warnings.append(
+                f"Service '{service_name}' committed rate {committed_gbps:.6f} Gbps grants "
+                f"{per_core_bps:.1f} B/s per CPU across {ncpus} CPUs, below 1 MTU frame ({frame_len} B/s); "
+                f"committed tier will fall through to burst"
+            )
+
+    return warnings
 
 
 def _raise_integrity_error(exc: IntegrityError) -> None:

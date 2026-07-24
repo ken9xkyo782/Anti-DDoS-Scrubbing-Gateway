@@ -392,6 +392,42 @@ async def test_size_plan_accepts_boundaries_and_warns_on_oversubscription(
     assert warning.warnings == ["Committed clean bandwidth 44.00 exceeds node capacity 40.00"]
 
 
+async def test_size_plan_warns_on_low_committed_per_core_share(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 1000)
+    admin = await create_admin(db_session, "low-committed-admin")
+    tenant = await create_tenant(db_session, "Low Committed Tenant")
+    await allocate(db_session, tenant=tenant, actor=admin, cidr="203.0.113.0/24")
+    svc = await create_service(
+        db_session,
+        tenant=tenant,
+        actor=admin,
+        name="low-committed-svc",
+        cidr="203.0.113.30/32",
+        committed=Decimal("0.01"),
+        ceiling=Decimal("1.0"),
+    )
+    await service_service.set_enabled(
+        db_session, service_id=svc.service.id, enabled=True, actor=admin
+    )
+
+    warning = await service_service.size_plan(
+        db_session,
+        service_id=svc.service.id,
+        actor=admin,
+        committed_clean_gbps=Decimal("0.01"),
+        ceiling_clean_gbps=Decimal("1.0"),
+    )
+
+    assert len(warning.warnings) == 1
+    assert "low-committed-svc" in warning.warnings[0]
+    assert "committed tier will fall through to burst" in warning.warnings[0]
+
+
 async def test_size_plan_tenant_user_is_forbidden(db_session: AsyncSession) -> None:
     admin = await create_admin(db_session, "size-forbidden-admin")
     tenant = await create_tenant(db_session, "Size Forbidden Tenant")
