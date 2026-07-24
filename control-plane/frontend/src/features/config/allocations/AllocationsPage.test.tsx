@@ -189,7 +189,7 @@ describe('AllocationsPage & AllocationForm', () => {
       })
     })
 
-    it('opens allocation form, performs overlap checking, and handles success allocation creation', async () => {
+    it('opens allocation form, performs overlap checking on submit, and handles success allocation creation', async () => {
       mockCheckOverlap.mockResolvedValue({ overlaps: false, conflicts: [] })
       mockCreateAllocation.mockResolvedValue({})
 
@@ -201,13 +201,12 @@ describe('AllocationsPage & AllocationForm', () => {
       const input = screen.getByTestId('cidr-input')
       fireEvent.change(input, { target: { value: '198.51.100.0/24' } })
 
-      await waitFor(() => {
-        expect(mockCheckOverlap).toHaveBeenCalledWith({ cidr: '198.51.100.0/24' })
-      })
+      expect(mockCheckOverlap).not.toHaveBeenCalled()
 
       fireEvent.click(screen.getByRole('button', { name: 'Allocate' }))
 
       await waitFor(() => {
+        expect(mockCheckOverlap).toHaveBeenCalledWith({ cidr: '198.51.100.0/24' })
         expect(mockCreateAllocation).toHaveBeenCalledWith({
           tenant_id: 'tenant-1',
           cidr: '198.51.100.0/24',
@@ -215,7 +214,7 @@ describe('AllocationsPage & AllocationForm', () => {
       })
     })
 
-    it('shows warning when overlap checking reports conflicts', async () => {
+    it('shows error when overlap checking reports conflicts on submit', async () => {
       mockCheckOverlap.mockResolvedValue({
         overlaps: true,
         conflicts: [
@@ -229,9 +228,11 @@ describe('AllocationsPage & AllocationForm', () => {
       const input = screen.getByTestId('cidr-input')
       fireEvent.change(input, { target: { value: '198.51.100.128/25' } })
 
+      fireEvent.click(screen.getByRole('button', { name: 'Allocate' }))
+
       await waitFor(() => {
-        expect(screen.getByTestId('overlap-warning')).toHaveTextContent(
-          'Warning: CIDR overlaps with existing active allocations: 198.51.100.0/24'
+        expect(screen.getByTestId('submit-error')).toHaveTextContent(
+          'Failed: CIDR overlaps with existing allocations (198.51.100.0/24)'
         )
       })
     })

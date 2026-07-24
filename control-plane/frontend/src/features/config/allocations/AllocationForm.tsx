@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Button, Field, Input } from '../../../ui'
 import { ApiError, fieldErrorsFrom422 } from '../../../api/client'
 import { useCheckOverlap } from '../../../hooks/resources/useAllocations'
@@ -13,52 +13,28 @@ export function AllocationForm({ onSubmit, onCancel, isSubmitting = false }: All
   const [cidr, setCidr] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
-  
-  const [overlapWarning, setOverlapWarning] = useState<string | null>(null)
   const [isCheckingOverlap, setIsCheckingOverlap] = useState(false)
 
   const checkOverlapMutation = useCheckOverlap()
-
-  useEffect(() => {
-    const trimmed = cidr.trim()
-    const timer = setTimeout(async () => {
-      if (!trimmed || trimmed.length < 5) {
-        setOverlapWarning(null)
-        return
-      }
-      setIsCheckingOverlap(true)
-      setOverlapWarning(null)
-      try {
-        const res = await checkOverlapMutation.mutateAsync({ cidr: trimmed })
-        if (res.overlaps && res.conflicts.length > 0) {
-          const conflictsStr = res.conflicts.map((c) => c.cidr).join(', ')
-          setOverlapWarning(`Warning: CIDR overlaps with existing active allocations: ${conflictsStr}`)
-        }
-      } catch {
-        // Ignore invalid CIDR inputs in background overlap checking
-      } finally {
-        setIsCheckingOverlap(false)
-      }
-    }, 500)
-
-    return () => clearTimeout(timer)
-  }, [cidr, checkOverlapMutation])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrors({})
     setSubmitError(null)
 
-    if (!cidr.trim()) {
+    const trimmed = cidr.trim()
+    if (!trimmed) {
       setErrors({ cidr: 'CIDR is required' })
       return
     }
 
-    // Run overlap check one final time synchronously before submit
+    setIsCheckingOverlap(true)
+
+    // Run overlap check synchronously when Allocate button is clicked
     try {
-      const res = await checkOverlapMutation.mutateAsync({ cidr: cidr.trim() })
+      const res = await checkOverlapMutation.mutateAsync({ cidr: trimmed })
       if (res.overlaps && res.conflicts.length > 0) {
-        const conflictsStr = res.conflicts.map(c => c.cidr).join(', ')
+        const conflictsStr = res.conflicts.map((c) => c.cidr).join(', ')
         setSubmitError(`Failed: CIDR overlaps with existing allocations (${conflictsStr})`)
         return
       }
@@ -73,10 +49,12 @@ export function AllocationForm({ onSubmit, onCancel, isSubmitting = false }: All
           return
         }
       }
+    } finally {
+      setIsCheckingOverlap(false)
     }
 
     try {
-      await onSubmit({ cidr: cidr.trim() })
+      await onSubmit({ cidr: trimmed })
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 422 && err.detail) {
@@ -92,6 +70,8 @@ export function AllocationForm({ onSubmit, onCancel, isSubmitting = false }: All
       }
     }
   }
+
+  const isLoading = isSubmitting || isCheckingOverlap
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -117,43 +97,21 @@ export function AllocationForm({ onSubmit, onCancel, isSubmitting = false }: All
           value={cidr}
           onChange={(e) => setCidr(e.target.value)}
           placeholder="e.g. 203.0.113.0/24"
-          disabled={isSubmitting}
+          disabled={isLoading}
           aria-label="CIDR Range"
           data-testid="cidr-input"
         />
       </Field>
 
-      {isCheckingOverlap && (
-        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
-          Checking for overlaps...
-        </div>
-      )}
-
-      {overlapWarning && (
-        <div
-          style={{
-            color: '#b54708',
-            padding: 'var(--space-3)',
-            border: '1px solid #fecdca',
-            backgroundColor: '#fffaeb',
-            borderRadius: 'var(--radius-md)',
-            fontSize: 'var(--font-size-sm)',
-          }}
-          role="alert"
-          data-testid="overlap-warning"
-        >
-          {overlapWarning}
-        </div>
-      )}
-
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={isLoading}>
           Cancel
         </Button>
-        <Button type="submit" variant="primary" loading={isSubmitting} disabled={isCheckingOverlap}>
+        <Button type="submit" variant="primary" loading={isLoading}>
           Allocate
         </Button>
       </div>
     </form>
   )
 }
+
